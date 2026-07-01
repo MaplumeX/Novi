@@ -1,7 +1,14 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import type { AgentHarness, ThinkingLevel } from "@earendil-works/pi-agent-core/node";
-import type { Models } from "@earendil-works/pi-ai";
+import type {
+  AgentHarness,
+  AgentMessage,
+  Session,
+  SessionTreeEntry,
+  ThinkingLevel,
+} from "@earendil-works/pi-agent-core/node";
+import type { JsonlSessionMetadata } from "@earendil-works/pi-agent-core/node";
+import type { Models, TextContent } from "@earendil-works/pi-ai";
 
 export interface ParsedCommand {
   name: string;
@@ -29,6 +36,7 @@ export function parseCommand(line: string): ParsedCommand {
 export interface CommandContext {
   harness: AgentHarness;
   models: Models;
+  session: Session<JsonlSessionMetadata>;
   sessionsDir: string;
   /** Whether the harness is idle (true) mid-turn (false). */
   isIdle: boolean;
@@ -221,23 +229,70 @@ export const COMMANDS: readonly Command[] = [
   },
   {
     name: "compact",
-    description: "Compact context (not implemented yet)",
-    run: async (ctx) => {
-      ctx.print("not implemented yet");
+    description: "Compact context (optional custom instructions)",
+    run: async (ctx, args) => {
+      if (!ctx.isIdle) {
+        ctx.print("Harness is busy; /compact requires idle.");
+        return;
+      }
+      try {
+        const result = await ctx.harness.compact(args || undefined);
+        const summary = result.summary.slice(0, 80);
+        ctx.print(`Compacted (was ${result.tokensBefore} tokens): ${summary}`);
+      } catch (e) {
+        ctx.print(`Compact failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
     },
   },
   {
     name: "tree",
-    description: "Navigate the session tree (not implemented yet)",
+    description: "List session tree entries",
     run: async (ctx) => {
-      ctx.print("not implemented yet");
+      let entries: SessionTreeEntry[];
+      try {
+        entries = await ctx.session.getEntries();
+      } catch (e) {
+        ctx.print(`Failed to read tree: ${e instanceof Error ? e.message : String(e)}`);
+        return;
+      }
+      if (entries.length === 0) {
+        ctx.print("Session tree is empty.");
+        return;
+      }
+      const lines = entries.map((e) => {
+        const summary = entrySummary(e).slice(0, 40);
+        return `  ${e.id}  ${e.type}${summary ? `  ${summary}` : ""}`;
+      });
+      ctx.print(["Session tree:", ...lines].join("\n"));
     },
   },
   {
     name: "goto",
-    description: "Jump to a session entry (not implemented yet)",
-    run: async (ctx) => {
-      ctx.print("not implemented yet");
+    description: "Jump to a session entry by id",
+    run: async (ctx, args) => {
+      const id = args.trim().split(/\s+/)[0];
+      if (!id) {
+        ctx.print("Usage: /goto <id>  (use /tree to list ids)");
+        return;
+      }
+      if (!ctx.isIdle) {
+        ctx.print("Harness is busy; /goto requires idle.");
+        return;
+      }
+      try {
+        const result = await ctx.harness.navigateTree(id, { summarize: true });
+        if (result.cancelled) {
+          ctx.print("Navigation cancelled.");
+          return;
+        }
+        // `session_tree` event triggers a branch reload in useHarnessState.
+        ctx.print(`Switched to ${id}.`);
+        if (result.editorText) {
+          ctx.print(`Editor text: ${result.editorText}`);
+        }
+      } catch (e) {
+        ctx.print(`Goto failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
     },
   },
 ];
@@ -258,4 +313,68 @@ export async function runCommand(
     return;
   }
   await command.run(ctx, args);
+}
+
+/**
+ * Best-effort short preview of a session tree entry for `/tree`.
+ *
+ * Display-only: never throws across the message-content union.
+ */
+function entrySummary(entry: SessionTreeEntry): string {
+  switch (entry.type) {
+    case "message":
+      return messagePreview(entry.message);
+    case "compaction":
+    case "branch_summary":
+      return entry.summary;
+    case "label":
+      return entry.label ?? "";
+    case "model_change":
+      return `${entry.provider}/${entry.modelId}`;
+    case "thinking_level_change":
+      return entry.thinkingLevel;
+    case "active_tools_change":
+      return entry.activeToolNames.join(",");
+    case "session_info":
+      return entry.name ?? "";
+    case "custom":
+    case "custom_message":
+      return entry.customType;
+    case "leaf":
+      return entry.targetId ?? "";
+    default:
+      return "";
+  }
+}
+
+/** Extract a plain-text preview from any agent message shape. */
+function messagePreview(message: AgentMessage): string {
+  switch (message.role) {
+    case "user":
+    case "assistant":
+    case "toolResult": {
+      const content = message.content;
+      if (typeof content === "string") return content;
+      if (!Array.isArray(content)) return "";
+      return content
+        .filter((c): c is TextContent => c.type === "text")
+        .map((c) => c.text)
+        .join(" ");
+    }
+    case "bashExecution":
+      return message.command;
+    case "custom": {
+      const content = message.content;
+      if (typeof content === "string") return content;
+      return content
+        .filter((c): c is TextContent => c.type === "text")
+        .map((c) => c.text)
+        .join(" ");
+    }
+    case "branchSummary":
+    case "compactionSummary":
+      return message.summary;
+    default:
+      return "";
+  }
 }

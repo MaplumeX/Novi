@@ -6,9 +6,12 @@ import type {
 } from "@earendil-works/pi-agent-core/node";
 import type { Api, Model, Models } from "@earendil-works/pi-ai";
 import { builtinModels } from "@earendil-works/pi-ai/providers/all";
+import { formatSkillsForSystemPrompt } from "@earendil-works/pi-agent-core/node";
+import type { AgentHarnessResources } from "@earendil-works/pi-agent-core/node";
 import { getNoviDir, getSessionsDir, getSystemPromptCandidates } from "./config.js";
 import { DEFAULT_SYSTEM_PROMPT } from "./default-system-prompt.js";
 import { createBuiltinTools } from "./tools/index.js";
+import { loadResources } from "./resources.js";
 
 /** Default provider used when `--provider` is not given. */
 export const DEFAULT_PROVIDER = "anthropic";
@@ -84,17 +87,29 @@ async function resolveModel(
 /**
  * System-prompt provider callback. Reads `.novi/system-prompt.md`, then
  * `~/.novi/system-prompt.md`, falling back to {@link DEFAULT_SYSTEM_PROMPT}.
+ * The model-visible skills block (from the harness resource snapshot) is
+ * appended when any skills are loaded. `resources` is the live snapshot kept
+ * by the harness, so the skills section reflects `setResources()` each turn.
  */
 function makeSystemPromptProvider(cwd: string) {
   const candidates = getSystemPromptCandidates(cwd);
-  return async ({ env }: { env: ExecutionEnv }): Promise<string> => {
+  return async ({
+    env,
+    resources,
+  }: {
+    env: ExecutionEnv;
+    resources: AgentHarnessResources;
+  }): Promise<string> => {
+    let base = DEFAULT_SYSTEM_PROMPT;
     for (const candidate of candidates) {
       const result = await env.readTextFile(candidate);
       if (result.ok && result.value.trim().length > 0) {
-        return result.value;
+        base = result.value;
+        break;
       }
     }
-    return DEFAULT_SYSTEM_PROMPT;
+    const skillsBlock = formatSkillsForSystemPrompt(resources.skills ?? []);
+    return skillsBlock ? `${base}\n\n${skillsBlock}` : base;
   };
 }
 
@@ -155,6 +170,18 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
   // TUI StatusBar / `/tools` command reflects.
   const tools = createBuiltinTools(env);
   await harness.setTools(tools, tools.map((t) => t.name));
+
+  // Load skills + prompt templates (user + project) and publish them to the
+  // harness. The system-prompt provider reads `resources.skills` each turn.
+  // Load failures are warnings only — they must not block startup.
+  const loaded = await loadResources(env, cwd);
+  for (const diagnostic of loaded.diagnostics) {
+    process.stderr.write(`warning: ${diagnostic}\n`);
+  }
+  await harness.setResources({
+    skills: loaded.skills,
+    promptTemplates: loaded.promptTemplates,
+  });
 
   return { harness, env, models, model, session, sessionPath };
 }

@@ -35,4 +35,23 @@ describe("parseCommand", () => {
     expect(parseCommand("/")).toEqual({ name: "", args: "" });
     expect(parseCommand("   ")).toEqual({ name: "", args: "" });
   });
+
+  it("parses /compact with multi-word instructions", () => {
+    expect(parseCommand("/compact keep it short")).toEqual({
+      name: "compact",
+      args: "keep it short",
+    });
+  });
+
+  it("parses /compact with no arguments", () => {
+    expect(parseCommand("/compact")).toEqual({ name: "compact", args: "" });
+  });
+
+  it("parses /goto with an id", () => {
+    expect(parseCommand("/goto abc123")).toEqual({ name: "goto", args: "abc123" });
+  });
+
+  it("parses /tree with no arguments", () => {
+    expect(parseCommand("/tree")).toEqual({ name: "tree", args: "" });
+  });
 });

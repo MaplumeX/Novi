@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type {
   AgentHarness,
   AgentMessage,
@@ -7,8 +7,9 @@ import type {
 } from "@earendil-works/pi-agent-core/node";
 import type { JsonlSessionMetadata } from "@earendil-works/pi-agent-core/node";
 import type { Api, Model } from "@earendil-works/pi-ai";
+import { AutoCompactor, CONTEXT_WINDOW_FALLBACK } from "../compaction.js";
 
-export type Phase = "idle" | "turn";
+export type Phase = "idle" | "turn" | "compaction";
 
 /** Lightweight view of an in-flight tool call, for streaming display. */
 export interface ToolCallView {
@@ -67,13 +68,19 @@ export function useHarnessState(
     queue: { steer: 0, followUp: 0, nextTurn: 0 },
   }));
 
+  // Synchronously-current messages mirror for handlers that need the latest
+  // history outside React's render cycle (e.g. auto-compaction on `settled`,
+  // which fires after the final `message_end` of the same tick).
+  const messagesRef = useRef<AgentMessage[]>([]);
+  // Auto-compactor instance persists across subscribe/unsubscribe cycles.
+  const [compactor] = useState(() => new AutoCompactor());
+
   useEffect(() => {
-    // Resume seeding: load the existing branch once on mount so previously
-    // persisted messages render before the first event arrives. run() regenerates
-    // the context, but we mirror the typed MessageEntry → message projection
-    // rather than reaching into storage internals.
     let cancelled = false;
-    const seed = async (): Promise<void> => {
+
+    // Pull MessageEntry → message from a branch and sync both the ref (for
+    // synchronous reads) and React state (for rendering).
+    const reloadMessages = async (): Promise<void> => {
       if (!session) return;
       try {
         const branch = await session.getBranch();
@@ -81,12 +88,18 @@ export function useHarnessState(
         const msgs = branch
           .filter((e): e is Extract<typeof e, { type: "message" }> => e.type === "message")
           .map((e) => e.message);
+        messagesRef.current = msgs;
         setState((prev) => ({ ...prev, messages: msgs }));
       } catch {
-        // Resume seeding is best-effort; live events still drive state.
+        // Reload is best-effort; live events still drive state.
       }
     };
-    void seed();
+
+    // Resume seeding: load the existing branch once on mount so previously
+    // persisted messages render before the first event arrives. run() regenerates
+    // the context, but we mirror the typed MessageEntry → message projection
+    // rather than reaching into storage internals.
+    void reloadMessages();
 
     const unsubscribe = harness.subscribe((event) => {
       switch (event.type) {
@@ -108,12 +121,19 @@ export function useHarnessState(
         case "message_end":
           // Append every role (user / assistant / toolResult) to history and
           // clear the streaming buffer only when an assistant message froze.
-          setState((prev) => {
-            const messages = [...prev.messages, event.message];
+          // Update the ref synchronously so post-turn handlers (`settled`)
+          // see the just-appended message.
+          {
+            const messages = [...messagesRef.current, event.message];
+            messagesRef.current = messages;
             const streamingText =
-              event.message.role === "assistant" ? "" : prev.streamingText;
-            return { ...prev, messages, streamingText };
-          });
+              event.message.role === "assistant" ? "" : undefined;
+            setState((prev) => ({
+              ...prev,
+              messages,
+              streamingText: streamingText === undefined ? prev.streamingText : streamingText,
+            }));
+          }
           break;
         case "tool_execution_start":
           setState((prev) => ({
@@ -160,6 +180,43 @@ export function useHarnessState(
             streamingText: "",
             streamingToolCalls: [],
           }));
+          break;
+        case "settled":
+          // Auto-compaction decision point: debounced by turn count, then
+          // gated by `shouldCompact`. `harness.compact()` requires idle and
+          // emits `session_compact`, which triggers reloadMessages below.
+          //
+          // `session_before_compact` is a hook event (emitHook) and is NOT
+          // broadcast to subscribers, so the TUI cannot observe compaction
+          // start that way. Instead flip to the "compaction" phase optimistically
+          // via onStart (R2: during compaction, prompt submission is disabled).
+          void compactor
+            .maybeCompact(
+              harness,
+              messagesRef.current,
+              harness.getModel().contextWindow ?? CONTEXT_WINDOW_FALLBACK,
+              () => setState((prev) => ({ ...prev, phase: "compaction" })),
+            )
+            .catch(() => {
+              // A skipped compaction never flipped the phase. A failed one did
+              // (onStart fired) but emitted no `session_compact`, so reset it.
+              setState((prev) =>
+                prev.phase === "compaction" ? { ...prev, phase: "idle" } : prev,
+              );
+            });
+          break;
+        case "session_compact":
+          // Compaction rewrote the active leaf: reload the branch, and the
+          // harness is back to idle, so clear any optimistic "compaction" phase.
+          setState((prev) =>
+            prev.phase === "compaction" ? { ...prev, phase: "idle" } : prev,
+          );
+          void reloadMessages();
+          break;
+        case "session_tree":
+          // Branch navigation rewrites the active leaf. Reload the branch so
+          // the rendered history matches the new leaf.
+          void reloadMessages();
           break;
       }
     });

@@ -29,6 +29,7 @@ function App({ harness, session, sessionPath, models, sessionsDir }: AppProps) {
   const commandCtx: CommandContext = {
     harness,
     models,
+    session,
     sessionsDir,
     isIdle: state.phase === "idle",
     exit: () => {

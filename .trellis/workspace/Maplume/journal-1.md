@@ -109,3 +109,38 @@ Implemented 8 built-in tools (read_file/write_file/edit_file/bash/ls/glob/grep/t
 ### Next Steps
 
 - None - task complete
+
+
+## Session 4: Implement child 4 skills-compaction-nav + complete parent (4/4)
+
+**Date**: 2026-07-02
+**Task**: Implement child 4 skills-compaction-nav + complete parent (4/4)
+**Branch**: `main`
+
+### Summary
+
+Final child: skills loading (loadSourcedSkills user+project, dedupe project-wins) + setResources + formatSkillsForSystemPrompt into system prompt provider; auto-compaction (settled->AutoCompactor with 3-turn debounce + shouldCompact) + manual /compact; tree nav /tree (session.getEntries) + /goto (navigateTree summarize). check fixed silent bug: compact phase not reflected in TUI (session_before_compact is hook-only, not broadcast to subscribe(); session_compact is). TUI now sets phase=compaction before calling compact(). 44 vitest tests green. Parent bootstrap-agent-skeleton 4/4 done. Archived parent + child 4.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9bb65b1` | (see git log) |
+| `341ef4d` | (see git log) |
+| `f17389a` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

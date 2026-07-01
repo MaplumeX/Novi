@@ -1,1 +1,2 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "检查新增组件是否只消费 HarnessState、不直达 harness 原始事件/ session 内部，验证事件投影无字段丢失"}
+{"file": ".trellis/spec/backend/pi-agent-core-api.md", "reason": "核对 child 2 对事件 union / Session.getBranch / queue_update 的用法与公开 API 契约一致"}

@@ -1,1 +1,2 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/pi-agent-core-api.md", "reason": "工具契约直接依赖：AgentTool 接口、AgentToolResult 结构、ExecutionEnv 方法（readTextFile/exec/listDir/fileInfo）、exec 返回 {stdout,stderr,exitCode}"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "工具实现要判断 ExecutionEnv 已有能力是否覆盖，避免重写 env 提供的 filesystem/shell 逻辑"}

@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "child 1 在 TUI(Ink/React)↔harness 命令式事件流之间建立数据流边界，跨层边界契约是本 child 设计核心，需在实现前参考跨层思考指南"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "空仓库开荒，需判断 harness 已有能力（env/session/models 等）是否已覆盖需求，避免重写上游已提供的逻辑"}

@@ -1,0 +1,1 @@
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "检查 child 1 TUI↔harness 事件订阅/state 同步的跨层一致性，确保事件 payload 与 setState 契约不丢字段、不串 phase"}

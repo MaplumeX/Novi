@@ -1,0 +1,31 @@
+{
+  "id": "bootstrap-agent-skeleton",
+  "name": "bootstrap-agent-skeleton",
+  "title": "Bootstrap pi-agent TUI skeleton",
+  "description": "",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "Maplume",
+  "assignee": "Maplume",
+  "createdAt": "2026-07-01",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "07-01-scaffold-harness",
+    "07-01-tui-shell",
+    "07-01-builtin-tools",
+    "07-01-skills-compaction-nav"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

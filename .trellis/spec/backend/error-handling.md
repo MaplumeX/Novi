@@ -1,51 +1,104 @@
 # Error Handling
 
-> How errors are handled in this project.
+> How errors are caught, thrown, and surfaced across the backend layer.
 
 ---
 
 ## Overview
 
-<!--
-Document your project's error handling conventions here.
+Novi follows a **throw-on-failure, catch-at-boundary** model:
 
-Questions to answer:
-- What error types do you define?
-- How are errors propagated?
-- How are errors logged?
-- How are errors returned to clients?
--->
+- Internal modules `throw new Error(...)` with descriptive messages.
+- Boundaries (`cli.ts` top-level, TUI event handlers, tool `execute`)
+  catch and surface errors to the user / model.
+- The `ExecutionEnv` API returns `Result<T, Error>` objects (`{ ok: true |
+  false }`); helper `unwrap` converts failed results into thrown errors.
 
-(To be filled by the team)
-
----
-
-## Error Types
-
-<!-- Custom error classes/types -->
-
-(To be filled by the team)
+There are no custom error classes. All errors are `Error` instances with a
+clear message string.
 
 ---
 
-## Error Handling Patterns
+## Result Wrapping: `unwrap`
 
-<!-- Try-catch patterns, error propagation -->
+`ExecutionEnv` methods return discriminated-union results. Use the shared
+`unwrap` helper to convert failures into throws:
 
-(To be filled by the team)
+```ts
+// src/tools/shared.ts
+export function unwrap<T>(
+  result: { ok: true; value: T } | { ok: false; error: Error },
+  context: string,
+): T {
+  if (!result.ok) {
+    throw new Error(`${context}: ${result.error.message}`);
+  }
+  return result.value;
+}
+```
+
+Usage pattern — every env call is unwrapped with a context prefix:
+
+```ts
+const res = await env.readTextFile(abs, signal);
+const text = unwrap(res, `read_file failed for "${params.path}"`);
+```
 
 ---
 
-## API Error Responses
+## Tool Error → Model Visibility
 
-<!-- Standard error response format -->
+Tools indicate failure to the model by **throwing**. The harness translates a
+thrown error into a tool result with `isError: true`. Do not return a
+`textResult("error: …")` for genuine failures — throw instead.
 
-(To be filled by the team)
+```ts
+// src/tools/bash.ts
+if (exitCode !== 0) {
+  throw new Error(`bash exited with code ${exitCode}\nstdout: ${stdout}\nstderr: ${stderr}`);
+}
+```
+
+For `edit_file`, an ambiguous match (0 or >1) throws rather than silently
+no-ops:
+
+```ts
+if (count === 0) throw new Error(`edit_file: oldText not found in "${params.path}".`);
+if (count > 1) throw new Error(`edit_file: oldText matches ${count} times, must be unique.`);
+```
 
 ---
 
-## Common Mistakes
+## Boundary Handling
 
-<!-- Error handling mistakes your team has made -->
+| Boundary | Handler |
+|----------|---------|
+| `cli.ts` top-level `try/catch` | Formats `error.message` → `fail()` (writes stderr + `process.exit(1)`) |
+| `App.tsx` `handlePrompt` | `.catch` → `print("Prompt failed: …")` |
+| `App.tsx` `handleCommand` | `try/catch` → `print("Command failed: …")` |
+| `bootstrap.ts` `resolveModel` | Throws clear config errors (no models, not found, no API key) |
+| `resources.ts` loader | Never throws — collects `diagnostics[]`, caller writes to stderr as warnings |
 
-(To be filled by the team)
+---
+
+## Startup vs Runtime Errors
+
+- **Startup errors** (bootstrap): fatal. `cli.ts` catches and exits with a
+  human-readable message. Example: provider not configured → "Set
+  ANTHROPIC_API_KEY …".
+- **Runtime errors** (turn / command): non-fatal. Caught at the TUI boundary
+  and surfaced as a notice line. The harness always returns to `idle` phase
+  (`agent_end` is emitted even on run failure via `emitRunFailure`).
+
+---
+
+## Forbidden Patterns
+
+- Do not swallow errors silently (no empty `catch {}`). If a failure is
+  intentional and non-fatal, log a diagnostic or warning.
+- Do not create custom error subclasses. Use `Error` with a clear message
+  prefixed by context.
+- Do not return error text as a successful tool result when the operation
+  genuinely failed — throw so the harness marks `isError`.
+- Do not let resource loaders throw. Invalid skill/template files must produce
+  diagnostics, not crash startup.

@@ -62,3 +62,15 @@ new AgentHarness({ env, session, models, model, systemPrompt, /* optional: */ to
 `prompt` / `skill` / `promptFromTemplate` / `compact` / `navigateTree` 需 `phase==="idle"`，否则抛 `AgentHarnessError("busy")`。`steer` / `followUp` / `nextTurn` / `abort` / runtime setters 可在 turn 中用。
 
 即使 turn 出错，harness 经 `emitRunFailure` 仍发 `agent_end`，phase 必回 idle。
+
+## setTools 与 activeToolNames 的非显然行为
+
+`setTools(tools, activeToolNames?)` 在不传 `activeToolNames` 时 **沿用上一次的 activeToolNames**，而不是默认全部新工具 active。若 harness 构造时未传 `tools`/`activeToolNames`（初值为 `[]`），首次 `setTools(tools)` 不带第二参数会导致 **0 个工具 active**（注册了但全不可用）。
+
+要默认全部 active，必须显式：
+```ts
+const tools = createBuiltinTools(env);
+await harness.setTools(tools, tools.map(t => t.name));
+```
+
+（源码确认：`setTools` 中 `const nextActiveToolNames = activeToolNames ? [...activeToolNames] : this.activeToolNames;`）

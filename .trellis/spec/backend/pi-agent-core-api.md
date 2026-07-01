@@ -63,6 +63,15 @@ new AgentHarness({ env, session, models, model, systemPrompt, /* optional: */ to
 
 即使 turn 出错，harness 经 `emitRunFailure` 仍发 `agent_end`，phase 必回 idle。
 
+## skill 开头/broadcast 为 compaction 事件
+
+区分两类事件渠道，否则 TUI 看不到 compaction 就就出问题):
+
+- `subscribe()` 订阅者收到 `AgentHarnessEvent` = `AgentEvent` ∪ `AgentHarnessOwnEvent`。可见的有 `session_compact`{compactionEntry, fromHook} 与 `session_tree`{newLeafId, oldLeafId, summaryEntry?, fromHook}。
+- “before” 类事件 `session_before_compact` / `session_before_tree` 是 **hook** 事件，由 `emitHook()` 仅发给 `on(type)` 注册者，**不广播** 给 `subscribe()` 监听者。
+
+后果：TUI 能看到 compact/tree “完成”，看不到“开始”。若 auto-compaction 是在 `settled` 事件后 fire-and-forget 触发，compact 期间的模型调用过程中 harness phase 是 `"compaction"`，但 TUI 仅在下一帧才 (如果有）才收到 `session_compact`——中间窗口如果用户提交 prompt 会被 harness 拒为 busy。做法：TUI 侧在调 `compact()` 前自行设 `state.phase="compaction"`，在 `session_compact` 上重置 idle。手动 `/compact` 命令因拿不到 setState 会留同类残留（接受）。
+
 ## setTools 与 activeToolNames 的非显然行为
 
 `setTools(tools, activeToolNames?)` 在不传 `activeToolNames` 时 **沿用上一次的 activeToolNames**，而不是默认全部新工具 active。若 harness 构造时未传 `tools`/`activeToolNames`（初值为 `[]`），首次 `setTools(tools)` 不带第二参数会导致 **0 个工具 active**（注册了但全不可用）。

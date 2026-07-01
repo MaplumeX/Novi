@@ -1,1 +1,2 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/pi-agent-core-api.md", "reason": "本 child 直接用 harness 的 resources/setResources/compact/navigateTree/settled 事件，以及 loadSkills/loadSourcedSkills/loadPromptTemplates/formatSkillsForSystemPrompt/estimateContextTokens/shouldCompact/DEFAULT_COMPACTION_SETTINGS 公开导出，契约以 spec 为准"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "resources 加载/compaction 决策/tree nav 跨 env-harness-TUI 三层，需保证决策层不直达 storage、TUI 只消费 state"}

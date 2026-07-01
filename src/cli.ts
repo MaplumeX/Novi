@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { parseArgs } from "node:util";
 import { bootstrap } from "./bootstrap.js";
+import { getSessionsDir } from "./config.js";
 import { renderApp } from "./tui/App.js";
 
 function fail(message: string): never {
@@ -39,13 +40,13 @@ if (values.help) {
 }
 
 try {
-  const { harness, sessionPath } = await bootstrap({
+  const { harness, session, sessionPath, models } = await bootstrap({
     cwd: values.cwd,
     provider: values.provider,
     model: values.model,
     resumePath: values.resume,
   });
-  renderApp(harness, sessionPath);
+  renderApp(harness, session, sessionPath, models, getSessionsDir());
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
   fail(`Novi: ${message}`);

@@ -1,81 +1,110 @@
 import { useState } from "react";
 import { Text, useApp, useInput, render } from "ink";
 import type { AgentHarness } from "@earendil-works/pi-agent-core/node";
+import type { Session, JsonlSessionMetadata } from "@earendil-works/pi-agent-core/node";
+import type { Models } from "@earendil-works/pi-ai";
 import { useHarnessState } from "./useHarnessState.js";
+import { MessageList } from "./MessageList.js";
+import { StatusBar } from "./StatusBar.js";
+import { InputBox } from "./InputBox.js";
+import { runCommand, type CommandContext } from "./commands.js";
 
 interface AppProps {
   harness: AgentHarness;
+  session: Session<JsonlSessionMetadata>;
   sessionPath: string;
+  models: Models;
+  sessionsDir: string;
 }
 
-function App({ harness, sessionPath }: AppProps) {
-  const { streamingText, phase } = useHarnessState(harness);
-  const [input, setInput] = useState("");
+function App({ harness, session, sessionPath, models, sessionsDir }: AppProps) {
+  const state = useHarnessState(harness, session);
   const { exit } = useApp();
+  const [notice, setNotice] = useState<string[]>([]);
 
-  async function submit(): Promise<void> {
-    const text = input.trim();
-    if (!text || phase !== "idle") {
-      return;
-    }
-    setInput("");
-    // Fire and forget; the subscribe hook drives all rendering. Errors here
-    // surface as the harness emitting an assistant message with stopReason
-    // "error"; child 2 will wire richer error UI.
-    harness.prompt(text).catch(() => {
-      /* surfaced via events in later children */
+  const print = (text: string): void => {
+    setNotice(text.split("\n"));
+  };
+
+  const commandCtx: CommandContext = {
+    harness,
+    models,
+    sessionsDir,
+    isIdle: state.phase === "idle",
+    exit: () => {
+      exit();
+      process.exit(0);
+    },
+    print,
+  };
+
+  function handlePrompt(text: string): void {
+    // Idle guarantees are enforced by InputBox; just dispatch.
+    harness.prompt(text).catch((e) => {
+      print(`Prompt failed: ${e instanceof Error ? e.message : String(e)}`);
     });
   }
 
-  // Ink enables raw mode while the app is mounted, so Ctrl-C arrives here as a
-  // key event instead of SIGINT. Abort the harness, then exit cleanly.
+  async function handleCommand(text: string): Promise<void> {
+    try {
+      await runCommand(text, commandCtx);
+    } catch (e) {
+      print(`Command failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  // Ctrl-C aborts the current turn / exits. Text input is handled by InputBox.
   useInput((value, key) => {
     if (key.ctrl && value === "c") {
       void harness.abort().finally(() => {
         exit();
         process.exit(0);
       });
-      return;
-    }
-    if (key.return) {
-      void submit();
-      return;
-    }
-    if (key.backspace || key.delete) {
-      setInput((prev) => prev.slice(0, -1));
-      return;
-    }
-    // Ignore other control sequences; accumulate printable chars.
-    if (value && !key.ctrl && !key.meta) {
-      setInput((prev) => prev + value);
     }
   });
 
   return (
     <>
-      {streamingText.length > 0 ? (
-        <Text>{streamingText}</Text>
-      ) : (
-        <Text dimColor>(no output yet)</Text>
-      )}
-      <Text> </Text>
-      <Text>
-        {phase === "turn" ? (
-          <Text dimColor>working…</Text>
-        ) : (
-          <Text>
-            <Text dimColor>› </Text>
-            {input}
-            <Text dimColor>▏</Text>
-          </Text>
-        )}
-      </Text>
+      <MessageList
+        messages={state.messages}
+        streamingText={state.streamingText}
+        streamingToolCalls={state.streamingToolCalls}
+      />
+      {notice.length > 0
+        ? notice.map((line, i) => (
+            <Text key={i} dimColor>
+              {line || " "}
+            </Text>
+          ))
+        : null}
+      <StatusBar
+        phase={state.phase}
+        model={state.model}
+        thinkingLevel={state.thinkingLevel}
+        activeToolNames={state.activeToolNames}
+        queue={state.queue}
+      />
+      <InputBox phase={state.phase} onPrompt={handlePrompt} onCommand={(t) => void handleCommand(t)} />
       <Text dimColor>session: {sessionPath}</Text>
-      <Text dimColor>Ctrl-C to exit</Text>
+      <Text dimColor>/help for commands · Ctrl-C to exit</Text>
     </>
   );
 }
 
-export function renderApp(harness: AgentHarness, sessionPath: string): void {
-  render(<App harness={harness} sessionPath={sessionPath} />);
+export function renderApp(
+  harness: AgentHarness,
+  session: Session<JsonlSessionMetadata>,
+  sessionPath: string,
+  models: Models,
+  sessionsDir: string,
+): void {
+  render(
+    <App
+      harness={harness}
+      session={session}
+      sessionPath={sessionPath}
+      models={models}
+      sessionsDir={sessionsDir}
+    />,
+  );
 }

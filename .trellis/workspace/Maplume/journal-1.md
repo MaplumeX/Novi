@@ -74,3 +74,38 @@ Extended child 1 minimal TUI into full interactive shell. Added Markdown rendere
 ### Next Steps
 
 - None - task complete
+
+
+## Session 3: Implement child 3 builtin-tools (8 tools + setTools)
+
+**Date**: 2026-07-01
+**Task**: Implement child 3 builtin-tools (8 tools + setTools)
+**Branch**: `main`
+
+### Summary
+
+Implemented 8 built-in tools (read_file/write_file/edit_file/bash/ls/glob/grep/todo) via factory closures createBuiltinTools(env). All failures throw (harness->isError per spec). grep uses ripgrep + Node fallback (both tested). glob uses minimatch. todo module-singleton. Wired harness.setTools(tools, tools.map(t=>t.name)). /tools shows name—label:description. check fixed critical bug: setTools without explicit activeToolNames inherited empty [] -> 0 active tools; documented gotcha in pi-agent-core-api spec. 30 vitest tests green; tsc+eslint green.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `246eed9` | (see git log) |
+| `d883c42` | (see git log) |
+| `d13734c` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

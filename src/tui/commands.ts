@@ -179,11 +179,14 @@ export const COMMANDS: readonly Command[] = [
     run: async (ctx) => {
       const tools = ctx.harness.getActiveTools();
       if (tools.length === 0) {
-        ctx.print("No active tools (tool integration arrives in child 3).");
+        ctx.print("No active tools.");
         return;
       }
       ctx.print(
-        ["Active tools:", ...tools.map((t) => `  - ${t.name}`)].join("\n"),
+        [
+          "Active tools:",
+          ...tools.map((t) => `  - ${t.name} — ${t.label}: ${t.description}`),
+        ].join("\n"),
       );
     },
   },

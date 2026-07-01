@@ -8,6 +8,7 @@ import type { Api, Model, Models } from "@earendil-works/pi-ai";
 import { builtinModels } from "@earendil-works/pi-ai/providers/all";
 import { getNoviDir, getSessionsDir, getSystemPromptCandidates } from "./config.js";
 import { DEFAULT_SYSTEM_PROMPT } from "./default-system-prompt.js";
+import { createBuiltinTools } from "./tools/index.js";
 
 /** Default provider used when `--provider` is not given. */
 export const DEFAULT_PROVIDER = "anthropic";
@@ -147,6 +148,13 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
     model,
     systemPrompt,
   });
+
+  // Register the built-in tool set. `setTools` keeps the previous
+  // `activeToolNames` when none are passed, so pass all names explicitly to
+  // activate every tool by default. Emits a `tools_update` event that the
+  // TUI StatusBar / `/tools` command reflects.
+  const tools = createBuiltinTools(env);
+  await harness.setTools(tools, tools.map((t) => t.name));
 
   return { harness, env, models, model, session, sessionPath };
 }

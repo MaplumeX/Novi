@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 1
+- **Total Sessions**: 2
 - **Last Active**: 2026-07-01
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~42 | Active |
+| `journal-1.md` | ~76 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 2 | 2026-07-01 | Implement child 2 tui-shell (multi-turn/markdown/commands) | `91964b1`, `214fadd` | `main` |
 | 1 | 2026-07-01 | Plan novi agent skeleton + implement child 1 (scaffold-harness) | `e0caac4`, `e624908`, `0a43096` | `main` |
 <!-- @@@/auto:session-history -->
 

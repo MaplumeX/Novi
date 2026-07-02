@@ -28,7 +28,8 @@ src/
 ├── compaction.ts           # AutoCompactor: turn debounce + threshold check
 ├── *.test.ts               # Co-located tests alongside their source
 ├── tools/                  # Built-in tool set, one file per tool
-│   ├── index.ts            # createBuiltinTools(env) aggregator
+│   ├── index.ts            # createBuiltinTools(env) — thin wrapper over registry
+│   ├── registry.ts         # BuiltinToolRegistry: add/buildAll/names
 │   ├── shared.ts           # Shared helpers (unwrap / textResult / sliceLines …)
 │   ├── bash.ts             # Each tool: createXxxTool(env): AgentTool
 │   ├── read-file.ts
@@ -55,7 +56,10 @@ src/
   `process.stderr` directly, except for top-level startup error paths.
 - **Tool files.** One file exports one `createXxxTool`, closing over
   `ExecutionEnv`, returning `AgentTool<typeof Parameters>`. The parameter
-  schema is defined with typebox in the same file.
+  schema is defined with typebox in the same file. Tools are registered
+  centrally via `BuiltinToolRegistry.add()` in `tools/index.ts` (see
+  `tools/registry.ts`); to add a new built-in tool, add one `.add()` call
+  there — there is no array literal to edit.
 - **Co-located tests.** `foo.ts` → `foo.test.ts`; `tools/` tests live under
   `tools/__tests__/`. Tests are excluded from `dist` (tsconfig includes only
   `src` and `tsc` does not compile `.test.ts` — vitest covers them).

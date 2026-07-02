@@ -177,3 +177,36 @@ Planned Novi agent v2 L3 iteration: parent + 7 child (A-F). Brainstormed scope e
 ### Next Steps
 
 - None - task complete
+
+
+## Session 6: Implement child 2 editor-capabilities (cursor model + @file + ! !! + Ctrl+G + Tab)
+
+**Date**: 2026-07-02
+**Task**: Implement child 2 editor-capabilities (cursor model + @file + ! !! + Ctrl+G + Tab)
+**Branch**: `main`
+
+### Summary
+
+Upgraded InputBox from useState<string> to EditorState cursor model (src/tui/editor-state.ts, 14 pure functions + 47 tests). Added @file fuzzy file-picker overlay (FilePicker component, {kind:'filePicker'} Overlay variant). Added !/!! shell bangs (parseBang+runBang). Added Ctrl+G external editor (tmp file + spawn $VISUAL$EDITOR$nano + raw-mode toggle in finally). Added Tab path completion (glob LCP). Emacs keybindings: Ctrl+A/E/W/U/K/B/F, Alt+B/F/D/Backspace. Check: no issues — overlay routing, raw-mode restore on failure, bang visible/hidden distinction, cursor invariants all verified. Spec updates: overlay filePicker variant + lifted editor state pattern + raw-mode finally pitfall. 131 vitest green. Archived child 2.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `884e884` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

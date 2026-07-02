@@ -612,3 +612,37 @@ Replaced emoji-heavy iconography (💭 ⚙ ⏵) with centralized dingbat/box-dra
 ### Next Steps
 
 - None - task complete
+
+
+## Session 19: Interactive /model picker overlay
+
+**Date**: 2026-07-02
+**Task**: Interactive /model picker overlay
+**Branch**: `main`
+
+### Summary
+
+Made the /model slash command interactive: /model (no args) now opens an arrow-key navigable overlay listing models from every provider with a configured API key (filtered via Models.getAuth, local check). Current model highlighted as initial cursor. /model <id> and /model <provider>/<id> direct-switch paths kept unchanged. New ModelPicker.tsx modeled on SessionPicker.tsx; Overlay union gains modelPicker variant; App.tsx renders the new branch; commands.test.ts mock updated with getProviders/getAuth and the no-args test rewritten to assert setOverlay.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0228af9` | (see git log) |
+| `180de60` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

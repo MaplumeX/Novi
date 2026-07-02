@@ -181,6 +181,31 @@ content (file picker insert, external editor result, etc.).
 
 ---
 
+## Theme & Colors
+
+`src/tui/theme.ts` is the single source of truth for colors, dividers, and
+visual constants. All components import from it — never hardcode Ink color
+strings directly.
+
+```tsx
+// Good
+import { theme } from "../theme.js";
+<Text color={theme.role.user}>…</Text>
+<Text color={theme.dim}>…</Text>      // replaces dimColor
+
+// Bad — scattered hardcoded colors
+<Text dimColor>…</Text>
+<Text color="cyan">…</Text>
+```
+
+- `theme.dim` (`"dim"`) is the semantic replacement for `dimColor`. Ink
+  resolves `color="dim"` to a chalk dim modifier, so it is functionally
+  equivalent.
+- `divider(width?)` produces a fixed-width `─` line; no dynamic terminal
+  width detection is used.
+- When adding a new color role, add it to `theme.ts` first, then consume it
+  via `theme.*` — do not add a new hardcoded color literal in a component.
+
 ## Forbidden Patterns
 
 - Do not subscribe to harness events inside components. All event handling

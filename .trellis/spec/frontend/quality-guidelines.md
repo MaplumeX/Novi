@@ -78,6 +78,9 @@ streaming), document it:
 
 - No `console.log` / `console.error` in the TUI — stray stdout writes corrupt
   the Ink render.
+- No hardcoded color literals (`dimColor`, `color="cyan"`, `color="green"`,
+  etc.) in components — import from `src/tui/theme.ts` instead. `theme.ts`
+  is the only file that defines color literals.
 - No `process.stdout`/`process.stderr` writes from components (startup paths
   in `cli.ts` / `bootstrap.ts` are the exception).
 - No direct `harness.subscribe()` outside `useHarnessState`.

@@ -476,3 +476,38 @@ Added a first-run onboarding wizard so Novi bootstraps a setup flow (provider se
 ### Next Steps
 
 - None - task complete
+
+
+## Session 15: TUI 视觉美化：配色体系、角色标识、状态栏、边框、spinner、Markdown
+
+**Date**: 2026-07-02
+**Task**: TUI 视觉美化：配色体系、角色标识、状态栏、边框、spinner、Markdown
+**Branch**: `main`
+
+### Summary
+
+建立共享主题模块 theme.ts 作为所有颜色/分隔线的单一来源，消除全部裸硬编码；美化角色标识（You ›/✻ Assistant）、状态栏（分隔符+图标）、工具调用块（状态徽标+标题栏）、输入框（强调色提示符+自建 braille spinner）、Markdown（代码块语言标签）；更新 frontend spec 记录主题模块约定和颜色硬编码禁令。typecheck/lint/test 全通过。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `fd74fef` | (see git log) |
+| `3dbaa5f` | (see git log) |
+| `a0ef0a1` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

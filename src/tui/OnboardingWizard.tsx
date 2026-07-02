@@ -8,6 +8,7 @@ import type { Model, Api } from "@earendil-works/pi-ai";
 import { writeSettings } from "../settings.js";
 import { writeCredentials, injectCredentialsIntoEnv } from "../credentials.js";
 import { getNoviDir, getSessionsDir } from "../config.js";
+import { theme } from "./theme.js";
 import { providerEnvKeys } from "../onboarding.js";
 import { DEFAULT_PROVIDER, DEFAULT_MODEL_ID, bootstrap, type BootstrapOptions } from "../bootstrap.js";
 import { renderApp } from "./App.js";
@@ -174,7 +175,7 @@ export function OnboardingWizard({
 
   if (step === "provider") {
     lines.push(
-      <Text key="hint" dimColor>
+      <Text key="hint" color={theme.dim}>
         Select a provider · ↑↓ navigate · Enter confirm · Esc/Ctrl-C cancel
       </Text>,
     );
@@ -186,14 +187,14 @@ export function OnboardingWizard({
       const p = providers[i]!;
       const marker = i === providerCursor ? "›" : " ";
       lines.push(
-        <Text key={p} color={i === providerCursor ? "cyan" : undefined}>
+        <Text key={p} color={i === providerCursor ? theme.accent : undefined}>
           {marker} {p}
         </Text>,
       );
     }
     if (providers.length > window) {
       lines.push(
-        <Text key="more" dimColor>
+        <Text key="more" color={theme.dim}>
           ({providers.length} providers · scroll for more)
         </Text>,
       );
@@ -201,25 +202,25 @@ export function OnboardingWizard({
   } else if (step === "key") {
     const currentKey = envKeyList[envKeyIndex];
     lines.push(
-      <Text key="hint" dimColor>
+      <Text key="hint" color={theme.dim}>
         Provider: {selectedProvider} · Enter your {currentKey} · Esc back
       </Text>,
     );
     lines.push(
       <Text key="prompt">
-        <Text dimColor>{currentKey}: </Text>
-        {keyBuffer ? "•".repeat(keyBuffer.length) : <Text dimColor>(hidden)</Text>}
+        <Text color={theme.dim}>{currentKey}: </Text>
+        {keyBuffer ? "•".repeat(keyBuffer.length) : <Text color={theme.dim}>(hidden)</Text>}
       </Text>,
     );
     if (envKeyList.length > 1) {
       lines.push(
-        <Text key="progress" dimColor>
+        <Text key="progress" color={theme.dim}>
           credential {envKeyIndex + 1} of {envKeyList.length}
         </Text>,
       );
     }
     lines.push(
-      <Text key="hint2" dimColor>
+      <Text key="hint2" color={theme.dim}>
         The value is stored in ~/.novi/credentials.json (0600) and never shown again.
       </Text>,
     );
@@ -230,7 +231,7 @@ export function OnboardingWizard({
       : 0;
     const cursor = modelCursor;
     lines.push(
-      <Text key="hint" dimColor>
+      <Text key="hint" color={theme.dim}>
         Provider: {selectedProvider} · Pick a model · ↑↓ navigate · Enter confirm · Esc back
       </Text>,
     );
@@ -242,16 +243,16 @@ export function OnboardingWizard({
       const marker = i === cursor ? "›" : " ";
       const isDefault = i === defaultIdx;
       lines.push(
-        <Text key={m.id} color={i === cursor ? "cyan" : undefined}>
+        <Text key={m.id} color={i === cursor ? theme.accent : undefined}>
           {marker} {m.id}
-          {isDefault ? <Text dimColor> (recommended)</Text> : null}
+          {isDefault ? <Text color={theme.dim}> (recommended)</Text> : null}
         </Text>,
       );
     }
   }
 
   if (error) {
-    lines.push(<Text key="error" color="red">{error}</Text>);
+    lines.push(<Text key="error" color={theme.status.error}>{error}</Text>);
   }
 
   return (

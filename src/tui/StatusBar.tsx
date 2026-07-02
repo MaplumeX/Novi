@@ -1,6 +1,7 @@
 import { Text, Box } from "ink";
 import type { HarnessState } from "./useHarnessState.js";
 import { formatUsageBar } from "./usage.js";
+import { theme } from "./theme.js";
 
 type StatusBarProps = Pick<
   HarnessState,
@@ -23,26 +24,26 @@ export function StatusBar({
     cumulativeUsage,
     model.contextWindow ?? 0,
   );
+  const isActive = phase !== "idle";
+  const statusColor = isActive ? theme.status.active : theme.status.idle;
+  const statusIcon = isActive ? "◉" : "●";
   return (
     <Box>
-      <Text dimColor>[</Text>
-      <Text color={phase === "idle" ? "green" : "yellow"}>{phase}</Text>
-      <Text dimColor>]</Text>
-      <Text dimColor> model:</Text>
-      <Text>{model.provider}/{model.id}</Text>
-      <Text dimColor> thinking:</Text>
-      <Text>{thinkingLevel}</Text>
-      <Text dimColor> tools:</Text>
-      <Text>{activeToolNames.length}</Text>
-      <Text dimColor> queue:</Text>
-      <Text>{queueLen}</Text>
+      <Text color={statusColor}>{statusIcon}</Text>
+      <Text color={theme.dim}> {phase} </Text>
+      <Text color={theme.dim}>│</Text>
+      <Text> {model.provider}/{model.id}</Text>
+      <Text color={theme.dim}> │ think:{thinkingLevel} </Text>
+      <Text color={theme.dim}>│</Text>
+      <Text> ⚙{activeToolNames.length}</Text>
+      <Text color={theme.dim}> ⏵{queueLen}</Text>
       {queueLen > 0 ? (
-        <Text dimColor>
+        <Text color={theme.dim}>
           {" "}
           (s{queue.steer.length} f{queue.followUp.length} n{queue.nextTurn.length})
         </Text>
       ) : null}
-      <Text dimColor> </Text>
+      <Text color={theme.dim}> │ </Text>
       <Text>{usageBar}</Text>
     </Box>
   );

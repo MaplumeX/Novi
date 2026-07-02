@@ -1,6 +1,7 @@
 import { Fragment, type ReactNode } from "react";
 import { Box, Text } from "ink";
 import type { Token, Tokens } from "marked";
+import { theme } from "../theme.js";
 
 /**
  * Pure `marked` token → Ink element mapping. No harness access, no state —
@@ -25,14 +26,14 @@ function renderInline(token: Token): ReactNode {
     case "em":
       return <Text italic>{renderInlineTokens((token as Tokens.Em).tokens)}</Text>;
     case "codespan":
-      return <Text backgroundColor="#333">{(token as Tokens.Codespan).text}</Text>;
+      return <Text backgroundColor="#333" color={theme.accent}>{(token as Tokens.Codespan).text}</Text>;
     case "del":
       return <Text strikethrough>{renderInlineTokens((token as Tokens.Del).tokens)}</Text>;
     case "link":
       // Show the link text; href omitted to keep lines tidy in a terminal.
-      return <Text color="blue">{renderInlineTokens((token as Tokens.Link).tokens)}</Text>;
+      return <Text color={theme.link}>{renderInlineTokens((token as Tokens.Link).tokens)}</Text>;
     case "image":
-      return <Text color="blue">{(token as Tokens.Image).text}</Text>;
+      return <Text color={theme.link}>{(token as Tokens.Image).text}</Text>;
     case "br":
       return "\n";
     case "escape":
@@ -54,7 +55,7 @@ function renderListItem(item: Tokens.ListItem, index: number, ordered: boolean, 
   const marker = ordered ? `${start + index}.` : "·";
   return (
     <Text key={index}>
-      <Text dimColor>{marker} </Text>
+      <Text color={theme.dim}>{marker} </Text>
       {item.tokens ? renderBlockTokens(item.tokens) : item.text}
     </Text>
   );
@@ -78,9 +79,13 @@ function renderBlock(token: Token): ReactNode {
     }
     case "code": {
       const c = token as Tokens.Code;
+      const lang = c.lang || "";
       return (
-        <Box borderStyle="single" paddingX={1}>
-          <Text>{c.text}</Text>
+        <Box flexDirection="column">
+          {lang ? <Text color={theme.dim}>{lang}</Text> : null}
+          <Box borderStyle="single" borderColor={theme.border} paddingX={1}>
+            <Text>{c.text}</Text>
+          </Box>
         </Box>
       );
     }
@@ -97,13 +102,13 @@ function renderBlock(token: Token): ReactNode {
       const b = token as Tokens.Blockquote;
       return (
         <Box marginLeft={2}>
-          <Text dimColor>│ </Text>
+          <Text color={theme.dim}>│ </Text>
           <Box flexDirection="column">{renderBlockTokens(b.tokens)}</Box>
         </Box>
       );
     }
     case "hr":
-      return <Text dimColor>{"─".repeat(40)}</Text>;
+      return <Text color={theme.dim}>{"─".repeat(40)}</Text>;
     case "space":
       return null;
     case "html":

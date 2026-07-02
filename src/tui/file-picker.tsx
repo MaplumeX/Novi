@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Text, Box, useInput } from "ink";
 import path from "node:path";
 import type { ExecutionEnv } from "@earendil-works/pi-agent-core/node";
+import { theme } from "./theme.js";
 
 /**
  * Scan `cwd` for project files, filtering out common noise directories,
@@ -164,19 +165,19 @@ export function FilePicker({ cwd, env, initialQuery, onInsert, onCancel }: FileP
   return (
     <Box flexDirection="column" marginTop={1}>
       <Text bold>
-        @file — filter: <Text color="cyan">{query || "(all)"}</Text>
+        @file — filter: <Text color={theme.accent}>{query || "(all)"}</Text>
       </Text>
       {candidates.length === 0 ? (
-        <Text dimColor>No files match &quot;{query}&quot;</Text>
+        <Text color={theme.dim}>No files match &quot;{query}&quot;</Text>
       ) : (
         candidates.map((p, i) => (
-          <Text key={p} color={i === cursor ? "cyan" : undefined}>
+          <Text key={p} color={i === cursor ? theme.accent : undefined}>
             {i === cursor ? "› " : "  "}
             {p}
           </Text>
         ))
       )}
-      <Text dimColor>type to filter · ↑↓ select · Enter insert · Esc cancel</Text>
+      <Text color={theme.dim}>type to filter · ↑↓ select · Enter insert · Esc cancel</Text>
     </Box>
   );
 }

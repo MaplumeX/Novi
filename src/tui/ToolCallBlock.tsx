@@ -1,6 +1,7 @@
 import { Box, Text } from "ink";
 import type { AgentToolCall } from "@earendil-works/pi-agent-core/node";
 import type { ToolResultMessage } from "@earendil-works/pi-ai";
+import { theme } from "./theme.js";
 
 const MAX_RESULT_LINES = 20;
 
@@ -97,20 +98,20 @@ function renderDiff(diffLines: DiffLine[]): React.ReactElement {
       {truncated.map((line, idx) => {
         if (line.startsWith("- ")) {
           return (
-            <Text key={idx} color="red">
+            <Text key={idx} color={theme.diff.del}>
               {line}
             </Text>
           );
         }
         if (line.startsWith("+ ")) {
           return (
-            <Text key={idx} color="green">
+            <Text key={idx} color={theme.diff.add}>
               {line}
             </Text>
           );
         }
         return (
-          <Text key={idx} dimColor>
+          <Text key={idx} color={theme.dim}>
             {line}
           </Text>
         );
@@ -128,7 +129,7 @@ function renderExpanded(call: AgentToolCall, result?: ToolResultMessage): React.
       const newText = typeof args.newText === "string" ? args.newText : "";
       return (
         <Box flexDirection="column">
-          <Text dimColor>path: {typeof args.path === "string" ? args.path : ""}</Text>
+          <Text color={theme.dim}>path: {typeof args.path === "string" ? args.path : ""}</Text>
           {renderDiff(simpleDiff(oldText, newText))}
         </Box>
       );
@@ -138,7 +139,7 @@ function renderExpanded(call: AgentToolCall, result?: ToolResultMessage): React.
       const lines = truncateLines(content.split("\n"));
       return (
         <Box flexDirection="column">
-          <Text dimColor>path: {typeof args.path === "string" ? args.path : ""}</Text>
+          <Text color={theme.dim}>path: {typeof args.path === "string" ? args.path : ""}</Text>
           {lines.map((line, idx) => (
             <Text key={idx}>{line}</Text>
           ))}
@@ -156,9 +157,9 @@ function renderExpanded(call: AgentToolCall, result?: ToolResultMessage): React.
       const lines = truncateLines(output.split("\n"));
       return (
         <Box flexDirection="column">
-          <Text dimColor>$ {cmd}</Text>
+          <Text color={theme.dim}>$ {cmd}</Text>
           {result?.isError ? (
-            <Text color="red">exit: error</Text>
+            <Text color={theme.status.error}>exit: error</Text>
           ) : null}
           {lines.map((line, idx) => (
             <Text key={idx}>{line}</Text>
@@ -178,7 +179,7 @@ function renderExpanded(call: AgentToolCall, result?: ToolResultMessage): React.
       const lines = truncateLines(resultText.split("\n"));
       return (
         <Box flexDirection="column">
-          <Text dimColor>{argsJson}</Text>
+          <Text color={theme.dim}>{argsJson}</Text>
           {lines.length > 0 ? (
             lines.map((line, idx) => (
               <Text key={idx}>{line}</Text>
@@ -192,22 +193,30 @@ function renderExpanded(call: AgentToolCall, result?: ToolResultMessage): React.
 
 export function ToolCallBlock({ call, result, expanded }: ToolCallBlockProps): React.ReactElement {
   const summary = summarizeArgs(call.name, call.arguments ?? {});
+  const badgeColor = result?.isError ? theme.status.error : result ? theme.status.idle : theme.status.active;
   if (!expanded) {
     return (
-      <Text dimColor>
-        ⚙ {call.name}
-        {summary ? ` — ${summary}` : ""}
-        {result?.isError ? " (error)" : ""}
+      <Text>
+        <Text color={badgeColor}>●</Text>{" "}
+        <Text color={theme.dim}>⚙ {call.name}</Text>
+        {summary ? <Text color={theme.dim}> — {summary}</Text> : null}
+        {result?.isError ? <Text color={theme.status.error}> (error)</Text> : null}
       </Text>
     );
   }
   return (
     <Box flexDirection="column">
-      <Text dimColor>
-        ⚙ {call.name}
-        {result?.isError ? " (error)" : ""}
-      </Text>
-      {renderExpanded(call, result)}
+      <Box borderStyle="single" borderColor={theme.border} paddingX={1}>
+        <Text>
+          <Text color={badgeColor}>●</Text>{" "}
+          <Text color={theme.dim}>⚙ {call.name}</Text>
+          {summary ? <Text color={theme.dim}> — {summary}</Text> : null}
+          {result?.isError ? <Text color={theme.status.error}> (error)</Text> : null}
+        </Text>
+      </Box>
+      <Box paddingLeft={1}>
+        <Box flexDirection="column">{renderExpanded(call, result)}</Box>
+      </Box>
     </Box>
   );
 }

@@ -4,6 +4,7 @@ import type { ToolResultMessage } from "@earendil-works/pi-ai";
 import type { HarnessState } from "./useHarnessState.js";
 import { Markdown } from "./Markdown.js";
 import { ToolCallBlock } from "./ToolCallBlock.js";
+import { theme } from "./theme.js";
 
 interface MessageListProps {
   messages: AgentMessage[];
@@ -57,14 +58,14 @@ function renderAssistantMessage(
         if (toolExpanded && part.thinking.length > 0) {
           parts.push(
             <Box key={`think-${i}`} flexDirection="column">
-              <Text dimColor>💭 thinking</Text>
-              <Text dimColor>{part.thinking}</Text>
+              <Text color={theme.dim}>💭 thinking</Text>
+              <Text color={theme.dim}>{part.thinking}</Text>
             </Box>,
           );
         } else {
           const firstLine = part.thinking.split("\n")[0]?.slice(0, 60) ?? "";
           parts.push(
-            <Text key={`think-${i}`} dimColor>
+            <Text key={`think-${i}`} color={theme.dim}>
               💭 {firstLine}
               {part.thinking.length > 60 ? "…" : ""}
             </Text>,
@@ -93,8 +94,8 @@ function renderAssistantMessage(
   flushText("md-end");
 
   return (
-    <Box key={index} flexDirection="column">
-      <Text dimColor>✻</Text>
+    <Box key={index} flexDirection="column" marginTop={1}>
+      <Text color={theme.role.assistant} bold>{"✻ Assistant"}</Text>
       {parts.length > 0 ? <Box flexDirection="column">{parts}</Box> : null}
     </Box>
   );
@@ -113,9 +114,9 @@ function renderMessage(
           ? message.content
           : collectText(message.content);
       return (
-        <Box key={index} flexDirection="column">
+        <Box key={index} flexDirection="column" marginTop={1}>
           <Text>
-            <Text color="cyan">›</Text> {text}
+            <Text color={theme.role.user} bold>{"You ›"}</Text> {text}
           </Text>
         </Box>
       );
@@ -145,14 +146,14 @@ export function MessageList({
     <Box flexDirection="column">
       {messages.map((m, i) => renderMessage(m, messages, toolExpanded, i))}
       {streamingToolCalls.map((tc) => (
-        <Text key={`tc-${tc.id}`} dimColor>
+        <Text key={`tc-${tc.id}`} color={theme.dim}>
           ⚙ {tc.name}… {tc.status === "running" ? "running" : `(${tc.status})`}
         </Text>
       ))}
       {streamingThinking.length > 0 ? (
         <Box flexDirection="column">
-          <Text dimColor>💭 thinking</Text>
-          <Text dimColor>{streamingThinking}</Text>
+          <Text color={theme.dim}>💭 thinking</Text>
+          <Text color={theme.dim}>{streamingThinking}</Text>
         </Box>
       ) : null}
       {streamingText.length > 0 ? <Markdown text={streamingText} /> : null}

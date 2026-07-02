@@ -18,6 +18,7 @@ import {
 import { insert, type EditorState } from "./editor-state.js";
 import { messageText, restoreText } from "./queue-helpers.js";
 import type { BootstrapResult } from "../bootstrap.js";
+import { theme, divider } from "./theme.js";
 
 /** Overlay union: null = normal input; settings = form; filePicker = @file; sessionPicker = /resume. */
 // Type re-exported from commands.ts to keep the variants in one place.
@@ -240,7 +241,7 @@ function App({
       />
       {notice.length > 0
         ? notice.map((line, i) => (
-            <Text key={i} dimColor>
+            <Text key={i} color={theme.dim}>
               {line || " "}
             </Text>
           ))
@@ -313,8 +314,9 @@ function App({
           onCancel={() => setOverlay(null)}
         />
       ) : null}
-      <Text dimColor>session: {handle.sessionPath}</Text>
-      <Text dimColor>
+      <Text color={theme.dim}>{divider()}</Text>
+      <Text color={theme.dim}>session: {handle.sessionPath}</Text>
+      <Text color={theme.dim}>
         /help for commands · Ctrl-C to exit · Ctrl-O: {toolExpanded ? "collapse" : "expand"}
       </Text>
     </>

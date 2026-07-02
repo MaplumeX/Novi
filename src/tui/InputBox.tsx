@@ -22,6 +22,8 @@ import { COMMANDS } from "./commands.js";
 import { parseBang, runBang } from "./bang.js";
 import { openExternalEditor } from "./external-editor.js";
 import { loadFileCandidates } from "./file-picker.js";
+import { theme, divider } from "./theme.js";
+import { Spinner } from "./components/Spinner.js";
 
 interface InputBoxProps {
   phase: Phase;
@@ -327,9 +329,7 @@ export function InputBox({
     setState((s) => insert(s, value));
   });
 
-  const busyHint = phase !== "idle" && !state.text.startsWith("/") && !state.text.startsWith("!")
-    ? " (working…)"
-    : "";
+  const busy = phase !== "idle" && !state.text.startsWith("/") && !state.text.startsWith("!");
 
   const before = state.text.slice(0, state.cursor);
   const at = state.text.slice(state.cursor);
@@ -338,12 +338,19 @@ export function InputBox({
 
   return (
     <Box flexDirection="column">
+      <Text color={theme.dim}>{divider()}</Text>
       <Text>
-        <Text dimColor>› </Text>
+        <Text color={theme.accent} bold>› </Text>
         {before}
-        <Text dimColor>▏</Text>
+        <Text color={theme.dim}>▏</Text>
         {at}
-        {busyHint ? <Text dimColor>{busyHint}</Text> : null}
+        {busy ? (
+          <Text>
+            {" "}
+            <Spinner color={theme.accent} />
+            <Text color={theme.dim}> working…</Text>
+          </Text>
+        ) : null}
       </Text>
       {slashListOpen ? (
         matchedCommands.length > 0 ? (
@@ -356,7 +363,7 @@ export function InputBox({
             ))}
           </Box>
         ) : (
-          <Text dimColor>  No matching commands</Text>
+          <Text color={theme.dim}>  No matching commands</Text>
         )
       ) : null}
     </Box>

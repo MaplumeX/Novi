@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Text, Box, useInput } from "ink";
+import { theme } from "./theme.js";
 
 /** A selectable entry in the session picker list. */
 export interface SessionInfo {
@@ -52,13 +53,13 @@ export function SessionPicker({ sessions, onPick, onCancel }: SessionPickerProps
     <Box flexDirection="column" marginTop={1}>
       <Text bold>Resume session — ↑↓ select · Enter resume · Esc cancel</Text>
       {sessions.length === 0 ? (
-        <Text dimColor>No sessions found.</Text>
+        <Text color={theme.dim}>No sessions found.</Text>
       ) : (
         sessions.map((s, i) => (
-          <Text key={s.path} color={i === cursor ? "cyan" : undefined}>
+          <Text key={s.path} color={i === cursor ? theme.accent : undefined}>
             {i === cursor ? "› " : "  "}
             {s.label}{"  "}
-            <Text dimColor>({s.mtime.toLocaleString()})</Text>
+            <Text color={theme.dim}>({s.mtime.toLocaleString()})</Text>
           </Text>
         ))
       )}

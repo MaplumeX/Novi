@@ -7,6 +7,7 @@ import type { ResolvedSettings } from "../settings.js";
 import { writeSettings, loadSettings, resolveSettings } from "../settings.js";
 import { loadCredentials, getCredentialsPath } from "../credentials.js";
 import { getNoviDir } from "../config.js";
+import { theme } from "./theme.js";
 
 interface SettingsFormProps {
   settings: ResolvedSettings;
@@ -228,23 +229,23 @@ export function SettingsForm({
     const modified = draft[f.key] !== undefined;
     const marker = isEditing ? "✎" : isCursor ? "›" : modified ? "*" : " ";
     lines.push(
-      <Text key={f.key} color={isCursor || isEditing ? "cyan" : undefined}>
+      <Text key={f.key} color={isCursor || isEditing ? theme.accent : undefined}>
         {marker} {f.label}: {val || "(unset)"}{" "}
-        <Text dimColor>[{src}]</Text>
-        {isEditing && f.type === "select" ? <Text dimColor> ↑↓ cycle</Text> : null}
+        <Text color={theme.dim}>[{src}]</Text>
+        {isEditing && f.type === "select" ? <Text color={theme.dim}> ↑↓ cycle</Text> : null}
       </Text>,
     );
   }
 
   if (message) {
-    lines.push(<Text key="msg" color={message.startsWith("Save failed") ? "red" : "green"}>{message}</Text>);
+    lines.push(<Text key="msg" color={message.startsWith("Save failed") ? theme.status.error : theme.status.idle}>{message}</Text>);
   }
 
   // Read-only credentials section (from ~/.novi/credentials.json).
   const credEntries = Object.entries(creds);
   lines.push(<Text key="creds-hdr" bold>Credentials (read-only — {getCredentialsPath()})</Text>);
   if (credEntries.length === 0) {
-    lines.push(<Text key="creds-empty" dimColor>  (none configured)</Text>);
+    lines.push(<Text key="creds-empty" color={theme.dim}>  (none configured)</Text>);
   } else {
     for (const [name, value] of credEntries) {
       lines.push(

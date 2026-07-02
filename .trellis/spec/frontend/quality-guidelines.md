@@ -55,8 +55,8 @@ When a rendering decision is non-obvious (e.g. avoiding `marked.lexer` during
 streaming), document it:
 
 ```tsx
-// Performance: `marked.lexer` runs over the full text per call. Callers must
-// NOT feed streaming deltas here — during streaming, render `<Text>` directly.
+// `marked.lexer` runs over the full text per call; a 50ms debounce inside
+// `Markdown` bounds re-lexer frequency, so streaming deltas are acceptable.
 ```
 
 ---
@@ -83,7 +83,9 @@ streaming), document it:
 - No direct `harness.subscribe()` outside `useHarnessState`.
 - No passing `AgentHarness` / `Session` instances into display components
   (`MessageList`, `StatusBar`, `InputBox`) — pass already-projected state.
-- No streaming deltas fed into `Markdown` — it expects finalized text.
+- No unthrottled streaming deltas fed into `Markdown` — it internally
+  debounces (50ms `setTimeout`) before running `marked.lexer`; callers may
+  pass streaming text, but must not bypass that debounce.
 - No default import of typebox (`import Type from …`); use
   `import * as Type`.
 - When spawning external processes that take over the terminal (e.g.

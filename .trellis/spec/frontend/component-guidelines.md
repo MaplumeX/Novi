@@ -189,5 +189,6 @@ content (file picker insert, external editor result, etc.).
   (`MessageList`, `StatusBar`). They receive already-projected state.
 - Do not call harness methods (`prompt`, `abort`,…) directly from display
   components. Route through callbacks defined in `App.tsx`.
-- Do not feed streaming deltas into `Markdown` — it runs `marked.lexer` over
-  full text. During streaming, render `<Text>` directly (see `MessageList`).
+- `Markdown` debounces its input with a 50ms `setTimeout` before running
+  `marked.lexer`, so streaming deltas are acceptable — the throttle bounds
+  re-lexer frequency. The final `message_end` flush renders complete text.

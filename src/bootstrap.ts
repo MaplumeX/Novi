@@ -15,6 +15,10 @@ import { DEFAULT_SYSTEM_PROMPT } from "./default-system-prompt.js";
 import { createBuiltinTools } from "./tools/index.js";
 import { loadResources } from "./resources.js";
 import {
+  loadCredentials,
+  injectCredentialsIntoEnv,
+} from "./credentials.js";
+import {
   loadSettings,
   resolveSettings,
   getAgentsMdCandidates,
@@ -194,6 +198,13 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
   const cwd = options.cwd ?? process.cwd();
 
   const env = new NodeExecutionEnv({ cwd, shellEnv: process.env });
+
+  // Inject any stored credentials (from ~/.novi/credentials.json) into the
+  // process env before resolving the model, so pi-ai's getAuth sees them.
+  // Only keys absent from the environment are injected — a user who exports an
+  // env var always wins over the stored value.
+  const storedCreds = await loadCredentials(env);
+  injectCredentialsIntoEnv(storedCreds, process.env);
 
   const sessionsDir = getSessionsDir();
   await ensureDir(env, getNoviDir());

@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Text, Box, useInput } from "ink";
 import path from "node:path";
 import type { ExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core/node";
 import type { ResolvedSettings } from "../settings.js";
 import { writeSettings, loadSettings, resolveSettings } from "../settings.js";
+import { loadCredentials, getCredentialsPath } from "../credentials.js";
 import { getNoviDir } from "../config.js";
 
 interface SettingsFormProps {
@@ -55,6 +56,12 @@ function getSource(settings: ResolvedSettings, key: string): string {
   return settings._sources[key] ?? "default";
 }
 
+/** Mask a secret, showing the first 3 and last 4 characters only. */
+function maskSecret(value: string): string {
+  if (value.length <= 8) return "••••";
+  return `${value.slice(0, 3)}...${value.slice(-4)}`;
+}
+
 export function SettingsForm({
   settings,
   env,
@@ -71,6 +78,11 @@ export function SettingsForm({
   const [message, setMessage] = useState<string | null>(null);
   // Local draft of edits (dot-path → value).
   const [draft, setDraft] = useState<Record<string, unknown>>({});
+  // Credentials loaded from ~/.novi/credentials.json (read-only, masked).
+  const [creds, setCreds] = useState<Record<string, string>>({});
+  useEffect(() => {
+    void loadCredentials(env).then(setCreds);
+  }, [env]);
 
   const field = FIELDS[cursor];
   const baseValue = field
@@ -226,6 +238,21 @@ export function SettingsForm({
 
   if (message) {
     lines.push(<Text key="msg" color={message.startsWith("Save failed") ? "red" : "green"}>{message}</Text>);
+  }
+
+  // Read-only credentials section (from ~/.novi/credentials.json).
+  const credEntries = Object.entries(creds);
+  lines.push(<Text key="creds-hdr" bold>Credentials (read-only — {getCredentialsPath()})</Text>);
+  if (credEntries.length === 0) {
+    lines.push(<Text key="creds-empty" dimColor>  (none configured)</Text>);
+  } else {
+    for (const [name, value] of credEntries) {
+      lines.push(
+        <Text key={name}>
+          {" "} {name}: {maskSecret(value)}
+        </Text>,
+      );
+    }
   }
 
   return (

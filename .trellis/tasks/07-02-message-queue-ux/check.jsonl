@@ -1,1 +1,6 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/frontend/index.md", "reason": "frontend Quality Check — InputBox/App/commands pass component/state guidelines"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "verify callback props named onXxx; InputBox still props-driven"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "verify queue read from HarnessState (not duplicated); editor text local; restore bridges correctly"}
+{"file": ".trellis/spec/backend/pi-agent-core-api.md", "reason": "verify steer/followUp/abort called with correct signatures; queue_update projection intact"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "verify steer/followUp/abort failures caught and surfaced as notice"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "verify only useHarnessState parses queue_update; App/InputBox consume state.queue"}

@@ -1,1 +1,7 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/frontend/index.md", "reason": "frontend layer entry: component/hook/state guidelines for InputBox submit routing + App queue handlers"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "InputBox props conventions (onSteer/onFollowUp callbacks); overlay non-null => InputBox unmounted"}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "useHarnessState already projects queue_update; no new subscription; queue read via state.queue"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "queue is harness-derived state (HarnessState.queue); editor text is local UI state; restore bridges them"}
+{"file": ".trellis/spec/backend/pi-agent-core-api.md", "reason": "harness.steer/followUp/nextTurn/abort signatures + queue_update event shape"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "steer/followUp/abort failures must surface as notice, not throw uncaught"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "queue projection owned by useHarnessState; InputBox/App consume state.queue, do not re-parse events"}

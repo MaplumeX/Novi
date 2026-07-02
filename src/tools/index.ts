@@ -6,22 +6,25 @@ import { createGlobTool } from "./glob.js";
 import { createGrepTool } from "./grep.js";
 import { createLsTool } from "./ls.js";
 import { createReadFileTool } from "./read-file.js";
+import { BuiltinToolRegistry } from "./registry.js";
 import { createTodoTool } from "./todo.js";
 import { createWriteFileTool } from "./write-file.js";
+
+/** Module-level registry declaring every built-in tool in one place. */
+const registry = new BuiltinToolRegistry()
+  .add("read_file", (env) => createReadFileTool(env))
+  .add("write_file", (env) => createWriteFileTool(env))
+  .add("edit_file", (env) => createEditFileTool(env))
+  .add("bash", (env) => createBashTool(env))
+  .add("ls", (env) => createLsTool(env))
+  .add("glob", (env) => createGlobTool(env))
+  .add("grep", (env) => createGrepTool(env))
+  .add("todo", () => createTodoTool());
 
 /**
  * Build the full set of built-in tools, each closing over the shared
  * {@link ExecutionEnv}. Register via `harness.setTools(createBuiltinTools(env))`.
  */
 export function createBuiltinTools(env: ExecutionEnv): AgentTool[] {
-  return [
-    createReadFileTool(env),
-    createWriteFileTool(env),
-    createEditFileTool(env),
-    createBashTool(env),
-    createLsTool(env),
-    createGlobTool(env),
-    createGrepTool(env),
-    createTodoTool(),
-  ];
+  return registry.buildAll(env);
 }

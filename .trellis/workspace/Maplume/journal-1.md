@@ -210,3 +210,36 @@ Upgraded InputBox from useState<string> to EditorState cursor model (src/tui/edi
 ### Next Steps
 
 - None - task complete
+
+
+## Session 7: Implement child 3 message-queue-ux (steer/followUp/Esc-restore/Alt-Up)
+
+**Date**: 2026-07-02
+**Task**: Implement child 3 message-queue-ux (steer/followUp/Esc-restore/Alt-Up)
+**Branch**: `main`
+
+### Summary
+
+Wired steer/followUp/abort-restore/Alt+Up into InputBox. Enter turn=steer, Alt+Enter=followUp, Esc=abort+restore(AbortResult.clearedSteer/clearedFollowUp→editor preserving draft), Alt+Up=preview(not dequeue,harness无API). QueueState holds AgentMessage[] now. messageText single projection (removed duplicate messagePreview from commands). /queue command. 143 vitest green. Archived child 3.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `HEAD` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

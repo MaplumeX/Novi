@@ -546,3 +546,36 @@ Introduced BuiltinToolRegistry abstraction (src/tools/registry.ts) replacing the
 ### Next Steps
 
 - None - task complete
+
+
+## Session 17: TUI Visual Redesign
+
+**Date**: 2026-07-02
+**Task**: TUI Visual Redesign
+**Branch**: `main`
+
+### Summary
+
+Replaced emoji-heavy iconography (💭 ⚙ ⏵) with centralized dingbat/box-drawing design system inspired by Claude Code. Added icons registry to theme.ts, redesigned Spinner (dingbat frames), MessageList (guide-line layout, streaming status line), ToolCallBlock (no border, │ + ╌ separators), StatusBar (plain text labels), InputBox (icons.prompt).
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `960e2aa` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

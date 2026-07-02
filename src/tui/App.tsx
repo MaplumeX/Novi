@@ -10,6 +10,7 @@ import { InputBox } from "./InputBox.js";
 import { SettingsForm } from "./SettingsForm.js";
 import { FilePicker } from "./file-picker.js";
 import { SessionPicker } from "./SessionPicker.js";
+import { ModelPicker } from "./ModelPicker.js";
 import { runCommand, nextThinkingLevel, type CommandContext, type Overlay } from "./commands.js";
 import {
   createHarnessHandle,
@@ -316,6 +317,25 @@ function App({
               } catch (e) {
                 setOverlay(null);
                 print(`Resume failed: ${e instanceof Error ? e.message : String(e)}`);
+              }
+            })();
+          }}
+          onCancel={() => setOverlay(null)}
+        />
+      ) : overlay.kind === "modelPicker" ? (
+        <ModelPicker
+          models={overlay.models}
+          currentIndex={overlay.currentIndex}
+          onPick={(entry) => {
+            void (async () => {
+              try {
+                const model = models.getModel(entry.provider, entry.id)!;
+                await handle.harness.setModel(model);
+                setOverlay(null);
+                print(`Switched to ${entry.provider}/${entry.id}.`);
+              } catch (e) {
+                setOverlay(null);
+                print(`Switch failed: ${e instanceof Error ? e.message : String(e)}`);
               }
             })();
           }}

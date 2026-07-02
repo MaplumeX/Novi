@@ -214,12 +214,16 @@ describe("runCommand — /model", () => {
   function makeModelCtx(opts: {
     current?: { provider: string; id: string };
     models?: Array<{ provider: string; id: string }>;
+    providers?: Array<{ id: string }>;
+    authed?: Set<string>;
   }): { ctx: CommandContext; setModelSpy: ReturnType<typeof vi.fn> } {
     const current = opts.current ?? { provider: "anthropic", id: "claude-x" };
     const models = opts.models ?? [
       { provider: "anthropic", id: "claude-x" },
       { provider: "anthropic", id: "claude-y" },
     ];
+    const providers = opts.providers ?? [{ id: "anthropic" }];
+    const authed = opts.authed ?? new Set(["anthropic"]);
     const setModelSpy = vi.fn().mockResolvedValue(undefined);
     const ctx = {
       harness: {
@@ -232,6 +236,9 @@ describe("runCommand — /model", () => {
           models.find((m) => m.provider === p && m.id === id),
         getModels: (p?: string) =>
           models.filter((m) => !p || m.provider === p),
+        getProviders: () => providers,
+        getAuth: async (model: { provider: string }) =>
+          authed.has(model.provider) ? { ok: true } : undefined,
       },
       session: {},
       sessionsDir: "/tmp/sessions",
@@ -250,15 +257,34 @@ describe("runCommand — /model", () => {
     return { ctx, setModelSpy };
   }
 
-  it("lists current provider models with the active one marked when no args", async () => {
+  it("opens the model picker overlay when no args", async () => {
     const { ctx } = makeModelCtx({});
     await runCommand("/model", ctx);
-    const printed = (ctx.print as ReturnType<typeof vi.fn>).mock.calls[0]![0] as string;
-    expect(printed).toContain("Current model: anthropic/claude-x");
-    expect(printed).toContain("Models for anthropic:");
-    expect(printed).toContain("  › claude-x");
-    expect(printed).toContain("    claude-y");
-    expect(printed).toContain("Switch with: /model <modelId>");
+    expect(ctx.setOverlay).toHaveBeenCalledWith({
+      kind: "modelPicker",
+      models: [
+        { provider: "anthropic", id: "claude-x" },
+        { provider: "anthropic", id: "claude-y" },
+      ],
+      currentIndex: 0,
+    });
+  });
+
+  it("filters out unconfigured providers from the picker", async () => {
+    const { ctx } = makeModelCtx({
+      models: [
+        { provider: "anthropic", id: "claude-x" },
+        { provider: "openai", id: "gpt-5" },
+      ],
+      providers: [{ id: "anthropic" }, { id: "openai" }],
+      authed: new Set(["anthropic"]),
+    });
+    await runCommand("/model", ctx);
+    expect(ctx.setOverlay).toHaveBeenCalledWith({
+      kind: "modelPicker",
+      models: [{ provider: "anthropic", id: "claude-x" }],
+      currentIndex: 0,
+    });
   });
 
   it("switches within current provider when given a bare modelId", async () => {

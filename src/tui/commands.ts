@@ -76,12 +76,19 @@ export interface CommandContext {
   queue: QueueState;
 }
 
+/** A selectable entry in the model picker list. */
+export interface ModelEntry {
+  provider: string;
+  id: string;
+}
+
 /** Overlay variants openable from commands. */
 export type Overlay =
   | null
   | { kind: "settings" }
   | { kind: "filePicker" }
-  | { kind: "sessionPicker"; sessions: import("./SessionPicker.js").SessionInfo[] };
+  | { kind: "sessionPicker"; sessions: import("./SessionPicker.js").SessionInfo[] }
+  | { kind: "modelPicker"; models: ModelEntry[]; currentIndex: number };
 
 export interface Command {
   name: string;
@@ -220,20 +227,27 @@ export const COMMANDS: readonly Command[] = [
     run: async (ctx, args) => {
       const current = ctx.harness.getModel();
       if (!args) {
-        // List the current provider's models with the active one marked.
-        const providerModels = ctx.models.getModels(current.provider);
-        const lines = [`Current model: ${current.provider}/${current.id}`];
-        if (providerModels.length > 0) {
-          lines.push(`Models for ${current.provider}:`);
+        // Build a flat list of models from every provider whose credential
+        // is currently usable (local auth check, no network call), then open
+        // the interactive model picker overlay.
+        const entries: ModelEntry[] = [];
+        for (const provider of ctx.models.getProviders()) {
+          const providerModels = ctx.models.getModels(provider.id);
+          if (providerModels.length === 0) continue;
+          const auth = await ctx.models.getAuth(providerModels[0]!);
+          if (!auth) continue;
           for (const m of providerModels) {
-            const marker = m.id === current.id ? "›" : " ";
-            lines.push(`  ${marker} ${m.id}`);
+            entries.push({ provider: provider.id, id: m.id });
           }
-          lines.push(
-            `Switch with: /model <modelId>  or  /model <provider>/<modelId>`,
-          );
         }
-        ctx.print(lines.join("\n"));
+        const currentIndex = entries.findIndex(
+          (e) => e.provider === current.provider && e.id === current.id,
+        );
+        ctx.setOverlay({
+          kind: "modelPicker",
+          models: entries,
+          currentIndex: currentIndex >= 0 ? currentIndex : 0,
+        });
         return;
       }
       // `<modelId>` (no slash) → switch within the current provider.

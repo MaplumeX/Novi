@@ -1,0 +1,29 @@
+{
+  "id": "tui-polish",
+  "name": "tui-polish",
+  "title": "TUI 界面完善：消息显示、斜杠命令匹配、常见 TUI 功能补齐",
+  "description": "",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "Maplume",
+  "assignee": "Maplume",
+  "createdAt": "2026-07-02",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "07-02-message-display",
+    "07-02-input-interaction"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

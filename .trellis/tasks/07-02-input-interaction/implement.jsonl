@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend pre-development checklist + quality gate"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "InputBox props-driven pattern; overlay pattern; App owns harness/editor state"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Local state only for UI concerns; inputHistory/historyBrowse owned by App"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "Type patterns for new InputBox props and command list export"}

@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend pre-development checklist + quality gate"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Display components consume HarnessState not raw events; props-driven patterns; overlay pattern"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "useHarnessState owns TUI↔harness boundary; local state only for UI concerns"}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "useHarnessState hook conventions for event subscription"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Anti-pattern: every consumer parses same payload; useHarnessState is single event interpreter"}

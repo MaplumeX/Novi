@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend quality gate for check pass"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Code standards and forbidden patterns for frontend changes"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "Type patterns for new HarnessState fields and ToolCallBlock props"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Verify useHarnessState remains single event interpreter; no raw event leaking to display components"}

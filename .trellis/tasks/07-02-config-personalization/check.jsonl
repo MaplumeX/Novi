@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "backend Quality Check section — verify settings/bootstrap code passes lint/type/quality"}
+{"file": ".trellis/spec/backend/pi-agent-core-api.md", "reason": "verify replayHarnessState uses only public getters (getActiveTools/getModel/getThinkingLevel/getStreamOptions/getResources), not private fields"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "verify settings parse failure degrades to warning, not throw; writeSettings errors handled"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "frontend Quality Check — App/useHarnessState/SettingsForm pass component/hook/state guidelines"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "verify useHarnessState dependency array + unsubscribe cleanup (R1: no event leak after harness rebuild)"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "NoviSettings/ResolvedSettings/Overlay types verified; no any leaks"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "verify only useHarnessState parses events; SettingsForm/App consume state, not raw events"}
+{"file": ".trellis/tasks/07-02-novi-v2-feature-completion/research/harness-session-swap.md", "reason": "verify HarnessHandle.replace flow matches the documented constraint (rebuild + unsubscribe + replay)"}

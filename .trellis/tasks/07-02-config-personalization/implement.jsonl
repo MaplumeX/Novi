@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "backend layer entry: Pre-Development Checklist + Quality Check gates for settings/bootstrap/harness code"}
+{"file": ".trellis/spec/backend/pi-agent-core-api.md", "reason": "verified public API contract: AgentHarness getters/setters, session, setStreamOptions — replayHarnessState relies on these"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "settings load/parse failure must degrade to warning, not throw — matches guideline"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "frontend layer entry: component/hook/state guidelines for App/useHarnessState/SettingsForm changes"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "useHarnessState dependency-array + cleanup (unsubscribe) must follow state mgmt rules — R1 leak prevention"}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "useHarnessState refactor + HarnessHandle hook shape"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "SettingsForm + overlay rendering pattern (props, composition)"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "useHarnessState owns event→state projection; SettingsForm/overlay must not re-parse events"}
+{"file": ".trellis/tasks/07-02-novi-v2-feature-completion/research/harness-session-swap.md", "reason": "confirms AgentHarness has no session hot-swap API — HarnessHandle.replace + replayHarnessState design basis"}

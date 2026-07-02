@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "parent cross-child Quality Check: all children must pass backend quality gates"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "parent cross-child Quality Check: all children must pass frontend quality gates"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "parent cross-child invariant: single event interpreter (useHarnessState) across all children"}
+{"file": ".trellis/tasks/07-02-novi-v2-feature-completion/research/harness-session-swap.md", "reason": "parent research: verify child 1/4 harness rebuild respects the no-hot-swap constraint"}

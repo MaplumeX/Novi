@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/pi-agent-core-api.md", "reason": "parent cross-child reference: harness public API contract all children rely on"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "HarnessHandle + useHarnessState refactor pattern shared by child 1/4"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "event→state projection invariant must hold across all 7 children"}
+{"file": ".trellis/tasks/07-02-novi-v2-feature-completion/research/harness-session-swap.md", "reason": "parent research: harness rebuild constraint affects child 1 (/reload) and child 4 (session switch)"}

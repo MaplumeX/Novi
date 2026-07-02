@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 17
+- **Total Sessions**: 18
 - **Last Active**: 2026-07-02
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~581 | Active |
+| `journal-1.md` | ~614 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 18 | 2026-07-02 | TUI interaction details parity audit (D1-D3) | `76125cf` | `main` |
 | 17 | 2026-07-02 | TUI Visual Redesign | `960e2aa` | `main` |
 | 16 | 2026-07-02 | Tool registration mechanism (BuiltinToolRegistry) | `b73fae9`, `6d0efd7`, `ac70097` | `main` |
 | 15 | 2026-07-02 | TUI 视觉美化：配色体系、角色标识、状态栏、边框、spinner、Markdown | `fd74fef`, `3dbaa5f`, `a0ef0a1` | `main` |

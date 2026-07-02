@@ -579,3 +579,36 @@ Replaced emoji-heavy iconography (💭 ⚙ ⏵) with centralized dingbat/box-dra
 ### Next Steps
 
 - None - task complete
+
+
+## Session 18: TUI interaction details parity audit (D1-D3)
+
+**Date**: 2026-07-02
+**Task**: TUI interaction details parity audit (D1-D3)
+**Branch**: `main`
+
+### Summary
+
+补齐 TUI 键盘交互细节：R1 Shift+Tab 循环思考强度（App 透传 onCycleThinking 回调，nextThinkingLevel 纯函数，StatusBar 同步）、R2 slash Tab 补全高亮选中项而非公共前缀（completeSlashSelection 纯函数）、R3 FilePicker Tab 与 Enter 等价接受选中项（filePickerKeyAction 纯函数）。新增 commands.test.ts/input-box.test.ts/file-picker.test.ts 覆盖。D4 Ctrl+L、D5 Ctrl+R 移出范围留待后续。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `76125cf` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

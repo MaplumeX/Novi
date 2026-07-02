@@ -1,1 +1,5 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/pi-agent-core-api.md", "reason": "verify getStreamOptions/getModel/contextWindow correct usage; message_end usage access"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "verify usage in HarnessState; StatusBar consumes via Pick; no duplicate harness state"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "verify StatusBar props-driven; formatUsageBar pure function"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "verify no-usage / divide-by-zero / undefined cost handled gracefully (no crash)"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "verify summarizeUsage single aggregator; no local re-parse in components"}

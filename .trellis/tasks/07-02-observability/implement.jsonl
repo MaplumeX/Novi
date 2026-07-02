@@ -1,1 +1,6 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/pi-agent-core-api.md", "reason": "AgentHarness.getStreamOptions(); message_end event shape with usage; model.contextWindow"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "frontend guidelines for StatusBar + useHarnessState changes"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "usage is harness-derived state projected via useHarnessState; StatusBar consumes props"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "StatusBar props-driven (Pick<HarnessState>); usage formatting in pure function"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "usage may be undefined (no usage data) — must not crash, show 0/-"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "usage projection owned by useHarnessState; summarizeUsage single aggregator"}

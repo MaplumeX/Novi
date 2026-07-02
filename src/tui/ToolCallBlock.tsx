@@ -1,7 +1,8 @@
+import { Fragment } from "react";
 import { Box, Text } from "ink";
 import type { AgentToolCall } from "@earendil-works/pi-agent-core/node";
 import type { ToolResultMessage } from "@earendil-works/pi-ai";
-import { theme } from "./theme.js";
+import { DIVIDER_WIDTH, icons, theme } from "./theme.js";
 
 const MAX_RESULT_LINES = 20;
 
@@ -120,31 +121,38 @@ function renderDiff(diffLines: DiffLine[]): React.ReactElement {
   );
 }
 
-/** Render the expanded content for a specific tool type. */
-function renderExpanded(call: AgentToolCall, result?: ToolResultMessage): React.ReactElement {
+/** Dotted separator line used between expanded content sections. */
+function dottedSeparator(key: string): React.ReactElement {
+  return (
+    <Text key={key} color={theme.dim}>
+      {icons.separatorDotted.repeat(DIVIDER_WIDTH)}
+    </Text>
+  );
+}
+
+/** Render the expanded content sections for a specific tool type. */
+function renderExpanded(call: AgentToolCall, result?: ToolResultMessage): React.ReactElement[] {
   const args = call.arguments ?? {};
   switch (call.name) {
     case "edit_file": {
       const oldText = typeof args.oldText === "string" ? args.oldText : "";
       const newText = typeof args.newText === "string" ? args.newText : "";
-      return (
-        <Box flexDirection="column">
-          <Text color={theme.dim}>path: {typeof args.path === "string" ? args.path : ""}</Text>
-          {renderDiff(simpleDiff(oldText, newText))}
-        </Box>
-      );
+      return [
+        <Text color={theme.dim}>path: {typeof args.path === "string" ? args.path : ""}</Text>,
+        renderDiff(simpleDiff(oldText, newText)),
+      ];
     }
     case "write_file": {
       const content = typeof args.content === "string" ? args.content : "";
       const lines = truncateLines(content.split("\n"));
-      return (
+      return [
+        <Text color={theme.dim}>path: {typeof args.path === "string" ? args.path : ""}</Text>,
         <Box flexDirection="column">
-          <Text color={theme.dim}>path: {typeof args.path === "string" ? args.path : ""}</Text>
           {lines.map((line, idx) => (
             <Text key={idx}>{line}</Text>
           ))}
-        </Box>
-      );
+        </Box>,
+      ];
     }
     case "bash": {
       const cmd = typeof args.command === "string" ? args.command : "";
@@ -155,17 +163,17 @@ function renderExpanded(call: AgentToolCall, result?: ToolResultMessage): React.
             .join("\n")
         : "";
       const lines = truncateLines(output.split("\n"));
-      return (
+      return [
         <Box flexDirection="column">
           <Text color={theme.dim}>$ {cmd}</Text>
-          {result?.isError ? (
-            <Text color={theme.status.error}>exit: error</Text>
-          ) : null}
+          {result?.isError ? <Text color={theme.status.error}>exit: error</Text> : null}
+        </Box>,
+        <Box flexDirection="column">
           {lines.map((line, idx) => (
             <Text key={idx}>{line}</Text>
           ))}
-        </Box>
-      );
+        </Box>,
+      ];
     }
     default: {
       // Generic fallback: args JSON + result text
@@ -177,16 +185,17 @@ function renderExpanded(call: AgentToolCall, result?: ToolResultMessage): React.
             .join("\n")
         : "";
       const lines = truncateLines(resultText.split("\n"));
-      return (
-        <Box flexDirection="column">
-          <Text color={theme.dim}>{argsJson}</Text>
-          {lines.length > 0 ? (
-            lines.map((line, idx) => (
+      const sections: React.ReactElement[] = [<Text color={theme.dim}>{argsJson}</Text>];
+      if (lines.length > 0) {
+        sections.push(
+          <Box flexDirection="column">
+            {lines.map((line, idx) => (
               <Text key={idx}>{line}</Text>
-            ))
-          ) : null}
-        </Box>
-      );
+            ))}
+          </Box>,
+        );
+      }
+      return sections;
     }
   }
 }
@@ -197,25 +206,32 @@ export function ToolCallBlock({ call, result, expanded }: ToolCallBlockProps): R
   if (!expanded) {
     return (
       <Text>
-        <Text color={badgeColor}>●</Text>{" "}
-        <Text color={theme.dim}>⚙ {call.name}</Text>
+        <Text color={badgeColor}>{icons.statusDot}</Text>{" "}
+        <Text color={theme.dim}>{call.name}</Text>
         {summary ? <Text color={theme.dim}> — {summary}</Text> : null}
         {result?.isError ? <Text color={theme.status.error}> (error)</Text> : null}
       </Text>
     );
   }
+  const sections = renderExpanded(call, result);
   return (
     <Box flexDirection="column">
-      <Box borderStyle="single" borderColor={theme.border} paddingX={1}>
-        <Text>
-          <Text color={badgeColor}>●</Text>{" "}
-          <Text color={theme.dim}>⚙ {call.name}</Text>
-          {summary ? <Text color={theme.dim}> — {summary}</Text> : null}
-          {result?.isError ? <Text color={theme.status.error}> (error)</Text> : null}
-        </Text>
-      </Box>
-      <Box paddingLeft={1}>
-        <Box flexDirection="column">{renderExpanded(call, result)}</Box>
+      <Text>
+        <Text color={badgeColor}>{icons.statusDot}</Text>{" "}
+        <Text color={theme.dim}>{call.name}</Text>
+        {summary ? <Text color={theme.dim}> — {summary}</Text> : null}
+        {result?.isError ? <Text color={theme.status.error}> (error)</Text> : null}
+      </Text>
+      <Box flexDirection="row" paddingLeft={1}>
+        <Text color={theme.dim}>{icons.guide} </Text>
+        <Box flexDirection="column">
+          {sections.map((section, i) => (
+            <Fragment key={i}>
+              {i > 0 ? dottedSeparator(`sep-${i}`) : null}
+              {section}
+            </Fragment>
+          ))}
+        </Box>
       </Box>
     </Box>
   );

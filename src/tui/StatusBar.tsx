@@ -1,7 +1,7 @@
 import { Text, Box } from "ink";
 import type { HarnessState } from "./useHarnessState.js";
 import { formatUsageBar } from "./usage.js";
-import { theme } from "./theme.js";
+import { icons, theme } from "./theme.js";
 
 type StatusBarProps = Pick<
   HarnessState,
@@ -35,8 +35,7 @@ export function StatusBar({
       <Text> {model.provider}/{model.id}</Text>
       <Text color={theme.dim}> │ think:{thinkingLevel} </Text>
       <Text color={theme.dim}>│</Text>
-      <Text> ⚙{activeToolNames.length}</Text>
-      <Text color={theme.dim}> ⏵{queueLen}</Text>
+      <Text color={theme.dim}> tools:{activeToolNames.length} {icons.mode} queue:{queueLen}</Text>
       {queueLen > 0 ? (
         <Text color={theme.dim}>
           {" "}

@@ -1,0 +1,7 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Component patterns, theme.ts usage rules, forbidden patterns — all TUI components must follow these"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Code standards and forbidden patterns for frontend changes"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "Type patterns and validation rules for TypeScript changes"}
+{"file": ".trellis/tasks/07-02-tui-redesign/design.md", "reason": "Technical design: icon registry shape, guide-line row layout, per-component rendering contracts"}
+{"file": ".trellis/tasks/07-02-tui-redesign/implement.md", "reason": "Ordered execution checklist with per-step validation commands and rollback points"}
+{"file": ".trellis/tasks/07-02-tui-redesign/prd.md", "reason": "Requirements R1-R6, acceptance criteria, design direction confirmation"}

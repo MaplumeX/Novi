@@ -205,6 +205,12 @@ import { theme } from "../theme.js";
   width detection is used.
 - When adding a new color role, add it to `theme.ts` first, then consume it
   via `theme.*` — do not add a new hardcoded color literal in a component.
+- `theme.ts` also exports an `icons` constant registry — all visual glyphs
+  (spinner frames, status dots, guide lines, separators, prompt symbols)
+  must trace to a named `icons.*` constant. Never hardcode emoji or ad-hoc
+  unicode glyphs in a component; import from `icons` and consume via
+  `icons.*`. This keeps the glyph vocabulary centralized and avoids
+  monospace-alignment-breaking emoji in the TUI.
 
 ## Forbidden Patterns
 

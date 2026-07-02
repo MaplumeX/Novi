@@ -22,7 +22,7 @@ import { COMMANDS } from "./commands.js";
 import { parseBang, runBang } from "./bang.js";
 import { openExternalEditor } from "./external-editor.js";
 import { loadFileCandidates } from "./file-picker.js";
-import { theme, divider } from "./theme.js";
+import { theme, divider, icons } from "./theme.js";
 import { Spinner } from "./components/Spinner.js";
 
 interface InputBoxProps {
@@ -340,7 +340,7 @@ export function InputBox({
     <Box flexDirection="column">
       <Text color={theme.dim}>{divider()}</Text>
       <Text>
-        <Text color={theme.accent} bold>› </Text>
+        <Text color={theme.accent} bold>{icons.prompt} </Text>
         {before}
         <Text color={theme.dim}>▏</Text>
         {at}

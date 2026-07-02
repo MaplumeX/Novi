@@ -1,8 +1,6 @@
 import { useEffect, useState } from "react";
 import { Text } from "ink";
-import { theme } from "../theme.js";
-
-const FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+import { icons, theme } from "../theme.js";
 
 interface SpinnerProps {
   /** Ink color name; defaults to `theme.accent`. */
@@ -10,15 +8,15 @@ interface SpinnerProps {
 }
 
 /**
- * Pure React braille spinner — no external dependency.
+ * Pure React dingbat spinner — no external dependency.
  *
- * Cycles through `FRAMES` every 80ms via `setInterval`.
+ * Cycles through `icons.spinner` every 80ms via `setInterval`.
  */
 export function Spinner({ color }: SpinnerProps): React.ReactElement {
   const [i, setI] = useState(0);
   useEffect(() => {
-    const t = setInterval(() => setI((v) => (v + 1) % FRAMES.length), 80);
+    const t = setInterval(() => setI((v) => (v + 1) % icons.spinner.length), 80);
     return () => clearInterval(t);
   }, []);
-  return <Text color={color ?? theme.accent}>{FRAMES[i]}</Text>;
+  return <Text color={color ?? theme.accent}>{icons.spinner[i]}</Text>;
 }

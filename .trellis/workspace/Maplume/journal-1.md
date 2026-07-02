@@ -309,3 +309,36 @@ Added template fallback at end of runCommand: parseCommandArgs+substituteArgs fr
 ### Next Steps
 
 - None - task complete
+
+
+## Session 10: Implement child 6 noninteractive-modes (print + stdin + json)
+
+**Date**: 2026-07-02
+**Task**: Implement child 6 noninteractive-modes (print + stdin + json)
+**Branch**: `main`
+
+### Summary
+
+Added -p/--print (runPrint: subscribe message_end→stdout→exit0) + --mode json (runJson: projectEvent→JSONL→stdout). stdin merge when !isTTY. projectEvent whitelist covers 29 event types, no Model/function/signal leaks. Check fixed critical stdout-flush-before-exit bug (data loss in pipes) + added 14 event projection tests. 182 vitest green. Archived child 6.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `HEAD` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

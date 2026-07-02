@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 9
+- **Total Sessions**: 10
 - **Last Active**: 2026-07-02
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~311 | Active |
+| `journal-1.md` | ~344 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 10 | 2026-07-02 | Implement child 6 noninteractive-modes (print + stdin + json) | HEAD | `main` |
 | 9 | 2026-07-02 | Implement child 5 prompt-template-commands | HEAD | `main` |
 | 8 | 2026-07-02 | Implement child 4 session-management (/new /resume /name /session) | HEAD | `main` |
 | 7 | 2026-07-02 | Implement child 3 message-queue-ux (steer/followUp/Esc-restore/Alt-Up) | HEAD | `main` |

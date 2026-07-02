@@ -216,20 +216,38 @@ export const COMMANDS: readonly Command[] = [
   },
   {
     name: "model",
-    description: "Show or switch the active model (provider/modelId)",
+    description: "Show or switch the active model (/model [provider/]<modelId>)",
     run: async (ctx, args) => {
       const current = ctx.harness.getModel();
       if (!args) {
-        ctx.print(`Current model: ${current.provider}/${current.id}`);
+        // List the current provider's models with the active one marked.
+        const providerModels = ctx.models.getModels(current.provider);
+        const lines = [`Current model: ${current.provider}/${current.id}`];
+        if (providerModels.length > 0) {
+          lines.push(`Models for ${current.provider}:`);
+          for (const m of providerModels) {
+            const marker = m.id === current.id ? "›" : " ";
+            lines.push(`  ${marker} ${m.id}`);
+          }
+          lines.push(
+            `Switch with: /model <modelId>  or  /model <provider>/<modelId>`,
+          );
+        }
+        ctx.print(lines.join("\n"));
         return;
       }
+      // `<modelId>` (no slash) → switch within the current provider.
+      // `<provider>/<modelId>` → cross-provider switch (existing behavior).
+      let provider: string;
+      let modelId: string;
       const sep = args.indexOf("/");
       if (sep <= 0) {
-        ctx.print("Usage: /model <provider>/<modelId>");
-        return;
+        provider = current.provider;
+        modelId = args;
+      } else {
+        provider = args.slice(0, sep);
+        modelId = args.slice(sep + 1);
       }
-      const provider = args.slice(0, sep);
-      const modelId = args.slice(sep + 1);
       const model = ctx.models.getModel(provider, modelId);
       if (!model) {
         ctx.print(`Model not found: ${provider}/${modelId}`);

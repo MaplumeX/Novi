@@ -210,6 +210,84 @@ describe("runCommand — prompt-template fallback", () => {
   });
 });
 
+describe("runCommand — /model", () => {
+  function makeModelCtx(opts: {
+    current?: { provider: string; id: string };
+    models?: Array<{ provider: string; id: string }>;
+  }): { ctx: CommandContext; setModelSpy: ReturnType<typeof vi.fn> } {
+    const current = opts.current ?? { provider: "anthropic", id: "claude-x" };
+    const models = opts.models ?? [
+      { provider: "anthropic", id: "claude-x" },
+      { provider: "anthropic", id: "claude-y" },
+    ];
+    const setModelSpy = vi.fn().mockResolvedValue(undefined);
+    const ctx = {
+      harness: {
+        getModel: () => current,
+        setModel: setModelSpy,
+        getResources: () => ({ skills: [], promptTemplates: [] }),
+      },
+      models: {
+        getModel: (p: string, id: string) =>
+          models.find((m) => m.provider === p && m.id === id),
+        getModels: (p?: string) =>
+          models.filter((m) => !p || m.provider === p),
+      },
+      session: {},
+      sessionsDir: "/tmp/sessions",
+      isIdle: true,
+      exit: vi.fn(),
+      print: vi.fn(),
+      handle: { replace: vi.fn() },
+      setOverlay: vi.fn(),
+      env: {},
+      cwd: "/tmp",
+      systemPrompt: () => "",
+      cliOverrides: {},
+      setSettings: vi.fn(),
+      queue: { steer: [], followUp: [], nextTurn: [] },
+    } as unknown as CommandContext;
+    return { ctx, setModelSpy };
+  }
+
+  it("lists current provider models with the active one marked when no args", async () => {
+    const { ctx } = makeModelCtx({});
+    await runCommand("/model", ctx);
+    const printed = (ctx.print as ReturnType<typeof vi.fn>).mock.calls[0]![0] as string;
+    expect(printed).toContain("Current model: anthropic/claude-x");
+    expect(printed).toContain("Models for anthropic:");
+    expect(printed).toContain("  › claude-x");
+    expect(printed).toContain("    claude-y");
+    expect(printed).toContain("Switch with: /model <modelId>");
+  });
+
+  it("switches within current provider when given a bare modelId", async () => {
+    const { ctx, setModelSpy } = makeModelCtx({});
+    await runCommand("/model claude-y", ctx);
+    expect(setModelSpy).toHaveBeenCalledWith({ provider: "anthropic", id: "claude-y" });
+    expect(ctx.print).toHaveBeenCalledWith("Switched to anthropic/claude-y.");
+  });
+
+  it("switches across providers with provider/modelId", async () => {
+    const { ctx, setModelSpy } = makeModelCtx({
+      models: [
+        { provider: "anthropic", id: "claude-x" },
+        { provider: "openai", id: "gpt-5" },
+      ],
+    });
+    await runCommand("/model openai/gpt-5", ctx);
+    expect(setModelSpy).toHaveBeenCalledWith({ provider: "openai", id: "gpt-5" });
+    expect(ctx.print).toHaveBeenCalledWith("Switched to openai/gpt-5.");
+  });
+
+  it("reports not found for an unknown model in current provider", async () => {
+    const { ctx, setModelSpy } = makeModelCtx({});
+    await runCommand("/model nope", ctx);
+    expect(setModelSpy).not.toHaveBeenCalled();
+    expect(ctx.print).toHaveBeenCalledWith("Model not found: anthropic/nope");
+  });
+});
+
 describe("runCommand — /templates", () => {
   it("lists name and description of loaded templates", async () => {
     const { ctx } = makeCtx({

@@ -1,1 +1,4 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/pi-agent-core-api.md", "reason": "harness.getResources().promptTemplates; promptFromTemplate; pi-agent-core exports substituteArgs/parseCommandArgs"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "commands.ts is TUI layer; runCommand fallback pattern"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "template prompt failure must surface as notice; busy guard for promptFromTemplate"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "template invocation uses shared substituteArgs (single decoder), not local re-parse"}

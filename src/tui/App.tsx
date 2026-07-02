@@ -74,6 +74,7 @@ function App({
   const [overlay, setOverlay] = useState<Overlay>(null);
   const [settings, setSettings] = useState(resolvedSettings);
   const [editorState, setEditorState] = useState<EditorState>({ text: "", cursor: 0 });
+  const [toolExpanded, setToolExpanded] = useState(false);
 
   const print = (text: string): void => {
     setNotice(text.split("\n"));
@@ -167,8 +168,12 @@ function App({
   }
 
   // Ctrl-C aborts the current turn / exits. When an overlay is open, Ctrl-C
-  // closes the overlay instead.
+  // closes the overlay instead. Ctrl-O toggles tool call expansion.
   useInput((value, key) => {
+    if (key.ctrl && value === "o") {
+      setToolExpanded((v) => !v);
+      return;
+    }
     if (key.ctrl && value === "c") {
       if (overlay !== null) {
         setOverlay(null);
@@ -186,7 +191,9 @@ function App({
       <MessageList
         messages={state.messages}
         streamingText={state.streamingText}
+        streamingThinking={state.streamingThinking}
         streamingToolCalls={state.streamingToolCalls}
+        toolExpanded={toolExpanded}
       />
       {notice.length > 0
         ? notice.map((line, i) => (
@@ -262,7 +269,9 @@ function App({
         />
       ) : null}
       <Text dimColor>session: {handle.sessionPath}</Text>
-      <Text dimColor>/help for commands · Ctrl-C to exit</Text>
+      <Text dimColor>
+        /help for commands · Ctrl-C to exit · Ctrl-O: {toolExpanded ? "collapse" : "expand"}
+      </Text>
     </>
   );
 }

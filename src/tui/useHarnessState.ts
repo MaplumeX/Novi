@@ -46,6 +46,8 @@ export interface HarnessState {
   messages: AgentMessage[];
   /** Accumulated assistant text for the current streaming response. */
   streamingText: string;
+  /** Accumulated thinking text for the current streaming response. */
+  streamingThinking: string;
   /** Tool calls currently executing (or just finished this turn). */
   streamingToolCalls: ToolCallView[];
   /** Active model, kept in sync with `model_update` events. */
@@ -82,6 +84,7 @@ export function useHarnessState(
     phase: "idle",
     messages: [],
     streamingText: "",
+    streamingThinking: "",
     streamingToolCalls: [],
     model: harness.getModel(),
     thinkingLevel: harness.getThinkingLevel(),
@@ -136,13 +139,19 @@ export function useHarnessState(
           break;
         case "message_start":
           if (event.message.role === "assistant") {
-            setState((prev) => ({ ...prev, streamingText: "" }));
+            setState((prev) => ({ ...prev, streamingText: "", streamingThinking: "" }));
           }
           break;
         case "message_update": {
           const ame = event.assistantMessageEvent;
           if (ame.type === "text_delta") {
             setState((prev) => ({ ...prev, streamingText: prev.streamingText + ame.delta }));
+          } else if (ame.type === "thinking_start") {
+            setState((prev) => ({ ...prev, streamingThinking: "" }));
+          } else if (ame.type === "thinking_delta") {
+            setState((prev) => ({ ...prev, streamingThinking: prev.streamingThinking + ame.delta }));
+          } else if (ame.type === "thinking_end") {
+            setState((prev) => ({ ...prev, streamingThinking: ame.content }));
           }
           break;
         }
@@ -157,6 +166,8 @@ export function useHarnessState(
             const isAssistantMsg = event.message.role === "assistant";
             const streamingText =
               isAssistantMsg ? "" : undefined;
+            const streamingThinking =
+              isAssistantMsg ? "" : undefined;
             // Project usage from the just-finished assistant message. Skipped
             // for other roles (no usage block). See usage.ts for the single
             // projection owner. Inline the role check so TS narrows
@@ -168,6 +179,7 @@ export function useHarnessState(
               ...prev,
               messages,
               streamingText: streamingText === undefined ? prev.streamingText : streamingText,
+              streamingThinking: streamingThinking === undefined ? prev.streamingThinking : streamingThinking,
               lastUsage: usageDelta ?? prev.lastUsage,
               cumulativeUsage: usageDelta
                 ? addUsage(prev.cumulativeUsage, usageDelta)
@@ -218,6 +230,7 @@ export function useHarnessState(
             ...prev,
             phase: "idle",
             streamingText: "",
+            streamingThinking: "",
             streamingToolCalls: [],
           }));
           break;

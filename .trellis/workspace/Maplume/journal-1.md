@@ -408,3 +408,38 @@ Parent task complete. All 7 children implemented+checked+archived: (1)config-per
 ### Next Steps
 
 - None - task complete
+
+
+## Session 13: novi first-run provider onboarding
+
+**Date**: 2026-07-02
+**Task**: novi first-run provider onboarding
+**Branch**: `main`
+
+### Summary
+
+Added a first-run onboarding wizard so Novi bootstraps a setup flow (provider select → API key entry → model select) instead of erroring out when no provider credentials are configured. New credentials store at ~/.novi/credentials.json (0600, injected into process.env at bootstrap, never overwrites user-set vars). Headless mode prints friendly guidance and exits. /settings gains a read-only masked credentials section. Updated backend specs with the credentials store pattern and the findEnvKeys/compat sentinel trick for env-var enumeration.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `51fcbe4` | (see git log) |
+| `8bed864` | (see git log) |
+| `f9cbbcf` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

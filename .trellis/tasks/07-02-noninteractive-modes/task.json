@@ -3,7 +3,7 @@
   "name": "noninteractive-modes",
   "title": "E: non-interactive modes (print + stdin + json)",
   "description": "",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

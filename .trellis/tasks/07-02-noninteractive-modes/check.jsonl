@@ -1,1 +1,4 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/pi-agent-core-api.md", "reason": "verify projectEvent covers all event types correctly; no private field access"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "verify failure paths exit 1 with stderr; no silent swallow"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "verify stderr vs stdout separation (print/json output on stdout only)"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "verify projectEvent is single decoder; runPrint/runJson consume projected output"}

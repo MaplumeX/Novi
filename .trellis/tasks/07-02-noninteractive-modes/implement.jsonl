@@ -1,1 +1,4 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/pi-agent-core-api.md", "reason": "AgentEvent union types (message_start/update/end, turn_*, agent_end, tool_execution_*, queue_update, model_update); harness.subscribe + prompt signatures"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "print/json mode failures must exit 1 with stderr; bootstrap errors already handled by cli.fail"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "stderr for errors/warnings; stdout for print/json output only"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "projectEvent is the single event→plain-object decoder for headless mode; consumers use projected output, not raw events"}

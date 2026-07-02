@@ -144,3 +144,36 @@ Final child: skills loading (loadSourcedSkills user+project, dedupe project-wins
 ### Next Steps
 
 - None - task complete
+
+
+## Session 5: Plan novi-v2 feature completion + implement child 1 (config-personalization)
+
+**Date**: 2026-07-02
+**Task**: Plan novi-v2 feature completion + implement child 1 (config-personalization)
+**Branch**: `main`
+
+### Summary
+
+Planned Novi agent v2 L3 iteration: parent + 7 child (A-F). Brainstormed scope excluding Extensions (G) and export/share (H). Confirmed /settings interactive form, /new/resume in-process (no fork/clone), full JSON event stream + stdin merge for -p, provider-level retry only. Implemented child 1 config-personalization: src/settings.ts (global/project merge + _sources + writeSettings AgileMerge), AGENTS.md candidate path scan, SYSTEM.md/APPEND_SYSTEM.md + legacy system-prompt.md fallback, interactive /settings overlay form, /reload rebuild harness + replay via HarnessHandle.replayHarnessState (public getters only). Check fixed: /reload now re-reads settings (was replaying from old harness); removed orphan bootstrap.reloadSettings + re-export. 71 vitest green. Spec updates: HarnessHandle rebuild pattern + overlay pattern + settings merge rules + useHarnessState handle deps. Archived child 1.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a3d58d1` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

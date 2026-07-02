@@ -83,3 +83,130 @@ await harness.setTools(tools, tools.map(t => t.name));
 ```
 
 （源码确认：`setTools` 中 `const nextActiveToolNames = activeToolNames ? [...activeToolNames] : this.activeToolNames;`）
+
+## Harness 重建模式（HarnessHandle + replayHarnessState）
+
+`AgentHarness` 无 session 热切 API（见上「Session 持久化」+ research/harness-session-swap.md）。
+`/reload`（重载 settings/skills/prompts/contextFiles）和 `/new`/`/resume`（session 切换，
+child 4）都**必须重建整个 `AgentHarness` 实例**。
+
+### HarnessHandle 接口
+
+Novi 在 `src/tui/harness-handle.ts` 定义可替换的 harness 句柄，`<App>` 持其为 React state：
+
+```ts
+export interface HarnessHandle {
+  harness: AgentHarness;
+  session: Session<JsonlSessionMetadata>;
+  sessionPath: string;
+  /** 重建 harness 并 setState。session 省略=复用当前(/reload)；传入=切换(child 4)。 */
+  replace: (next: ReplaceOptions) => Promise<void>;
+}
+```
+
+### replace 流程
+
+```
+1. await oldHarness.waitForIdle()     // 确保不在 turn 中
+2. unsubscribe()                       // useHarnessState useEffect cleanup 自动做
+3. session = next.session ?? old.session  // /reload 复用；/new /resume 传入新 session
+4. new AgentHarness({ env, session, models, model: old.getModel(), systemPrompt })
+5. await replayHarnessState(newHarness, oldHarness, env, cwd, { reloadResources })
+6. setHandle(newHandle)                // 触发 useHarnessState 重订阅
+```
+
+### replayHarnessState —— 全走 public getter
+
+replay 不能读 harness 的 private `resources`/`tools` 字段。全部走 public getter：
+
+```ts
+export async function replayHarnessState(
+  newHarness: AgentHarness,
+  oldHarness: AgentHarness,
+  env: ExecutionEnv,
+  cwd: string,
+  opts: { reloadResources?: boolean } = {},
+): Promise<void> {
+  // 1. Tools: 重建 built-in set + 恢复 activeToolNames（从 old.getActiveTools()）
+  const tools = createBuiltinTools(env);
+  const activeToolNames = oldHarness.getActiveTools().map(t => t.name);
+  await newHarness.setTools(tools, activeToolNames);  // ← 必须传 activeToolNames！
+
+  // 2. Model + thinking level
+  await newHarness.setModel(oldHarness.getModel());
+  await newHarness.setThinkingLevel(oldHarness.getThinkingLevel());
+
+  // 3. Stream options (timeout/retry)
+  await newHarness.setStreamOptions(oldHarness.getStreamOptions());
+
+  // 4. Resources: reload from disk 或 carry over
+  if (opts.reloadResources) {
+    const loaded = await loadResources(env, cwd);
+    await newHarness.setResources({ skills: loaded.skills, promptTemplates: loaded.promptTemplates });
+  } else {
+    await newHarness.setResources(oldHarness.getResources());
+  }
+}
+```
+
+> **关键**：`setTools(tools)` 不传第二参数会沿用上一次的 `activeToolNames`（见上节），
+> 但新 harness 初值为 `[]`，所以 replay **必须**显式传 `activeToolNames`，否则 0 个工具 active。
+
+### 递归闭包模式
+
+`createHarnessHandle` 用递归闭包确保每次 `replace` 调用都引用自身所属的 handle：
+
+```ts
+function makeReplace(old: HarnessHandle): HarnessHandle["replace"] {
+  return async (next) => {
+    // ... rebuild, replay ...
+    const newHandle: HarnessHandle = { harness: newHarness, session, sessionPath, replace: async () => {} };
+    newHandle.replace = makeReplace(newHandle);  // ← 递归绑定
+    setHandle(newHandle);
+  };
+}
+```
+
+### useHarnessState 依赖
+
+`useHarnessState(handle.harness, handle.session)` 的 `useEffect` 依赖数组为 `[harness, session]`。
+当 `handle.replace` 调 `setHandle` 时，`handle.harness` identity 变化 → effect cleanup
+（`unsubscribe()`）自动执行 → 新 effect 以新 harness 重订阅 + `reloadMessages()`。
+
+### 已验证的 public getter/setter
+
+以下方法在 harness 重建场景中验证可用：
+
+| 方法 | 用途 |
+|------|------|
+| `getModel()` | replay model |
+| `getThinkingLevel()` | replay thinking |
+| `getActiveTools()` | replay active tool names |
+| `getResources()` | carry over resources |
+| `getStreamOptions()` | replay stream options |
+| `setModel(model)` | set on new harness |
+| `setThinkingLevel(level)` | set on new harness |
+| `setTools(tools, activeToolNames?)` | set on new harness |
+| `setResources(resources)` | set on new harness |
+| `setStreamOptions(opts)` | set on new harness |
+| `waitForIdle()` | 确保不在 turn 中 |
+| `subscribe(fn)` → `unsubscribe` | 事件订阅/重订阅 |
+
+## systemPrompt 回调约定
+
+`AgentHarness` 构造参数 `systemPrompt` 可为 `string | (ctx) => string | Promise<string>`。
+Novi 用回调形式（`makeSystemPromptProvider(cwd)`），每次 turn 重新组装 prompt。
+
+### 拼接顺序（不可变约定）
+
+```
+[base, appendBlock, contextBlock, skillsBlock].filter(nonEmpty).join("\n\n")
+```
+
+1. **base**：`.novi/SYSTEM.md`(项目) → `~/.novi/SYSTEM.md`(全局) → `.novi/system-prompt.md`(兼容) → `~/.novi/system-prompt.md`(兼容) → `DEFAULT_SYSTEM_PROMPT`。取第一个非空，project > global > compat > default。
+2. **appendBlock**：`.novi/APPEND_SYSTEM.md`(项目) + `~/.novi/APPEND_SYSTEM.md`(全局)。两层都存在则都追加（项目在前）。
+3. **contextBlock**：AGENTS.md 候选路径（`~/.novi/AGENTS.md` + cwd 向上父目录各级 `AGENTS.md` + `<cwd>/AGENTS.md`），去重，顺序拼接。
+4. **skillsBlock**：`formatSkillsForSystemPrompt(resources.skills)`。
+
+> **注意**：base 是**替换**（取第一个非空），appendBlock/contextBlock/skillsBlock 是**追加**。
+> SYSTEM.md 替换默认 prompt 但保留 append + context + skills 拼接。

@@ -11,12 +11,13 @@ State is plain React: `useState` + `useRef` + a single custom hook
 (`useHarnessState`). The harness itself is the source of truth for
 agent/session state; the TUI mirrors it via event subscription.
 
-There are three categories of state:
+There are four categories of state:
 
 | Category | Mechanism | Owner |
 |----------|-----------|-------|
 | Agent/session state (messages, phase, model, queue, tools) | `HarnessState` via `useHarnessState` | `App.tsx` passes down as props |
-| Local UI state (notice, input buffer) | `useState` in the component | `App.tsx` / `InputBox.tsx` |
+| HarnessHandle state (replaceable harness + session) | `useState<HarnessHandle>` in `App` | `App.tsx` — `handle.replace()` triggers re-subscription |
+| Local UI state (notice, input buffer, overlay) | `useState` in the component | `App.tsx` / `InputBox.tsx` |
 | Synchronous mirror (latest messages for async callbacks) | `useRef` | `useHarnessState.ts` |
 
 ---
@@ -45,6 +46,32 @@ Display components (MessageList, StatusBar, InputBox)
 ---
 
 ## Patterns
+
+### HarnessHandle as React state
+
+`App.tsx` holds a `HarnessHandle` (not a raw `AgentHarness`) as `useState`.
+The handle's `replace()` method rebuilds the harness and calls `setHandle`,
+which changes `handle.harness` identity. Since `useHarnessState` depends on
+`[harness, session]`, this automatically triggers unsubscribe → re-subscribe
+→ `reloadMessages()`. This is the mechanism behind `/reload` and session
+switching (`/new`, `/resume`).
+
+```tsx
+const [handle, setHandle] = useState<HarnessHandle>(() =>
+  createHarnessHandle({ harness, session, sessionPath }, { env, models, cwd, systemPrompt, setHandle }),
+);
+const state = useHarnessState(handle.harness, handle.session);
+```
+
+### Overlay state
+
+`App.tsx` owns an `Overlay` union (`null | { kind: "settings" }`). When
+non-null, the overlay component replaces `InputBox` in the render tree (see
+`component-guidelines.md` § "Overlay Pattern").
+
+```tsx
+const [overlay, setOverlay] = useState<Overlay>(null);
+```
 
 ### Pass slices, not the whole store
 

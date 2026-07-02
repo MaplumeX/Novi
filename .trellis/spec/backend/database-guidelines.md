@@ -71,6 +71,30 @@ non-fatal warnings.
 
 ---
 
+## Settings Files
+
+Novi loads settings from `~/.novi/settings.json` (global) and
+`<cwd>/.novi/settings.json` (project) via `src/settings.ts`. The merge rule:
+
+- **Shallow one-level merge**: top-level keys are combined; nested objects are
+  merged one level deep (spread), with project overriding global.
+- Nested objects at depth > 1 are **replaced wholesale** by the project layer,
+  not deep-merged.
+- Unknown keys are preserved (forward-compat).
+- Precedence: CLI flag > project settings > global settings > built-in default.
+- Parse failures degrade to an empty layer + `stderr` warning; startup is
+  never blocked.
+
+`ResolvedSettings` carries `_sources: Record<string, SettingSource>` so the
+`/settings` form can display per-leaf provenance (`"global" | "project" |
+"cli" | "default"`).
+
+`writeSettings(env, targetPath, patch)` uses dot-path keys
+(e.g. `"compaction.enabled"`) to shallow-merge into existing JSON. Creates
+parent dirs if missing. A `null`/`undefined` value removes the key.
+
+---
+
 ## Forbidden Patterns
 
 - Do not introduce a database (SQLite, Prisma, etc.) without an explicit task.

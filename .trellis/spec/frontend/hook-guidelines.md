@@ -46,7 +46,9 @@ Key conventions enforced here:
 - **Cleanup on unmount.** The `useEffect` returns an unsubscribe + `cancelled`
   flag so async reloads after unmount are ignored.
 - **Dependencies.** `[harness, session]` — re-subscribes if either identity
-  changes.
+  changes. In practice these come from `handle.harness` / `handle.session`,
+  so `handle.replace()` (which sets a new handle with a new harness) triggers
+  re-subscription automatically.
 - **Synchronous ref mirror.** A `useRef<AgentMessage[]>` mirrors
   `messages` so post-turn handlers (`settled`) can read the latest history
   outside React's render cycle.

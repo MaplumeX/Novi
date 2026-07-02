@@ -36,17 +36,25 @@ export function StatusBar({ phase, model, … }: StatusBarProps): React.ReactEle
 
 Use `Pick<HarnessState, …>` to declare exactly which slices a component needs.
 
-### One root component owns the harness
+### One root component owns the HarnessHandle
 
-`App.tsx` is the only component that receives the `harness` / `session` /
-`models` instances. It passes derived state down as props:
+`App.tsx` is the only component that receives a `HarnessHandle` (containing
+`harness` / `session` / `sessionPath` / `replace()`). It holds the handle as
+React state and passes derived state down as props:
 
 ```tsx
-function App({ harness, session, sessionPath, models, sessionsDir }: AppProps) {
-  const state = useHarnessState(harness, session);
+function App({ initialHandle, models, sessionsDir, ... }: AppProps) {
+  const [handle, setHandle] = useState<HarnessHandle>(() =>
+    createHarnessHandle({ harness, session, sessionPath }, { env, models, cwd, systemPrompt, setHandle }),
+  );
+  const state = useHarnessState(handle.harness, handle.session);
   // … passes state.messages, state.phase, etc. to children
 }
 ```
+
+`handle.replace()` rebuilds the underlying `AgentHarness` and calls
+`setHandle`, which triggers `useHarnessState` to re-subscribe. See
+`backend/pi-agent-core-api.md` § "Harness 重建模式" for the full flow.
 
 ### Local state only for UI concerns
 
@@ -88,12 +96,63 @@ export function MessageList(…): React.ReactElement { … }
 ## Composition
 
 - Compose via children / fragments, not deep prop drilling. `App` returns a
-  `<>` fragment with `MessageList`, `StatusBar`, and `InputBox` siblings.
+  `<>` fragment with `MessageList`, `StatusBar`, and either `InputBox` or an
+  overlay component (see below) as siblings.
 - Keyed lists use the index for short-lived render output (acceptable for
   markdown tokens / notice lines):
   ```tsx
   {notice.map((line, i) => <Text key={i} …>)}
   ```
+
+---
+
+## Overlay Pattern
+
+The editor area (where `InputBox` normally renders) can be temporarily
+replaced by an overlay component. This is used by `/settings` (child 1) and
+will be reused by child 2 (file picker).
+
+### Overlay union state
+
+```tsx
+/** Overlay union: null = normal input; settings = interactive form. */
+type Overlay = null | { kind: "settings" };
+// child 2 will extend: | { kind: "filePicker"; query: string; cursor: number }
+
+const [overlay, setOverlay] = useState<Overlay>(null);
+```
+
+### Render branch
+
+```tsx
+{overlay === null ? (
+  <InputBox phase={…} onPrompt={…} onCommand={…} />
+) : overlay.kind === "settings" ? (
+  <SettingsForm settings={…} onExit={() => setOverlay(null)} onReload={…} />
+) : null}
+```
+
+**Critical**: when an overlay is open, `InputBox` is **not mounted** — its
+`useInput` is not active. This prevents duplicate key handling. The overlay
+component owns its own `useInput`.
+
+Ctrl-C while an overlay is open closes the overlay instead of exiting:
+
+```tsx
+useInput((value, key) => {
+  if (key.ctrl && value === "c") {
+    if (overlay !== null) { setOverlay(null); return; }
+    // … normal exit flow
+  }
+});
+```
+
+### Adding a new overlay kind
+
+1. Add a variant to the `Overlay` union.
+2. Add a render branch in `App.tsx`.
+3. Create the overlay component with its own `useInput`.
+4. Ensure `InputBox` is not mounted when the overlay is active.
 
 ---
 

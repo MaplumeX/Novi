@@ -276,3 +276,36 @@ In-process session switch via handle.replace. /new: repo.create+replace (replace
 ### Next Steps
 
 - None - task complete
+
+
+## Session 9: Implement child 5 prompt-template-commands
+
+**Date**: 2026-07-02
+**Task**: Implement child 5 prompt-template-commands
+**Branch**: `main`
+
+### Summary
+
+Added template fallback at end of runCommand: parseCommandArgs+substituteArgs from pi-agent-core → harness.prompt. /templates lists name+description. Builtin priority. Check: no issues, added test for empty-arg substitution. 156 vitest green. Archived child 5.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `HEAD` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

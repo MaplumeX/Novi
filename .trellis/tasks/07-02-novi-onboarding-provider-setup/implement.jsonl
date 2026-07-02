@@ -1,0 +1,11 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "backend index, directory structure + persistence + error-handling overview for credentials.ts/cli.ts/bootstrap.ts"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "new module placement (credentials.ts) must follow backend dir conventions"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "cli startup branching and headless fail/message strategy must follow error conventions"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "credentials.json 0600 persistence pattern + JSON storage conventions"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "headless guidance output + onboarding diagnostics go to stderr per logging conventions"}
+{"file": ".trellis/spec/backend/pi-agent-core-api.md", "reason": "verified pi-ai/pi-agent-core public API (Models/getAuth/findEnvKeys/getBuiltinProviders) contracts"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "frontend index for OnboardingWizard.tsx + SettingsForm.tsx changes"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "OnboardingWizard wizard component must follow component patterns"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "wizard step state + bootstrap re-entry after onComplete"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "Overlay/props typing for new onboarding overlay variant"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "task spans backend (cli/bootstrap/credentials) + frontend (wizard) layers"}

@@ -1,0 +1,10 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "backend index for reviewing credentials/cli/bootstrap changes"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "headless fail strategy + startup branching error conventions"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "credentials.json 0600 storage + JSON persistence conventions to verify"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "verify headless guidance + onboarding diagnostics follow logging conventions"}
+{"file": ".trellis/spec/backend/pi-agent-core-api.md", "reason": "verify pi-ai API usage (findEnvKeys/getAuth/getBuiltinProviders) per verified contract"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "frontend index for checking OnboardingWizard + SettingsForm changes"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "verify wizard component follows component patterns"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "verify wizard step state + bootstrap re-entry patterns"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "verify TypeScript typing for onboarding overlay variant"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "cross-layer review since task spans backend + frontend"}

@@ -342,3 +342,36 @@ Added -p/--print (runPrint: subscribe message_end→stdout→exit0) + --mode jso
 ### Next Steps
 
 - None - task complete
+
+
+## Session 11: Implement child 7 observability (StatusBar usage + /session + retry)
+
+**Date**: 2026-07-02
+**Task**: Implement child 7 observability (StatusBar usage + /session + retry)
+**Branch**: `main`
+
+### Summary
+
+Added usage projection (lastUsage+cumulativeUsage in useHarnessState, recompute on reload/resume). usage.ts pure functions (summarizeUsage/formatUsageBar/formatTokens/formatCost) with 18 tests. StatusBar shows tok:Xk cost:$Y ctx:Z%. /session adds tokens/cost/contextWindow/retry(getStreamOptions). Check: no issues. 200 vitest green. Archived child 7.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `HEAD` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

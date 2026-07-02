@@ -243,3 +243,36 @@ Wired steer/followUp/abort-restore/Alt+Up into InputBox. Enter turn=steer, Alt+E
 ### Next Steps
 
 - None - task complete
+
+
+## Session 8: Implement child 4 session-management (/new /resume /name /session)
+
+**Date**: 2026-07-02
+**Task**: Implement child 4 session-management (/new /resume /name /session)
+**Branch**: `main`
+
+### Summary
+
+In-process session switch via handle.replace. /new: repo.create+replace (replaces stub). /resume: repo.list+SessionPicker overlay+repo.open. /name: session.appendSessionName (persistent session_info entry). /session: file/id/messages/name. Check fixed /session count to filter type=message only. 143 vitest green. Archived child 4.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `HEAD` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

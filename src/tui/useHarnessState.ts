@@ -8,6 +8,14 @@ import type {
 import type { JsonlSessionMetadata } from "@earendil-works/pi-agent-core/node";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { AutoCompactor, CONTEXT_WINDOW_FALLBACK } from "../compaction.js";
+import {
+  addUsage,
+  lastUsageSummary,
+  summarizeUsage,
+  usageToSummary,
+  ZERO_USAGE,
+  type UsageSummary,
+} from "./usage.js";
 
 export type Phase = "idle" | "turn" | "compaction";
 
@@ -48,6 +56,11 @@ export interface HarnessState {
   activeToolNames: string[];
   /** Queued steer/followUp/nextTurn messages, projected from `queue_update`. */
   queue: QueueState;
+  /** Most recent assistant usage projection (undefined until first turn, or
+   *  after resume with no assistant messages). */
+  lastUsage: UsageSummary | undefined;
+  /** Cumulative usage across all assistant messages in the branch. */
+  cumulativeUsage: UsageSummary;
 }
 
 /**
@@ -74,6 +87,8 @@ export function useHarnessState(
     thinkingLevel: harness.getThinkingLevel(),
     activeToolNames: harness.getActiveTools().map((t) => t.name),
     queue: { steer: [], followUp: [], nextTurn: [] },
+    lastUsage: undefined,
+    cumulativeUsage: { ...ZERO_USAGE },
   }));
 
   // Synchronously-current messages mirror for handlers that need the latest
@@ -97,7 +112,12 @@ export function useHarnessState(
           .filter((e): e is Extract<typeof e, { type: "message" }> => e.type === "message")
           .map((e) => e.message);
         messagesRef.current = msgs;
-        setState((prev) => ({ ...prev, messages: msgs }));
+        setState((prev) => ({
+          ...prev,
+          messages: msgs,
+          lastUsage: lastUsageSummary(msgs),
+          cumulativeUsage: summarizeUsage(msgs),
+        }));
       } catch {
         // Reload is best-effort; live events still drive state.
       }
@@ -134,12 +154,24 @@ export function useHarnessState(
           {
             const messages = [...messagesRef.current, event.message];
             messagesRef.current = messages;
+            const isAssistantMsg = event.message.role === "assistant";
             const streamingText =
-              event.message.role === "assistant" ? "" : undefined;
+              isAssistantMsg ? "" : undefined;
+            // Project usage from the just-finished assistant message. Skipped
+            // for other roles (no usage block). See usage.ts for the single
+            // projection owner. Inline the role check so TS narrows
+            // `event.message` to AssistantMessage before reading `.usage`.
+            const usageDelta = event.message.role === "assistant"
+              ? usageToSummary(event.message.usage)
+              : undefined;
             setState((prev) => ({
               ...prev,
               messages,
               streamingText: streamingText === undefined ? prev.streamingText : streamingText,
+              lastUsage: usageDelta ?? prev.lastUsage,
+              cumulativeUsage: usageDelta
+                ? addUsage(prev.cumulativeUsage, usageDelta)
+                : prev.cumulativeUsage,
             }));
           }
           break;

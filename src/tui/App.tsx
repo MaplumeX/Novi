@@ -201,6 +201,8 @@ function App({
         thinkingLevel={state.thinkingLevel}
         activeToolNames={state.activeToolNames}
         queue={state.queue}
+        lastUsage={state.lastUsage}
+        cumulativeUsage={state.cumulativeUsage}
       />
       {overlay === null ? (
         <InputBox

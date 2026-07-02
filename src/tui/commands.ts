@@ -21,6 +21,7 @@ import { loadSettings, resolveSettings } from "../settings.js";
 import type { BootstrapResult } from "../bootstrap.js";
 import type { QueueState } from "./useHarnessState.js";
 import { messageText } from "./queue-helpers.js";
+import { summarizeUsage, formatTokens, formatCost } from "./usage.js";
 
 export interface ParsedCommand {
   name: string;
@@ -361,12 +362,24 @@ export const COMMANDS: readonly Command[] = [
       try {
         const meta = await ctx.session.getMetadata();
         const branch = await ctx.session.getBranch();
-        const messageCount = branch.filter((e) => e.type === "message").length;
+        const messageEntries = branch.filter((e) => e.type === "message");
+        const messages = messageEntries.map((e) => e.message);
+        const usage = summarizeUsage(messages);
+        const model = ctx.harness.getModel();
+        const contextWindow = model.contextWindow ?? 0;
+        const cumulativeTokens =
+          usage.inputTokens + usage.outputTokens +
+          usage.cacheReadTokens + usage.cacheWriteTokens;
+        const hasUsage =
+          usage.inputTokens !== 0 || usage.outputTokens !== 0 ||
+          usage.cacheReadTokens !== 0 || usage.cacheWriteTokens !== 0 ||
+          usage.cost !== 0;
+        const retry = ctx.harness.getStreamOptions();
         const lines = [
           "Session:",
           `  file: ${meta.path}`,
           `  id: ${meta.id}`,
-          `  messages: ${messageCount}`,
+          `  messages: ${messageEntries.length}`,
         ];
         try {
           const name = await ctx.session.getSessionName();
@@ -374,6 +387,13 @@ export const COMMANDS: readonly Command[] = [
         } catch {
           // session without a name — omit
         }
+        lines.push(
+          `  tokens: ${hasUsage ? formatTokens(cumulativeTokens) : "-"} ` +
+            `(${hasUsage ? `${formatTokens(usage.inputTokens)} in / ${formatTokens(usage.outputTokens)} out` : "no usage"})`,
+          `  cost: ${formatCost(usage.cost, hasUsage)}`,
+          `  context window: ${contextWindow > 0 ? formatTokens(contextWindow) : "-"}`,
+          `  retry: timeout=${retry.timeoutMs ?? "-"} retries=${retry.maxRetries ?? "-"} maxDelay=${retry.maxRetryDelayMs ?? "-"}`,
+        );
         ctx.print(lines.join("\n"));
       } catch (e) {
         ctx.print(`Session info failed: ${e instanceof Error ? e.message : String(e)}`);

@@ -18,11 +18,17 @@ export interface ToolCallView {
   status: "running" | "done" | "error";
 }
 
-/** Queue lengths surfaced from `queue_update` events. */
+/**
+ * Queued messages surfaced from `queue_update` events.
+ *
+ * The full `AgentMessage[]` arrays (not just counts) are projected so that
+ * the restore / Alt+Up preview / `/queue` paths share a single decoded
+ * view of the queue (see cross-layer-thinking-guide.md).
+ */
 export interface QueueState {
-  steer: number;
-  followUp: number;
-  nextTurn: number;
+  steer: AgentMessage[];
+  followUp: AgentMessage[];
+  nextTurn: AgentMessage[];
 }
 
 export interface HarnessState {
@@ -40,7 +46,7 @@ export interface HarnessState {
   thinkingLevel: ThinkingLevel;
   /** Active tool names, kept in sync with `tools_update`. Empty before child 3. */
   activeToolNames: string[];
-  /** Queue lengths, kept in sync with `queue_update`. */
+  /** Queued steer/followUp/nextTurn messages, projected from `queue_update`. */
   queue: QueueState;
 }
 
@@ -67,7 +73,7 @@ export function useHarnessState(
     model: harness.getModel(),
     thinkingLevel: harness.getThinkingLevel(),
     activeToolNames: harness.getActiveTools().map((t) => t.name),
-    queue: { steer: 0, followUp: 0, nextTurn: 0 },
+    queue: { steer: [], followUp: [], nextTurn: [] },
   }));
 
   // Synchronously-current messages mirror for handlers that need the latest
@@ -169,9 +175,9 @@ export function useHarnessState(
           setState((prev) => ({
             ...prev,
             queue: {
-              steer: event.steer.length,
-              followUp: event.followUp.length,
-              nextTurn: event.nextTurn.length,
+              steer: event.steer,
+              followUp: event.followUp,
+              nextTurn: event.nextTurn,
             },
           }));
           break;

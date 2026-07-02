@@ -2,17 +2,18 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import type {
   AgentHarness,
-  AgentMessage,
   Session,
   SessionTreeEntry,
   ThinkingLevel,
 } from "@earendil-works/pi-agent-core/node";
 import type { JsonlSessionMetadata, ExecutionEnv } from "@earendil-works/pi-agent-core/node";
-import type { Models, TextContent } from "@earendil-works/pi-ai";
+import type { Models } from "@earendil-works/pi-ai";
 import type { HarnessHandle } from "./harness-handle.js";
 import type { ResolvedSettings } from "../settings.js";
 import { loadSettings, resolveSettings } from "../settings.js";
 import type { BootstrapResult } from "../bootstrap.js";
+import type { QueueState } from "./useHarnessState.js";
+import { messageText } from "./queue-helpers.js";
 
 export interface ParsedCommand {
   name: string;
@@ -63,6 +64,8 @@ export interface CommandContext {
   cliOverrides: { provider?: string; model?: string; thinkingLevel?: ThinkingLevel };
   /** Update the resolved-settings state (after a /settings save). */
   setSettings: (s: ResolvedSettings) => void;
+  /** Queued steer/followUp/nextTurn messages (projected from queue_update). */
+  queue: QueueState;
 }
 
 export interface Command {
@@ -318,6 +321,23 @@ export const COMMANDS: readonly Command[] = [
     },
   },
   {
+    name: "queue",
+    description: "Show queued steer/followUp/nextTurn messages",
+    run: async (ctx) => {
+      const { steer, followUp, nextTurn } = ctx.queue;
+      const total = steer.length + followUp.length + nextTurn.length;
+      if (total === 0) {
+        ctx.print("Queue is empty.");
+        return;
+      }
+      const lines: string[] = ["Queue:"];
+      for (const m of steer) lines.push(`  [steer]     ${messageText(m).slice(0, 80)}`);
+      for (const m of followUp) lines.push(`  [followUp]  ${messageText(m).slice(0, 80)}`);
+      for (const m of nextTurn) lines.push(`  [nextTurn]  ${messageText(m).slice(0, 80)}`);
+      ctx.print(lines.join("\n"));
+    },
+  },
+  {
     name: "goto",
     description: "Jump to a session entry by id",
     run: async (ctx, args) => {
@@ -374,7 +394,7 @@ export async function runCommand(
 function entrySummary(entry: SessionTreeEntry): string {
   switch (entry.type) {
     case "message":
-      return messagePreview(entry.message);
+      return messageText(entry.message);
     case "compaction":
     case "branch_summary":
       return entry.summary;
@@ -393,38 +413,6 @@ function entrySummary(entry: SessionTreeEntry): string {
       return entry.customType;
     case "leaf":
       return entry.targetId ?? "";
-    default:
-      return "";
-  }
-}
-
-/** Extract a plain-text preview from any agent message shape. */
-function messagePreview(message: AgentMessage): string {
-  switch (message.role) {
-    case "user":
-    case "assistant":
-    case "toolResult": {
-      const content = message.content;
-      if (typeof content === "string") return content;
-      if (!Array.isArray(content)) return "";
-      return content
-        .filter((c): c is TextContent => c.type === "text")
-        .map((c) => c.text)
-        .join(" ");
-    }
-    case "bashExecution":
-      return message.command;
-    case "custom": {
-      const content = message.content;
-      if (typeof content === "string") return content;
-      return content
-        .filter((c): c is TextContent => c.type === "text")
-        .map((c) => c.text)
-        .join(" ");
-    }
-    case "branchSummary":
-    case "compactionSummary":
-      return message.summary;
     default:
       return "";
   }

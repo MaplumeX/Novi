@@ -14,7 +14,7 @@ export function StatusBar({
   activeToolNames,
   queue,
 }: StatusBarProps): React.ReactElement {
-  const queueLen = queue.steer + queue.followUp + queue.nextTurn;
+  const queueLen = queue.steer.length + queue.followUp.length + queue.nextTurn.length;
   return (
     <Box>
       <Text dimColor>[</Text>
@@ -31,7 +31,7 @@ export function StatusBar({
       {queueLen > 0 ? (
         <Text dimColor>
           {" "}
-          (s{queue.steer} f{queue.followUp} n{queue.nextTurn})
+          (s{queue.steer.length} f{queue.followUp.length} n{queue.nextTurn.length})
         </Text>
       ) : null}
     </Box>

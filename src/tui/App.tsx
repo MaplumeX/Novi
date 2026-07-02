@@ -13,6 +13,7 @@ import {
   type HarnessHandle,
 } from "./harness-handle.js";
 import { insert, type EditorState } from "./editor-state.js";
+import { messageText, restoreText } from "./queue-helpers.js";
 import type { BootstrapResult } from "../bootstrap.js";
 
 /** Overlay union: null = normal input; settings = form; filePicker = @file. */
@@ -93,12 +94,65 @@ function App({
     systemPrompt,
     cliOverrides,
     setSettings,
+    queue: state.queue,
   };
 
   function handlePrompt(text: string): void {
     handle.harness.prompt(text).catch((e) => {
       print(`Prompt failed: ${e instanceof Error ? e.message : String(e)}`);
     });
+  }
+
+  function handleSteer(text: string): void {
+    handle.harness.steer(text).catch((e) => {
+      print(`Steer failed: ${e instanceof Error ? e.message : String(e)}`);
+    });
+  }
+
+  function handleFollowUp(text: string): void {
+    handle.harness.followUp(text).catch((e) => {
+      print(`FollowUp failed: ${e instanceof Error ? e.message : String(e)}`);
+    });
+  }
+
+  /** Escape: abort + restore during a turn; clear the editor when idle; no-op in compaction. */
+  async function handleEscapeAbort(): Promise<void> {
+    if (state.phase === "compaction") return;
+    if (state.phase !== "turn") {
+      setEditorState({ text: "", cursor: 0 });
+      return;
+    }
+    // Abort returns the steer/followUp messages that were cleared, so restore
+    // them into the editor alongside any unsent text the user was still typing.
+    try {
+      const result = await handle.harness.abort();
+      const queuedTexts = [
+        ...result.clearedSteer.map(messageText),
+        ...result.clearedFollowUp.map(messageText),
+      ];
+      setEditorState((prev) => {
+        const combined = restoreText(queuedTexts, prev.text);
+        return { text: combined, cursor: combined.length };
+      });
+    } catch (e) {
+      print(`Abort failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  /** Alt+Up: preview the last queued message into the editor (no real dequeue). */
+  function handleAltUp(): void {
+    const all = [
+      ...state.queue.steer,
+      ...state.queue.followUp,
+      ...state.queue.nextTurn,
+    ];
+    if (all.length === 0) {
+      print("Queue is empty.");
+      return;
+    }
+    const last = all[all.length - 1]!;
+    const text = messageText(last);
+    setEditorState({ text, cursor: text.length });
   }
 
   async function handleCommand(text: string): Promise<void> {
@@ -156,6 +210,10 @@ function App({
           onCommand={(t) => void handleCommand(t)}
           onOpenFilePicker={() => setOverlay({ kind: "filePicker" })}
           onNotice={print}
+          onSteer={handleSteer}
+          onFollowUp={handleFollowUp}
+          onEscapeAbort={() => void handleEscapeAbort()}
+          onAltUp={handleAltUp}
         />
       ) : overlay.kind === "settings" ? (
         <SettingsForm

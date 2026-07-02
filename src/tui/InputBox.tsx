@@ -34,6 +34,14 @@ interface InputBoxProps {
   onOpenFilePicker: () => void;
   /** Surface a notice line (e.g. external editor / bang errors). */
   onNotice: (msg: string) => void;
+  /** Steer the in-flight turn (called during phase "turn"). */
+  onSteer: (text: string) => void;
+  /** Queue a follow-up for after the turn completes (phase "turn"). */
+  onFollowUp: (text: string) => void;
+  /** Escape during a turn: abort + restore queued text to the editor. */
+  onEscapeAbort: () => void;
+  /** Alt+Up: preview the last queued message into the editor. */
+  onAltUp: () => void;
 }
 
 /**
@@ -41,8 +49,9 @@ interface InputBoxProps {
  * `@file` trigger, `!`/`!!` shell bangs, Ctrl+G external editor, Tab path completion.
  *
  * Lines starting with `/` are routed to `onCommand`; bang-prefixed lines
- * (`!` / `!!`) are handled by {@link runBang}. While a turn is running, plain
- * prompts are held back — commands and bangs remain usable.
+ * (`!` / `!!`) are handled by {@link runBang}. During a turn, Enter steers
+ * the in-flight response and Alt+Enter queues a follow-up; Escape aborts and
+ * restores queued text. Commands and bangs remain usable in any phase.
  */
 export function InputBox({
   phase,
@@ -54,15 +63,19 @@ export function InputBox({
   onCommand,
   onOpenFilePicker,
   onNotice,
+  onSteer,
+  onFollowUp,
+  onEscapeAbort,
+  onAltUp,
 }: InputBoxProps): React.ReactElement {
-  function submit(): void {
+  function submit(mode: "prompt" | "steer" | "followUp"): void {
     const text = state.text.trim();
     if (!text) {
       setState({ text: "", cursor: 0 });
       return;
     }
 
-    // Bang detection (! / !!).
+    // Bang (! / !!) and slash-commands work in any phase.
     const bang = parseBang(state.text.trimStart());
     if (bang.kind !== "none") {
       setState({ text: "", cursor: 0 });
@@ -70,13 +83,28 @@ export function InputBox({
       return;
     }
 
-    setState({ text: "", cursor: 0 });
     if (text.startsWith("/")) {
+      setState({ text: "", cursor: 0 });
       onCommand(text);
       return;
     }
-    if (phase !== "idle") return;
-    onPrompt(text);
+
+    // Plain prompt: gated by phase. compaction is a no-op (do not clear the
+    // editor). idle→prompt, turn→steer/followUp (per the submit mode).
+    if (phase === "compaction") return;
+
+    setState({ text: "", cursor: 0 });
+    switch (mode) {
+      case "prompt":
+        onPrompt(text);
+        break;
+      case "steer":
+        onSteer(text);
+        break;
+      case "followUp":
+        onFollowUp(text);
+        break;
+    }
   }
 
   /** Extract the path token at cursor for Tab completion. */
@@ -164,6 +192,9 @@ export function InputBox({
       if (value === "b") { setState((s) => moveLeft(s, true)); return; }
       if (value === "f") { setState((s) => moveRight(s, true)); return; }
       if (value === "d") { setState(deleteWordForward); return; }
+      // Alt+Up: preview the last queued message into the editor (no real
+      // dequeue — the harness still delivers it; see onAltUp in App.tsx).
+      if (key.upArrow) { onAltUp(); return; }
       if (key.backspace) { setState(deleteWordBackward); return; }
     }
 
@@ -176,7 +207,17 @@ export function InputBox({
     // --- Return / Enter ---
     if (key.return) {
       if (key.shift) { setState((s) => insert(s, "\n")); return; }
-      submit();
+      // Alt/Meta+Enter: followUp during a turn, prompt when idle.
+      if (key.meta) { submit(phase === "turn" ? "followUp" : "prompt"); return; }
+      // Plain Enter: steer during a turn, prompt when idle, no-op in compaction.
+      if (phase === "turn") { submit("steer"); return; }
+      submit("prompt");
+      return;
+    }
+
+    // --- Escape: abort + restore during a turn (App decides per phase) ---
+    if (key.escape) {
+      onEscapeAbort();
       return;
     }
 

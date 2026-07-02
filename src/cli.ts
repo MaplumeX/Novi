@@ -3,22 +3,25 @@ import { parseArgs } from "node:util";
 import { bootstrap } from "./bootstrap.js";
 import { getSessionsDir } from "./config.js";
 import { renderApp } from "./tui/App.js";
+import { runPrint, runJson } from "./headless/run.js";
 
 function fail(message: string): never {
   process.stderr.write(`${message}\n`);
   process.exit(1);
 }
 
-const { values } = parseArgs({
+const { values, positionals } = parseArgs({
   options: {
     provider: { type: "string" },
     model: { type: "string" },
     thinking: { type: "string", short: "t" },
     cwd: { type: "string" },
     resume: { type: "string" },
+    print: { type: "boolean", short: "p", default: false },
+    mode: { type: "string" },
     help: { type: "boolean", short: "h", default: false },
   },
-  allowPositionals: false,
+  allowPositionals: true,
   strict: true,
 });
 
@@ -35,11 +38,19 @@ if (values.help) {
       "  --thinking <lvl>  Thinking level: off|minimal|low|medium|high|xhigh",
       "  --cwd <dir>       Working directory (default: process.cwd())",
       "  --resume <path>   Resume an existing session JSONL file",
+      "  -p, --print       Print mode: run once, print assistant text, exit (no TUI)",
+      "  --mode <mode>     Headless mode: \"json\" streams all events as JSONL",
       "  -h, --help        Show this help",
     ].join("\n") + "\n",
   );
   process.exit(0);
 }
+
+if (values.print && values.mode === "json") {
+  fail("--print and --mode json are mutually exclusive");
+}
+
+const promptText = positionals.join(" ");
 
 try {
   const result = await bootstrap({
@@ -56,7 +67,14 @@ try {
       | undefined,
     resumePath: values.resume,
   });
-  renderApp(result, getSessionsDir());
+
+  if (values.print) {
+    await runPrint({ result, prompt: promptText });
+  } else if (values.mode === "json") {
+    await runJson({ result, prompt: promptText });
+  } else {
+    renderApp(result, getSessionsDir());
+  }
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
   fail(`Novi: ${message}`);

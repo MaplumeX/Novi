@@ -1,1 +1,5 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/pi-agent-core-api.md", "reason": "HarnessHandle.replace + replayHarnessState flow (child 1 produced); JsonlSessionRepo.create/open signatures; session.getMetadata/getBranch/getEntries"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Overlay pattern: sessionPicker variant; component owns useInput; InputBox unmounted when overlay open"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "HarnessHandle state; useHarnessState re-subscribes on handle.session change (reload branch)"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "frontend Quality Check gates for SessionPicker/App/commands"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "repo.create/open + handle.replace failures must surface as notice, not throw uncaught"}

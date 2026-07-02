@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 15
+- **Total Sessions**: 16
 - **Last Active**: 2026-07-02
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~513 | Active |
+| `journal-1.md` | ~548 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 16 | 2026-07-02 | Tool registration mechanism (BuiltinToolRegistry) | `b73fae9`, `6d0efd7`, `ac70097` | `main` |
 | 15 | 2026-07-02 | TUI 视觉美化：配色体系、角色标识、状态栏、边框、spinner、Markdown | `fd74fef`, `3dbaa5f`, `a0ef0a1` | `main` |
 | 14 | 2026-07-02 | TUI 界面完善：消息显示 + 输入交互 | `cd844eaf2009ececeb67147a4b9f7b4ada304ad2` | `main` |
 | 13 | 2026-07-02 | novi first-run provider onboarding | `51fcbe4`, `8bed864`, `f9cbbcf` | `main` |

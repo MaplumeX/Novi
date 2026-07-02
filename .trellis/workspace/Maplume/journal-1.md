@@ -511,3 +511,38 @@ Added a first-run onboarding wizard so Novi bootstraps a setup flow (provider se
 ### Next Steps
 
 - None - task complete
+
+
+## Session 16: Tool registration mechanism (BuiltinToolRegistry)
+
+**Date**: 2026-07-02
+**Task**: Tool registration mechanism (BuiltinToolRegistry)
+**Branch**: `main`
+
+### Summary
+
+Introduced BuiltinToolRegistry abstraction (src/tools/registry.ts) replacing the hardcoded tool array in src/tools/index.ts. index.ts now uses chained .add() calls for 8 built-in tools; createBuiltinTools(env) remains a thin wrapper so bootstrap.ts/harness-handle.ts are unchanged. Added registry unit tests. Updated directory-structure.md spec. Pure internal refactor, no user-visible behavior change, no plugin support.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b73fae9` | (see git log) |
+| `6d0efd7` | (see git log) |
+| `ac70097` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

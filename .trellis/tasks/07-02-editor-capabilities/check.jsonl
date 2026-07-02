@@ -1,1 +1,5 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/frontend/index.md", "reason": "frontend Quality Check — InputBox/FilePicker/App pass component guidelines"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "verify overlay non-null => InputBox unmounted (no double key handling); FilePicker own useInput"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "verify EditorState/Overlay union types, no any"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "verify editor-state + bang are pure functions; no event parsing in components"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "verify external-editor + bang exec failures are caught and surfaced, not swallowed"}

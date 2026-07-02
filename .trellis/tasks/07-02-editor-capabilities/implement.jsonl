@@ -1,1 +1,6 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/frontend/index.md", "reason": "frontend layer entry: component/hook/state guidelines for InputBox/FilePicker/App overlay changes"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Overlay Pattern (settings/filePicker) — InputBox not mounted when overlay open; FilePicker owns useInput"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Overlay state ownership in App.tsx; local editor state stays in InputBox"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "EditorState/Overlay types — no any leaks in cursor model"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "external-editor spawn failure + bang exec failure must surface as notice, not throw uncaught"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "InputBox owns editor-state; App owns overlay; bang parsing is pure — avoid scattering event/parse logic"}

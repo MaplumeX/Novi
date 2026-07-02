@@ -375,3 +375,36 @@ Added usage projection (lastUsage+cumulativeUsage in useHarnessState, recompute 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 12: Complete novi-v2 feature completion parent (7/7 children done)
+
+**Date**: 2026-07-02
+**Task**: Complete novi-v2 feature completion parent (7/7 children done)
+**Branch**: `main`
+
+### Summary
+
+Parent task complete. All 7 children implemented+checked+archived: (1)config-personalization settings/AGENTS.md/SYSTEM.md/settings-form/reload+HarnessHandle, (2)editor-capabilities cursor/@file/!-!!/Ctrl-G/Tab, (3)message-queue-ux steer/followUp/Esc-restore/Alt-Up, (4)session-management /new/resume/name/session, (5)prompt-template-commands /name+templates, (6)noninteractive-modes -p/stdin/--mode json, (7)observability StatusBar-usage/session/retry. 200 vitest tests, tsc+eslint green. Parent archived.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `HEAD` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend quality-check section: lint/tsc/test expectations for verifying TUI changes."}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Quality bar (lint, tsc, test coverage) the check agent enforces on InputBox/file-picker/App edits."}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "Type-safety checks for the new onCycleThinking prop and Tab branch changes."}

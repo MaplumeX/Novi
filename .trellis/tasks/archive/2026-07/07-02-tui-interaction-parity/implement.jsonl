@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend spec entry: pre-development checklist + component/quality guideline pointers for TUI (Ink/React) edits."}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Component conventions for adding props to InputBox and editing file-picker without breaking existing patterns."}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Guides how lifted state (editorState, thinkingLevel) flows App↔InputBox; needed for R1 callback transparency."}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "Type discipline for new InputBox prop and Tab branch logic in file-picker."}

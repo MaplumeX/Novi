@@ -86,3 +86,7 @@ streaming), document it:
 - No streaming deltas fed into `Markdown` — it expects finalized text.
 - No default import of typebox (`import Type from …`); use
   `import * as Type`.
+- When spawning external processes that take over the terminal (e.g.
+  `openExternalEditor`), **always** disable stdin raw mode before spawning and
+  restore it in a `finally` block. Forgetting the `finally` on a spawn failure
+  leaves the terminal stuck in raw mode (no visible input, Ink can't render).

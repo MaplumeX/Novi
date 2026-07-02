@@ -110,17 +110,20 @@ export function MessageList(…): React.ReactElement { … }
 
 The editor area (where `InputBox` normally renders) can be temporarily
 replaced by an overlay component. This is used by `/settings` (child 1) and
-will be reused by child 2 (file picker).
+the `@file` file picker (child 2).
 
 ### Overlay union state
 
 ```tsx
-/** Overlay union: null = normal input; settings = interactive form. */
-type Overlay = null | { kind: "settings" };
-// child 2 will extend: | { kind: "filePicker"; query: string; cursor: number }
+/** Overlay union: null = normal input; settings = form; filePicker = @file. */
+type Overlay = null | { kind: "settings" } | { kind: "filePicker" };
 
 const [overlay, setOverlay] = useState<Overlay>(null);
 ```
+
+Keep overlay variants minimal — store only the `kind` discriminant in the
+union. Any query/cursor the overlay needs should be local `useState` inside
+the overlay component itself (see `FilePicker`).
 
 ### Render branch
 
@@ -149,10 +152,32 @@ useInput((value, key) => {
 
 ### Adding a new overlay kind
 
-1. Add a variant to the `Overlay` union.
+1. Add a variant to the `Overlay` union (just the `kind` discriminant).
 2. Add a render branch in `App.tsx`.
 3. Create the overlay component with its own `useInput`.
 4. Ensure `InputBox` is not mounted when the overlay is active.
+5. **Lift input state to App** if the overlay needs to read/modify
+   `InputBox`'s text (see below).
+
+### Lifted editor state across overlay transitions
+
+`InputBox` is unmounted when an overlay opens. If it owns its input as local
+`useState`, that state is **destroyed** on unmount and lost when the overlay
+closes. To survive the overlay lifecycle, `App` holds the editor state:
+
+```tsx
+// App.tsx
+const [editorState, setEditorState] = useState<EditorState>({ text: "", cursor: 0 });
+
+// InputBox receives state + setState as props, does not own the state.
+<InputBox state={editorState} setState={setEditorState} … />
+
+// When filePicker inserts a path, App mutates editorState directly:
+<FilePicker onInsert={(p) => { setEditorState((prev) => insert(prev, p)); setOverlay(null); }} … />
+```
+
+This is required whenever an overlay callback needs to modify the input
+content (file picker insert, external editor result, etc.).
 
 ---
 

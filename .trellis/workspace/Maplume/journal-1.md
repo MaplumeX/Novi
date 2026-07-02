@@ -443,3 +443,36 @@ Added a first-run onboarding wizard so Novi bootstraps a setup flow (provider se
 ### Next Steps
 
 - None - task complete
+
+
+## Session 14: TUI 界面完善：消息显示 + 输入交互
+
+**Date**: 2026-07-02
+**Task**: TUI 界面完善：消息显示 + 输入交互
+**Branch**: `main`
+
+### Summary
+
+完成 tui-polish 父任务及其 2 个子任务：message-display（streaming Markdown + thinking 流 + 工具调用折叠/展开 + Ctrl+O + diff + 角色标识）、input-interaction（斜杠命令列表匹配 + Tab 补全 + 输入历史三态切换）。115 TUI 测试通过，typecheck/lint 全绿。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `cd844eaf2009ececeb67147a4b9f7b4ada304ad2` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

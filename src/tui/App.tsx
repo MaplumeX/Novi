@@ -6,15 +6,17 @@ import { MessageList } from "./MessageList.js";
 import { StatusBar } from "./StatusBar.js";
 import { InputBox } from "./InputBox.js";
 import { SettingsForm } from "./SettingsForm.js";
+import { FilePicker } from "./file-picker.js";
 import { runCommand, type CommandContext } from "./commands.js";
 import {
   createHarnessHandle,
   type HarnessHandle,
 } from "./harness-handle.js";
+import { insert, type EditorState } from "./editor-state.js";
 import type { BootstrapResult } from "../bootstrap.js";
 
-/** Overlay union: null = normal input; settings = interactive form. */
-type Overlay = null | { kind: "settings" };
+/** Overlay union: null = normal input; settings = form; filePicker = @file. */
+type Overlay = null | { kind: "settings" } | { kind: "filePicker" };
 
 interface AppProps {
   /** Initial handle; App re-binds replace to its own setState in a useState init. */
@@ -67,6 +69,7 @@ function App({
   const [notice, setNotice] = useState<string[]>([]);
   const [overlay, setOverlay] = useState<Overlay>(null);
   const [settings, setSettings] = useState(resolvedSettings);
+  const [editorState, setEditorState] = useState<EditorState>({ text: "", cursor: 0 });
 
   const print = (text: string): void => {
     setNotice(text.split("\n"));
@@ -145,8 +148,14 @@ function App({
       {overlay === null ? (
         <InputBox
           phase={state.phase}
+          cwd={cwd}
+          env={env}
+          state={editorState}
+          setState={setEditorState}
           onPrompt={handlePrompt}
           onCommand={(t) => void handleCommand(t)}
+          onOpenFilePicker={() => setOverlay({ kind: "filePicker" })}
+          onNotice={print}
         />
       ) : overlay.kind === "settings" ? (
         <SettingsForm
@@ -157,6 +166,17 @@ function App({
           onSaved={(updated) => setSettings(updated)}
           onExit={() => setOverlay(null)}
           onReload={() => void handle.replace({ reloadResources: true })}
+        />
+      ) : overlay.kind === "filePicker" ? (
+        <FilePicker
+          cwd={cwd}
+          env={env}
+          initialQuery=""
+          onInsert={(filePath) => {
+            setEditorState((prev) => insert(prev, filePath));
+            setOverlay(null);
+          }}
+          onCancel={() => setOverlay(null)}
         />
       ) : null}
       <Text dimColor>session: {handle.sessionPath}</Text>

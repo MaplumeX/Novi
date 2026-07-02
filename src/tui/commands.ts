@@ -3,6 +3,8 @@ import path from "node:path";
 import {
   JsonlSessionRepo,
   uuidv7,
+  parseCommandArgs,
+  substituteArgs,
 } from "@earendil-works/pi-agent-core/node";
 import type {
   AgentHarness,
@@ -467,6 +469,23 @@ export const COMMANDS: readonly Command[] = [
     },
   },
   {
+    name: "templates",
+    description: "List available prompt templates",
+    run: async (ctx) => {
+      const templates = ctx.harness.getResources().promptTemplates ?? [];
+      if (templates.length === 0) {
+        ctx.print("No prompt templates loaded.");
+        return;
+      }
+      ctx.print(
+        [
+          "Prompt templates:",
+          ...templates.map((t) => `  /${t.name}${t.description ? ` — ${t.description}` : ""}`),
+        ].join("\n"),
+      );
+    },
+  },
+  {
     name: "goto",
     description: "Jump to a session entry by id",
     run: async (ctx, args) => {
@@ -508,11 +527,27 @@ export async function runCommand(
     return;
   }
   const command = COMMANDS.find((c) => c.name === name);
-  if (!command) {
-    ctx.print(`Unknown command: /${name}. Try /help.`);
+  if (command) {
+    await command.run(ctx, args);
     return;
   }
-  await command.run(ctx, args);
+  // Prompt-template fallback: `/<templateName> [args]` → substituteArgs → prompt.
+  const templates = ctx.harness.getResources().promptTemplates ?? [];
+  const template = templates.find((t) => t.name === name);
+  if (template) {
+    if (!ctx.isIdle) {
+      ctx.print(`Harness is busy; /${name} requires idle.`);
+      return;
+    }
+    const parsedArgs = parseCommandArgs(args);
+    const content = substituteArgs(template.content, parsedArgs);
+    ctx.print(`Expanding template: ${name}`);
+    ctx.harness.prompt(content).catch((e: unknown) => {
+      ctx.print(`Template prompt failed: ${e instanceof Error ? e.message : String(e)}`);
+    });
+    return;
+  }
+  ctx.print(`Unknown command: /${name}. Try /help.`);
 }
 
 /**

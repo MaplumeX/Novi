@@ -50,6 +50,8 @@ interface InputBoxProps {
   onHistoryUp: () => void;
   /** Single-line, non-slash mode: browse input history forwards. */
   onHistoryDown: () => void;
+  /** Shift+Tab: cycle the thinking level (off→minimal→…→xhigh→off). */
+  onCycleThinking: () => void;
 }
 
 /**
@@ -77,6 +79,7 @@ export function InputBox({
   onAltUp,
   onHistoryUp,
   onHistoryDown,
+  onCycleThinking,
 }: InputBoxProps): React.ReactElement {
   // --- Slash command list state ---
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
@@ -295,20 +298,20 @@ export function InputBox({
     if (key.delete) { setState(deleteForward); return; }
 
     // --- Tab: slash completion or path completion ---
+    // Shift+Tab cycles the thinking level before any Tab handling.
+    if (key.tab && key.shift) {
+      onCycleThinking();
+      return;
+    }
     if (key.tab) {
       if (slashActive) {
-        const names = matchedCommands.map((c) => c.name);
-        if (names.length === 1) {
-          const completed = slashArgs
-            ? `/${names[0]!}${slashArgs}`
-            : `/${names[0]!} `;
-          setState({ text: completed, cursor: completed.length });
-        } else {
-          const prefix = longestCommonPrefix(names);
-          if (prefix.length > slashQuery.length) {
-            const completed = `/${prefix}${slashArgs}`;
-            setState({ text: completed, cursor: completed.length });
-          }
+        const completed = completeSlashSelection(
+          matchedCommands,
+          slashSelected,
+          slashArgs,
+        );
+        if (completed) {
+          setState({ text: completed.text, cursor: completed.cursor });
         }
         return;
       }
@@ -368,6 +371,36 @@ export function InputBox({
       ) : null}
     </Box>
   );
+}
+
+/**
+ * Compute the editor result of Tab-completing the slash command list.
+ *
+ * - Single match: complete to `/<name> ` (trailing space) when no args are
+ *   present, or `/<name><args>` when args were already typed.
+ * - Multiple matches: complete to the **currently highlighted** command name
+ *   (preserving any `slashArgs`).
+ *
+ * Pure function so the completion logic is unit-testable in isolation.
+ * Returns `null` when no completion applies (e.g. empty list).
+ */
+export function completeSlashSelection(
+  matchedCommands: readonly { name: string }[],
+  selectedIndex: number,
+  slashArgs: string,
+): { text: string; cursor: number } | null {
+  if (matchedCommands.length === 0) return null;
+  if (matchedCommands.length === 1) {
+    const name = matchedCommands[0]!.name;
+    const completed = slashArgs ? `/${name}${slashArgs}` : `/${name} `;
+    return { text: completed, cursor: completed.length };
+  }
+  const cmd = matchedCommands[
+    Math.min(selectedIndex, matchedCommands.length - 1)
+  ];
+  if (!cmd) return null;
+  const completed = `/${cmd.name}${slashArgs}`;
+  return { text: completed, cursor: completed.length };
 }
 
 /** Compute the longest common prefix string among a list of strings. */

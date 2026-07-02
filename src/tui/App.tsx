@@ -10,7 +10,7 @@ import { InputBox } from "./InputBox.js";
 import { SettingsForm } from "./SettingsForm.js";
 import { FilePicker } from "./file-picker.js";
 import { SessionPicker } from "./SessionPicker.js";
-import { runCommand, type CommandContext, type Overlay } from "./commands.js";
+import { runCommand, nextThinkingLevel, type CommandContext, type Overlay } from "./commands.js";
 import {
   createHarnessHandle,
   type HarnessHandle,
@@ -203,6 +203,13 @@ function App({
     setEditorState({ text, cursor: text.length });
   }
 
+  /** Shift+Tab: cycle the thinking level (off→minimal→…→xhigh→off). */
+  function handleCycleThinking(): void {
+    const next = nextThinkingLevel(state.thinkingLevel);
+    void handle.harness.setThinkingLevel(next);
+    print(`Thinking: ${next}`);
+  }
+
   async function handleCommand(text: string): Promise<void> {
     try {
       await runCommand(text, commandCtx);
@@ -268,6 +275,7 @@ function App({
           onNotice={print}
           onSteer={handleSteer}
           onFollowUp={handleFollowUp}
+          onCycleThinking={handleCycleThinking}
           onEscapeAbort={() => void handleEscapeAbort()}
           onAltUp={handleAltUp}
           onHistoryUp={handleHistoryUp}

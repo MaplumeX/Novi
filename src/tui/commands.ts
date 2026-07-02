@@ -89,7 +89,7 @@ export interface Command {
   run: (ctx: CommandContext, args: string) => Promise<void>;
 }
 
-const THINKING_LEVELS: readonly ThinkingLevel[] = [
+export const THINKING_LEVELS: readonly ThinkingLevel[] = [
   "off",
   "minimal",
   "low",
@@ -97,6 +97,18 @@ const THINKING_LEVELS: readonly ThinkingLevel[] = [
   "high",
   "xhigh",
 ];
+
+/**
+ * Return the next thinking level in the {@link THINKING_LEVELS} cycle,
+ * wrapping from the last entry back to the first.
+ *
+ * Pure function so it can be unit-tested in isolation.
+ */
+export function nextThinkingLevel(current: ThinkingLevel): ThinkingLevel {
+  const idx = THINKING_LEVELS.indexOf(current);
+  if (idx === -1) return THINKING_LEVELS[0]!;
+  return THINKING_LEVELS[(idx + 1) % THINKING_LEVELS.length]!;
+}
 
 /**
  * Best-effort scan of a session jsonl file for the most recent `session_info`

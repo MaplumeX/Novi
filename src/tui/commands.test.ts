@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { parseCommand, runCommand, COMMANDS } from "./commands.js";
+import { parseCommand, runCommand, COMMANDS, nextThinkingLevel, THINKING_LEVELS } from "./commands.js";
 import type { CommandContext } from "./commands.js";
 
 /** Build a mock CommandContext with a fake harness carrying promptTemplates + prompt spy. */
@@ -86,6 +86,46 @@ describe("parseCommand", () => {
 
   it("parses /tree with no arguments", () => {
     expect(parseCommand("/tree")).toEqual({ name: "tree", args: "" });
+  });
+});
+
+describe("nextThinkingLevel", () => {
+  it("cycles through every level in order", () => {
+    const cycle = THINKING_LEVELS.map((_, i) =>
+      Array.from({ length: THINKING_LEVELS.length }, (_, n) =>
+        nextThinkingLevel(THINKING_LEVELS[(i + n) % THINKING_LEVELS.length]!),
+      ),
+    );
+    // Starting from each level, stepping once should land on the next level.
+    for (let i = 0; i < THINKING_LEVELS.length; i++) {
+      const start = THINKING_LEVELS[i]!;
+      const expected = THINKING_LEVELS[(i + 1) % THINKING_LEVELS.length]!;
+      expect(nextThinkingLevel(start)).toBe(expected);
+    }
+    void cycle;
+  });
+
+  it("wraps from xhigh back to off", () => {
+    expect(nextThinkingLevel("xhigh")).toBe("off");
+  });
+
+  it("goes off → minimal → low → medium → high → xhigh → off", () => {
+    let level = nextThinkingLevel("off");
+    expect(level).toBe("minimal");
+    level = nextThinkingLevel(level);
+    expect(level).toBe("low");
+    level = nextThinkingLevel(level);
+    expect(level).toBe("medium");
+    level = nextThinkingLevel(level);
+    expect(level).toBe("high");
+    level = nextThinkingLevel(level);
+    expect(level).toBe("xhigh");
+    level = nextThinkingLevel(level);
+    expect(level).toBe("off");
+  });
+
+  it("falls back to off for an unknown level", () => {
+    expect(nextThinkingLevel("bogus" as never)).toBe("off");
   });
 });
 

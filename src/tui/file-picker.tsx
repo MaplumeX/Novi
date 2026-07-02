@@ -103,6 +103,44 @@ export interface FilePickerProps {
   onCancel: () => void;
 }
 
+/** Decoded intent from a FilePicker keypress (pure — unit-testable in isolation). */
+export type FilePickerAction =
+  | "up"
+  | "down"
+  | "select"
+  | "cancel"
+  | "backspace"
+  | "append"
+  | null;
+
+/**
+ * Map a raw Ink `useInput(value, key)` payload to a FilePicker action.
+ * `select` is returned for both `return` and `tab` — Tab accepts the
+ * highlighted item, matching the "Tab accepts completion" mental model.
+ */
+export function filePickerKeyAction(
+  value: string,
+  key: {
+    upArrow?: boolean;
+    downArrow?: boolean;
+    return?: boolean;
+    tab?: boolean;
+    escape?: boolean;
+    backspace?: boolean;
+    delete?: boolean;
+    ctrl?: boolean;
+    meta?: boolean;
+  },
+): FilePickerAction {
+  if (key.upArrow) return "up";
+  if (key.downArrow) return "down";
+  if (key.return || key.tab) return "select";
+  if (key.escape) return "cancel";
+  if (key.backspace || key.delete) return "backspace";
+  if (!value || key.ctrl || key.meta) return null;
+  return "append";
+}
+
 /**
  * FilePicker overlay: shows a fuzzy-filtered project file list.
  *
@@ -137,29 +175,30 @@ export function FilePicker({ cwd, env, initialQuery, onInsert, onCancel }: FileP
   }, [candidates, cursor, onInsert, onCancel]);
 
   useInput((value, key) => {
-    if (key.upArrow) {
-      setCursor((c) => (c - 1 + candidates.length) % Math.max(candidates.length, 1));
-      return;
+    switch (filePickerKeyAction(value, key)) {
+      case "up":
+        setCursor((c) => (c - 1 + candidates.length) % Math.max(candidates.length, 1));
+        return;
+      case "down":
+        setCursor((c) => (c + 1) % Math.max(candidates.length, 1));
+        return;
+      case "select":
+        select();
+        return;
+      case "cancel":
+        onCancel();
+        return;
+      case "backspace":
+        setQuery((q) => q.slice(0, -1));
+        return;
+      case "append":
+        setQuery((q) => q + value);
+        return;
+      case null:
+        return;
+      default:
+        return;
     }
-    if (key.downArrow) {
-      setCursor((c) => (c + 1) % Math.max(candidates.length, 1));
-      return;
-    }
-    if (key.return) {
-      select();
-      return;
-    }
-    if (key.escape) {
-      onCancel();
-      return;
-    }
-    if (key.backspace || key.delete) {
-      setQuery((q) => q.slice(0, -1));
-      return;
-    }
-    // Printable chars refine the query.
-    if (!value || key.ctrl || key.meta) return;
-    setQuery((q) => q + value);
   });
 
   return (
@@ -177,7 +216,7 @@ export function FilePicker({ cwd, env, initialQuery, onInsert, onCancel }: FileP
           </Text>
         ))
       )}
-      <Text color={theme.dim}>type to filter · ↑↓ select · Enter insert · Esc cancel</Text>
+      <Text color={theme.dim}>type to filter · ↑↓ select · Enter/Tab insert · Esc cancel</Text>
     </Box>
   );
 }

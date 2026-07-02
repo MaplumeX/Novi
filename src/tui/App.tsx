@@ -75,6 +75,11 @@ function App({
   const [settings, setSettings] = useState(resolvedSettings);
   const [editorState, setEditorState] = useState<EditorState>({ text: "", cursor: 0 });
   const [toolExpanded, setToolExpanded] = useState(false);
+  const [inputHistory, setInputHistory] = useState<string[]>([]);
+  const [historyBrowse, setHistoryBrowse] = useState<{
+    index: number;
+    savedText: string;
+  } | null>(null);
 
   const print = (text: string): void => {
     setNotice(text.split("\n"));
@@ -101,22 +106,60 @@ function App({
     queue: state.queue,
   };
 
+  function recordHistory(text: string): void {
+    setInputHistory((prev) => [...prev, text]);
+    setHistoryBrowse(null);
+  }
+
   function handlePrompt(text: string): void {
+    recordHistory(text);
     handle.harness.prompt(text).catch((e) => {
       print(`Prompt failed: ${e instanceof Error ? e.message : String(e)}`);
     });
   }
 
   function handleSteer(text: string): void {
+    recordHistory(text);
     handle.harness.steer(text).catch((e) => {
       print(`Steer failed: ${e instanceof Error ? e.message : String(e)}`);
     });
   }
 
   function handleFollowUp(text: string): void {
+    recordHistory(text);
     handle.harness.followUp(text).catch((e) => {
       print(`FollowUp failed: ${e instanceof Error ? e.message : String(e)}`);
     });
+  }
+
+  /** Single-line non-slash mode ↑: load the previous history entry. */
+  function handleHistoryUp(): void {
+    if (inputHistory.length === 0) return;
+    if (historyBrowse === null) {
+      const index = inputHistory.length - 1;
+      const text = inputHistory[index]!;
+      setHistoryBrowse({ index, savedText: editorState.text });
+      setEditorState({ text, cursor: text.length });
+    } else if (historyBrowse.index > 0) {
+      const index = historyBrowse.index - 1;
+      const text = inputHistory[index]!;
+      setHistoryBrowse({ ...historyBrowse, index });
+      setEditorState({ text, cursor: text.length });
+    }
+  }
+
+  /** Single-line non-slash mode ↓: load the next history entry or restore. */
+  function handleHistoryDown(): void {
+    if (historyBrowse === null) return;
+    const index = historyBrowse.index + 1;
+    if (index >= inputHistory.length) {
+      setEditorState({ text: historyBrowse.savedText, cursor: historyBrowse.savedText.length });
+      setHistoryBrowse(null);
+    } else {
+      const text = inputHistory[index]!;
+      setHistoryBrowse({ ...historyBrowse, index });
+      setEditorState({ text, cursor: text.length });
+    }
   }
 
   /** Escape: abort + restore during a turn; clear the editor when idle; no-op in compaction. */
@@ -226,6 +269,8 @@ function App({
           onFollowUp={handleFollowUp}
           onEscapeAbort={() => void handleEscapeAbort()}
           onAltUp={handleAltUp}
+          onHistoryUp={handleHistoryUp}
+          onHistoryDown={handleHistoryDown}
         />
       ) : overlay.kind === "settings" ? (
         <SettingsForm

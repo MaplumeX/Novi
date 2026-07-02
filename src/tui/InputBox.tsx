@@ -1,4 +1,5 @@
-import { Text, useInput } from "ink";
+import { useEffect, useState } from "react";
+import { Box, Text, useInput } from "ink";
 import type { ExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import type { Phase } from "./useHarnessState.js";
 import {
@@ -17,6 +18,7 @@ import {
   deleteToLineEnd,
   type EditorState,
 } from "./editor-state.js";
+import { COMMANDS } from "./commands.js";
 import { parseBang, runBang } from "./bang.js";
 import { openExternalEditor } from "./external-editor.js";
 import { loadFileCandidates } from "./file-picker.js";
@@ -42,6 +44,10 @@ interface InputBoxProps {
   onEscapeAbort: () => void;
   /** Alt+Up: preview the last queued message into the editor. */
   onAltUp: () => void;
+  /** Single-line, non-slash mode: browse input history backwards. */
+  onHistoryUp: () => void;
+  /** Single-line, non-slash mode: browse input history forwards. */
+  onHistoryDown: () => void;
 }
 
 /**
@@ -67,7 +73,36 @@ export function InputBox({
   onFollowUp,
   onEscapeAbort,
   onAltUp,
+  onHistoryUp,
+  onHistoryDown,
 }: InputBoxProps): React.ReactElement {
+  // --- Slash command list state ---
+  const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
+  const [slashDismissed, setSlashDismissed] = useState(false);
+
+  // Derive slash query from the text: text after "/" up to the first space.
+  const slashQuery = state.text.startsWith("/")
+    ? (state.text.slice(1).split(/\s/)[0] ?? "")
+    : "";
+  const matchedCommands = state.text.startsWith("/")
+    ? slashQuery
+      ? COMMANDS.filter((c) => c.name.toLowerCase().includes(slashQuery.toLowerCase()))
+      : [...COMMANDS]
+    : [];
+  const slashListOpen = state.text.startsWith("/") && !slashDismissed;
+  const slashActive = slashListOpen && matchedCommands.length > 0;
+
+  // Args typed after the command name (everything from the first space).
+  // Preserved across Enter/Tab so completion never silently drops user input.
+  const firstSpaceIdx = state.text.indexOf(" ");
+  const slashArgs = firstSpaceIdx >= 0 ? state.text.slice(firstSpaceIdx) : "";
+
+  // Reset selection and dismissed flag when the query changes.
+  useEffect(() => {
+    setSlashSelectedIndex(0);
+    setSlashDismissed(false);
+  }, [slashQuery]);
+
   function submit(mode: "prompt" | "steer" | "followUp"): void {
     const text = state.text.trim();
     if (!text) {
@@ -201,11 +236,39 @@ export function InputBox({
     // --- Arrow keys ---
     if (key.leftArrow) { setState((s) => moveLeft(s)); return; }
     if (key.rightArrow) { setState((s) => moveRight(s)); return; }
-    if (key.upArrow) { setState(moveLineUp); return; }
-    if (key.downArrow) { setState(moveLineDown); return; }
+    // ↑/↓ three-state dispatch: slash list → multi-line → input history
+    if (key.upArrow) {
+      if (slashActive) {
+        setSlashSelectedIndex((i) => Math.max(0, i - 1));
+        return;
+      }
+      if (state.text.includes("\n")) { setState(moveLineUp); return; }
+      onHistoryUp();
+      return;
+    }
+    if (key.downArrow) {
+      if (slashActive) {
+        setSlashSelectedIndex((i) => Math.min(matchedCommands.length - 1, i + 1));
+        return;
+      }
+      if (state.text.includes("\n")) { setState(moveLineDown); return; }
+      onHistoryDown();
+      return;
+    }
 
     // --- Return / Enter ---
     if (key.return) {
+      // Slash command list active: execute the selected command.
+      if (slashActive) {
+        const cmd = matchedCommands[
+          Math.min(slashSelectedIndex, matchedCommands.length - 1)
+        ];
+        if (cmd) {
+          setState({ text: "", cursor: 0 });
+          onCommand(`/${cmd.name}${slashArgs}`);
+        }
+        return;
+      }
       if (key.shift) { setState((s) => insert(s, "\n")); return; }
       // Alt/Meta+Enter: followUp during a turn, prompt when idle.
       if (key.meta) { submit(phase === "turn" ? "followUp" : "prompt"); return; }
@@ -215,8 +278,12 @@ export function InputBox({
       return;
     }
 
-    // --- Escape: abort + restore during a turn (App decides per phase) ---
+    // --- Escape: close slash list, or abort + restore during a turn ---
     if (key.escape) {
+      if (slashListOpen) {
+        setSlashDismissed(true);
+        return;
+      }
       onEscapeAbort();
       return;
     }
@@ -225,8 +292,27 @@ export function InputBox({
     if (key.backspace) { setState(backspace); return; }
     if (key.delete) { setState(deleteForward); return; }
 
-    // --- Tab: path completion ---
-    if (key.tab) { void tabComplete(); return; }
+    // --- Tab: slash completion or path completion ---
+    if (key.tab) {
+      if (slashActive) {
+        const names = matchedCommands.map((c) => c.name);
+        if (names.length === 1) {
+          const completed = slashArgs
+            ? `/${names[0]!}${slashArgs}`
+            : `/${names[0]!} `;
+          setState({ text: completed, cursor: completed.length });
+        } else {
+          const prefix = longestCommonPrefix(names);
+          if (prefix.length > slashQuery.length) {
+            const completed = `/${prefix}${slashArgs}`;
+            setState({ text: completed, cursor: completed.length });
+          }
+        }
+        return;
+      }
+      void tabComplete();
+      return;
+    }
 
     // --- Printable chars ---
     if (!value || key.ctrl || key.meta) return;
@@ -248,14 +334,32 @@ export function InputBox({
   const before = state.text.slice(0, state.cursor);
   const at = state.text.slice(state.cursor);
 
+  const slashSelected = Math.min(slashSelectedIndex, Math.max(0, matchedCommands.length - 1));
+
   return (
-    <Text>
-      <Text dimColor>› </Text>
-      {before}
-      <Text dimColor>▏</Text>
-      {at}
-      {busyHint ? <Text dimColor>{busyHint}</Text> : null}
-    </Text>
+    <Box flexDirection="column">
+      <Text>
+        <Text dimColor>› </Text>
+        {before}
+        <Text dimColor>▏</Text>
+        {at}
+        {busyHint ? <Text dimColor>{busyHint}</Text> : null}
+      </Text>
+      {slashListOpen ? (
+        matchedCommands.length > 0 ? (
+          <Box flexDirection="column">
+            {matchedCommands.map((cmd, i) => (
+              <Text key={cmd.name} wrap="truncate">
+                {i === slashSelected ? "→ " : "  "}
+                /{cmd.name} — {cmd.description}
+              </Text>
+            ))}
+          </Box>
+        ) : (
+          <Text dimColor>  No matching commands</Text>
+        )
+      ) : null}
+    </Box>
   );
 }
 

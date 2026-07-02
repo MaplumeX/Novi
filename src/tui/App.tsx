@@ -1,13 +1,16 @@
 import { useRef, useState } from "react";
 import { Text, useApp, useInput, render } from "ink";
 import type { Models } from "@earendil-works/pi-ai";
+import { JsonlSessionRepo } from "@earendil-works/pi-agent-core/node";
+import type { JsonlSessionMetadata } from "@earendil-works/pi-agent-core/node";
 import { useHarnessState } from "./useHarnessState.js";
 import { MessageList } from "./MessageList.js";
 import { StatusBar } from "./StatusBar.js";
 import { InputBox } from "./InputBox.js";
 import { SettingsForm } from "./SettingsForm.js";
 import { FilePicker } from "./file-picker.js";
-import { runCommand, type CommandContext } from "./commands.js";
+import { SessionPicker } from "./SessionPicker.js";
+import { runCommand, type CommandContext, type Overlay } from "./commands.js";
 import {
   createHarnessHandle,
   type HarnessHandle,
@@ -16,8 +19,8 @@ import { insert, type EditorState } from "./editor-state.js";
 import { messageText, restoreText } from "./queue-helpers.js";
 import type { BootstrapResult } from "../bootstrap.js";
 
-/** Overlay union: null = normal input; settings = form; filePicker = @file. */
-type Overlay = null | { kind: "settings" } | { kind: "filePicker" };
+/** Overlay union: null = normal input; settings = form; filePicker = @file; sessionPicker = /resume. */
+// Type re-exported from commands.ts to keep the variants in one place.
 
 interface AppProps {
   /** Initial handle; App re-binds replace to its own setState in a useState init. */
@@ -233,6 +236,25 @@ function App({
           onInsert={(filePath) => {
             setEditorState((prev) => insert(prev, filePath));
             setOverlay(null);
+          }}
+          onCancel={() => setOverlay(null)}
+        />
+      ) : overlay.kind === "sessionPicker" ? (
+        <SessionPicker
+          sessions={overlay.sessions}
+          onPick={(info) => {
+            void (async () => {
+              try {
+                const repo = new JsonlSessionRepo({ fs: env, sessionsRoot: sessionsDir });
+                const session = await repo.open({ path: info.path } as JsonlSessionMetadata);
+                await handle.replace({ session, sessionPath: info.path, reloadResources: true });
+                setOverlay(null);
+                print(`Resumed session: ${info.path}`);
+              } catch (e) {
+                setOverlay(null);
+                print(`Resume failed: ${e instanceof Error ? e.message : String(e)}`);
+              }
+            })();
           }}
           onCancel={() => setOverlay(null)}
         />

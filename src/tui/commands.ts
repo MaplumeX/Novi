@@ -1,12 +1,17 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import {
+  JsonlSessionRepo,
+  uuidv7,
+} from "@earendil-works/pi-agent-core/node";
 import type {
   AgentHarness,
   Session,
   SessionTreeEntry,
   ThinkingLevel,
+  JsonlSessionMetadata,
+  ExecutionEnv,
 } from "@earendil-works/pi-agent-core/node";
-import type { JsonlSessionMetadata, ExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import type { Models } from "@earendil-works/pi-ai";
 import type { HarnessHandle } from "./harness-handle.js";
 import type { ResolvedSettings } from "../settings.js";
@@ -52,8 +57,8 @@ export interface CommandContext {
   // --- config-personalization (child 1) ---
   /** Replaceable harness holder (for /reload, /new, /resume). */
   handle: HarnessHandle;
-  /** Overlay setter: open the settings form (or future overlays). */
-  setOverlay: (overlay: null | { kind: "settings" }) => void;
+  /** Overlay setter: open the settings form, session picker, etc. */
+  setOverlay: (overlay: Overlay) => void;
   /** Execution env (for settings file reads/writes). */
   env: ExecutionEnv;
   /** Working directory. */
@@ -67,6 +72,13 @@ export interface CommandContext {
   /** Queued steer/followUp/nextTurn messages (projected from queue_update). */
   queue: QueueState;
 }
+
+/** Overlay variants openable from commands. */
+export type Overlay =
+  | null
+  | { kind: "settings" }
+  | { kind: "filePicker" }
+  | { kind: "sessionPicker"; sessions: import("./SessionPicker.js").SessionInfo[] };
 
 export interface Command {
   name: string;
@@ -82,6 +94,39 @@ const THINKING_LEVELS: readonly ThinkingLevel[] = [
   "high",
   "xhigh",
 ];
+
+/**
+ * Best-effort scan of a session jsonl file for the most recent `session_info`
+ * entry carrying a name. Cheaper than a full `Session` open (no tree build),
+ * and lets the `/resume` picker display user-set names.
+ */
+async function loadSessionDisplayName(
+  env: ExecutionEnv,
+  filePath: string,
+): Promise<string | undefined> {
+  const res = await env.readTextLines(filePath);
+  if (!res.ok) return undefined;
+  let name: string | undefined;
+  for (const line of res.value) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    let entry: unknown;
+    try {
+      entry = JSON.parse(trimmed);
+    } catch {
+      continue;
+    }
+    if (
+      entry !== null &&
+      typeof entry === "object" &&
+      (entry as { type?: string }).type === "session_info" &&
+      typeof (entry as { name?: unknown }).name === "string"
+    ) {
+      name = (entry as { name: string }).name;
+    }
+  }
+  return name;
+}
 
 async function listSessionFiles(sessionsDir: string): Promise<Array<{ name: string; mtime: Date }>> {
   let entries: string[];
@@ -236,17 +281,101 @@ export const COMMANDS: readonly Command[] = [
   },
   {
     name: "new",
-    description: "Start a fresh session (manual restart)",
+    description: "Start a new session",
     run: async (ctx) => {
-      ctx.print("Quit and restart with: tsx src/cli.ts  (or `novi`)");
+      if (!ctx.isIdle) {
+        ctx.print("Harness is busy; /new requires idle.");
+        return;
+      }
+      try {
+        const repo = new JsonlSessionRepo({ fs: ctx.env, sessionsRoot: ctx.sessionsDir });
+        const id = uuidv7();
+        const session = await repo.create({ cwd: ctx.cwd, id });
+        const meta = await session.getMetadata();
+        await ctx.handle.replace({ session, sessionPath: meta.path, reloadResources: true });
+        ctx.print(`New session: ${meta.path}`);
+      } catch (e) {
+        ctx.print(`New session failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
     },
   },
   {
     name: "resume",
-    description: "Resume a session (manual restart with --resume <path>)",
+    description: "Browse and resume a previous session",
+    run: async (ctx) => {
+      try {
+        const repo = new JsonlSessionRepo({ fs: ctx.env, sessionsRoot: ctx.sessionsDir });
+        const metas = await repo.list({ cwd: ctx.cwd });
+        if (metas.length === 0) {
+          ctx.print("No previous sessions found.");
+          return;
+        }
+        const sessions = await Promise.all(
+          metas.map(async (m) => {
+            const displayName = await loadSessionDisplayName(ctx.env, m.path);
+            return {
+              label: displayName ?? path.basename(m.path),
+              path: m.path,
+              mtime: new Date(m.createdAt),
+            };
+          }),
+        );
+        ctx.setOverlay({ kind: "sessionPicker", sessions });
+      } catch (e) {
+        ctx.print(`Resume failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    },
+  },
+  {
+    name: "name",
+    description: "Name the current session (/name <name>)",
     run: async (ctx, args) => {
-      const target = args || "<path>";
-      ctx.print(`Quit and restart with: tsx src/cli.ts --resume ${target}`);
+      const name = args.trim();
+      if (!name) {
+        try {
+          const current = await ctx.session.getSessionName();
+          ctx.print(
+            current
+              ? `Session name: ${current}`
+              : "Session has no name. Usage: /name <name>",
+          );
+        } catch (e) {
+          ctx.print(`Failed: ${e instanceof Error ? e.message : String(e)}`);
+        }
+        return;
+      }
+      try {
+        await ctx.session.appendSessionName(name);
+        ctx.print(`Session named: ${name}`);
+      } catch (e) {
+        ctx.print(`Name failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    },
+  },
+  {
+    name: "session",
+    description: "Show current session info",
+    run: async (ctx) => {
+      try {
+        const meta = await ctx.session.getMetadata();
+        const branch = await ctx.session.getBranch();
+        const messageCount = branch.filter((e) => e.type === "message").length;
+        const lines = [
+          "Session:",
+          `  file: ${meta.path}`,
+          `  id: ${meta.id}`,
+          `  messages: ${messageCount}`,
+        ];
+        try {
+          const name = await ctx.session.getSessionName();
+          if (name) lines.push(`  name: ${name}`);
+        } catch {
+          // session without a name — omit
+        }
+        ctx.print(lines.join("\n"));
+      } catch (e) {
+        ctx.print(`Session info failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
     },
   },
   {

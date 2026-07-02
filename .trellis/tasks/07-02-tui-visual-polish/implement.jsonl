@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "组件模式/props/组合约定——所有 TUI 组件改造必须遵循"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "代码标准/禁止模式——颜色硬编码清理的验收依据"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "类型模式——theme.ts 的 const 类型定义需符合项目类型规范"}
+{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "模块组织约定——Spinner.tsx 等新文件放置位置"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "跨层一致性——主题模块被多组件消费，需遵循统一 payload 原则"}

@@ -41,6 +41,23 @@ anthropic provider 读 `ANTHROPIC_API_KEY` / `ANTHROPIC_OAUTH_TOKEN`（经 `envA
 
 检测未配置 provider：用公开 `models.getAuth(model)`（返回 `undefined` 即未配置，无网络调用）。
 
+### 枚举 provider 接受的 env var 名（findEnvKeys via compat）
+
+`findEnvKeys(provider, env)` / `getEnvApiKey(provider, env)` **只从 `@earendil-works/pi-ai/compat` subpath 导出**（root `index` 和 `providers/all` 都不导出它们）。`compat` 是「临时兼容入口」（会在 coding-agent ModelManager 迁移后删除），但目前是唯一访问路径。
+
+`findEnvKeys(provider, env)` 的语义是「返回**当前已设置**的 env var 名」，不是「provider 接受的所有 env var 名」。要枚举某 provider 接受的 env var 名（用于 onboarding 向导提示用户输入哪个变量），传一个「所有属性都返回 truthy」的 sentinel env：
+
+```ts
+import { findEnvKeys } from "@earendil-works/pi-ai/compat";
+import type { ProviderEnv } from "@earendil-works/pi-ai";
+
+const ALL_SET: ProviderEnv = new Proxy({}, { get: () => "x", has: () => true }) as ProviderEnv;
+const accepted = findEnvKeys("anthropic", ALL_SET); // ["ANTHROPIC_OAUTH_TOKEN","ANTHROPIC_API_KEY"]
+```
+
+- 对于 ambient-only provider（如 `amazon-bedrock`、`google-vertex` 默认 ADC），`findEnvKeys` 返回 `undefined` —— 这些 provider 没有简单 env var key，向导应展示「请用 ambient 凭证（profile/ADC）手动配置」并跳过 key 录入。
+- 不要把 provider→env-var 映射复制到 Novi 代码里——会随 pi-ai 漂移。始终用上述 sentinel trick 查询。
+
 ## AgentHarnessOptions 关键字段
 
 需**同时**传 `models: Models` 和 `model: Model`：

@@ -95,6 +95,38 @@ parent dirs if missing. A `null`/`undefined` value removes the key.
 
 ---
 
+## Credentials Store
+
+API keys are **not** stored in `settings.json`. They live in a separate
+file `~/.novi/credentials.json` (`src/credentials.ts`), physically isolated
+from settings so accidental sharing/screenshots of `settings.json` never
+leak secrets.
+
+```ts
+// Format: flat { "<ENV_VAR_NAME>": "<api_key>" } JSON object.
+import { loadCredentials, writeCredentials, injectCredentialsIntoEnv } from "./credentials.js";
+
+const creds = await loadCredentials(env);             // missing/corrupt → {}
+await writeCredentials(env, { ANTHROPIC_API_KEY: "sk-..." }); // shallow-merge + chmod 0600
+injectCredentialsIntoEnv(creds, process.env);          // only fills UNDEFINED vars
+```
+
+- **File**: `~/.novi/credentials.json`, JSON object `{ "ENV_VAR": "value" }`,
+  pretty-printed, permission `0600` (set via `fs.chmod` after write; chmod
+  failure is ignored, not fatal).
+- **Injection at startup**: `bootstrap()` calls `loadCredentials` +
+  `injectCredentialsIntoEnv` before `resolveModel`, so pi-ai's `getAuth` sees
+  stored keys transparently. **Only `undefined` env vars are filled** — a user
+  who explicitly exports a var always wins. Empty string is treated as set
+  (the user explicitly cleared it).
+- **Read-only display**: `/settings` shows credential key names + masked
+  values (first 3 / last 4 chars) — never the full secret. Editing requires
+  manual file edits or a future `/setup`.
+- Key names come from pi-ai's provider→env mapping; see
+  `backend/pi-agent-core-api.md` for the `findEnvKeys` enumeration trick.
+
+---
+
 ## Forbidden Patterns
 
 - Do not introduce a database (SQLite, Prisma, etc.) without an explicit task.

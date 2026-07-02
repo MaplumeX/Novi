@@ -57,6 +57,8 @@ export function useHarnessState(
   harness: AgentHarness,
   session?: Session<JsonlSessionMetadata>,
 ): HarnessState {
+  // Dependency array below is [harness, session]; callers passing
+  // handle.harness / handle.session get re-subscription on replace().
   const [state, setState] = useState<HarnessState>(() => ({
     phase: "idle",
     messages: [],

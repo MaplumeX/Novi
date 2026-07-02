@@ -1,30 +1,42 @@
+import path from "node:path";
 import { NodeExecutionEnv, AgentHarness, JsonlSessionRepo, uuidv7 } from "@earendil-works/pi-agent-core/node";
 import type {
   JsonlSessionMetadata,
   Session,
   ExecutionEnv,
+  ThinkingLevel,
 } from "@earendil-works/pi-agent-core/node";
 import type { Api, Model, Models } from "@earendil-works/pi-ai";
 import { builtinModels } from "@earendil-works/pi-ai/providers/all";
 import { formatSkillsForSystemPrompt } from "@earendil-works/pi-agent-core/node";
 import type { AgentHarnessResources } from "@earendil-works/pi-agent-core/node";
-import { getNoviDir, getSessionsDir, getSystemPromptCandidates } from "./config.js";
+import { getNoviDir, getSessionsDir } from "./config.js";
 import { DEFAULT_SYSTEM_PROMPT } from "./default-system-prompt.js";
 import { createBuiltinTools } from "./tools/index.js";
 import { loadResources } from "./resources.js";
+import {
+  loadSettings,
+  resolveSettings,
+  getAgentsMdCandidates,
+  type ResolvedSettings,
+} from "./settings.js";
 
 /** Default provider used when `--provider` is not given. */
 export const DEFAULT_PROVIDER = "anthropic";
 /** Default model id under the default provider. */
 export const DEFAULT_MODEL_ID = "claude-sonnet-4-5";
+/** Default thinking level when none is configured. */
+export const DEFAULT_THINKING_LEVEL: ThinkingLevel = "medium";
 
 export interface BootstrapOptions {
   /** Working directory. Defaults to `process.cwd()`. */
   cwd?: string;
-  /** Provider id (e.g. "anthropic"). Defaults to {@link DEFAULT_PROVIDER}. */
+  /** Provider id (e.g. "anthropic"). Defaults to settings or {@link DEFAULT_PROVIDER}. */
   provider?: string;
-  /** Model id under the provider. Defaults to a sensible built-in. */
+  /** Model id under the provider. Defaults to settings or a sensible built-in. */
   model?: string;
+  /** Thinking level. Defaults to settings or {@link DEFAULT_THINKING_LEVEL}. */
+  thinkingLevel?: ThinkingLevel;
   /** Optional path to an existing session file to resume. */
   resumePath?: string;
 }
@@ -37,6 +49,17 @@ export interface BootstrapResult {
   session: Session<JsonlSessionMetadata>;
   /** Absolute path of the active session JSONL file. */
   sessionPath: string;
+  /** Working directory passed to bootstrap. */
+  cwd: string;
+  /** Resolved settings (merged + CLI overrides + provenance). */
+  resolvedSettings: ResolvedSettings;
+  /** System-prompt provider (reused when rebuilding the harness on /reload). */
+  systemPrompt: (ctx: {
+    env: ExecutionEnv;
+    resources: AgentHarnessResources;
+  }) => Promise<string>;
+  /** Raw CLI overrides (provider/model/thinking) for /settings re-resolution. */
+  cliOverrides: { provider?: string; model?: string; thinkingLevel?: ThinkingLevel };
 }
 
 /**
@@ -55,10 +78,6 @@ async function resolveModel(
         `Run with --provider <id> to pick another provider.`,
     );
   }
-  // When --model is not given, prefer the documented stable default for the
-  // default provider; otherwise fall back to the first catalog entry. Catalog
-  // order is not guaranteed to be newest-first, so without this the default
-  // provider would resolve to a stale legacy model.
   const model = modelId
     ? (models.getModel(provider, modelId) ?? undefined)
     : (provider === DEFAULT_PROVIDER
@@ -85,31 +104,75 @@ async function resolveModel(
 }
 
 /**
- * System-prompt provider callback. Reads `.novi/system-prompt.md`, then
- * `~/.novi/system-prompt.md`, falling back to {@link DEFAULT_SYSTEM_PROMPT}.
- * The model-visible skills block (from the harness resource snapshot) is
- * appended when any skills are loaded. `resources` is the live snapshot kept
- * by the harness, so the skills section reflects `setResources()` each turn.
+ * System-prompt provider callback. Assembles the model-visible prompt from:
+ *
+ * 1. **base**: `.novi/SYSTEM.md` (project) → `~/.novi/SYSTEM.md` (global) →
+ *    `.novi/system-prompt.md` (compat) → `~/.novi/system-prompt.md` (compat) →
+ *    {@link DEFAULT_SYSTEM_PROMPT}. Project > global; SYSTEM.md > legacy
+ *    `system-prompt.md`.
+ * 2. **appendBlock**: `.novi/APPEND_SYSTEM.md` (project) +
+ *    `~/.novi/APPEND_SYSTEM.md` (global) — both appended (project first) when
+ *    present.
+ * 3. **contextBlock**: AGENTS.md candidate files (global + parent dirs + cwd),
+ *    deduplicated, concatenated.
+ * 4. **skillsBlock**: model-visible skills block from the harness resource
+ *    snapshot.
+ *
+ * Sections are joined with blank-line separators; empty sections are omitted.
  */
-function makeSystemPromptProvider(cwd: string) {
-  const candidates = getSystemPromptCandidates(cwd);
-  return async ({
-    env,
-    resources,
-  }: {
-    env: ExecutionEnv;
-    resources: AgentHarnessResources;
-  }): Promise<string> => {
+function makeSystemPromptProvider(cwd: string): (ctx: {
+  env: ExecutionEnv;
+  resources: AgentHarnessResources;
+}) => Promise<string> {
+  // Legacy system-prompt.md candidates (compat fallback, before SYSTEM.md).
+  const noviDir = getNoviDir();
+  const systemMdCandidates = [
+    path.join(cwd, ".novi", "SYSTEM.md"),
+    path.join(noviDir, "SYSTEM.md"),
+    // Legacy compat (recommended migration to SYSTEM.md).
+    path.join(cwd, ".novi", "system-prompt.md"),
+    path.join(noviDir, "system-prompt.md"),
+  ];
+  const appendCandidates = [
+    path.join(cwd, ".novi", "APPEND_SYSTEM.md"),
+    path.join(noviDir, "APPEND_SYSTEM.md"),
+  ];
+  const agentsMdCandidates = getAgentsMdCandidates(cwd);
+
+  return async ({ env, resources }: { env: ExecutionEnv; resources: AgentHarnessResources }): Promise<string> => {
+    // 1. base prompt
     let base = DEFAULT_SYSTEM_PROMPT;
-    for (const candidate of candidates) {
+    for (const candidate of systemMdCandidates) {
       const result = await env.readTextFile(candidate);
       if (result.ok && result.value.trim().length > 0) {
         base = result.value;
         break;
       }
     }
+
+    // 2. append block (both layers, project first)
+    const appendParts: string[] = [];
+    for (const candidate of appendCandidates) {
+      const result = await env.readTextFile(candidate);
+      if (result.ok && result.value.trim().length > 0) {
+        appendParts.push(result.value.trim());
+      }
+    }
+
+    // 3. context files (AGENTS.md)
+    const contextParts: string[] = [];
+    for (const candidate of agentsMdCandidates) {
+      const result = await env.readTextFile(candidate);
+      if (result.ok && result.value.trim().length > 0) {
+        contextParts.push(result.value.trim());
+      }
+    }
+
+    // 4. skills block
     const skillsBlock = formatSkillsForSystemPrompt(resources.skills ?? []);
-    return skillsBlock ? `${base}\n\n${skillsBlock}` : base;
+
+    const parts = [base.trim(), ...appendParts, ...contextParts, skillsBlock];
+    return parts.filter((s) => s.length > 0).join("\n\n");
   };
 }
 
@@ -136,6 +199,21 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
   await ensureDir(env, getNoviDir());
   await ensureDir(env, sessionsDir);
 
+  // Load settings (global + project merge). Parse failures are non-fatal warnings.
+  const loadResult = await loadSettings(env, cwd);
+  for (const diagnostic of loadResult.diagnostics) {
+    process.stderr.write(`warning: ${diagnostic}\n`);
+  }
+  const resolvedSettings = resolveSettings(
+    loadResult.merged,
+    loadResult.layers,
+    {
+      provider: options.provider,
+      model: options.model,
+      thinkingLevel: options.thinkingLevel,
+    },
+  );
+
   const repo = new JsonlSessionRepo({ fs: env, sessionsRoot: sessionsDir });
   let session: Session<JsonlSessionMetadata>;
   if (options.resumePath) {
@@ -151,8 +229,8 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
   const sessionPath = metadata.path;
 
   const models = builtinModels();
-  const provider = options.provider ?? DEFAULT_PROVIDER;
-  const model = await resolveModel(models, provider, options.model);
+  const provider = resolvedSettings.defaultProvider ?? DEFAULT_PROVIDER;
+  const model = await resolveModel(models, provider, resolvedSettings.defaultModel);
 
   const systemPrompt = makeSystemPromptProvider(cwd);
 
@@ -162,18 +240,17 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
     models,
     model,
     systemPrompt,
+    thinkingLevel: resolvedSettings.defaultThinkingLevel ?? DEFAULT_THINKING_LEVEL,
   });
 
   // Register the built-in tool set. `setTools` keeps the previous
   // `activeToolNames` when none are passed, so pass all names explicitly to
-  // activate every tool by default. Emits a `tools_update` event that the
-  // TUI StatusBar / `/tools` command reflects.
+  // activate every tool by default.
   const tools = createBuiltinTools(env);
   await harness.setTools(tools, tools.map((t) => t.name));
 
   // Load skills + prompt templates (user + project) and publish them to the
   // harness. The system-prompt provider reads `resources.skills` each turn.
-  // Load failures are warnings only — they must not block startup.
   const loaded = await loadResources(env, cwd);
   for (const diagnostic of loaded.diagnostics) {
     process.stderr.write(`warning: ${diagnostic}\n`);
@@ -183,5 +260,32 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
     promptTemplates: loaded.promptTemplates,
   });
 
-  return { harness, env, models, model, session, sessionPath };
+  // Retry/provider options: pass through to the harness via setStreamOptions.
+  // Actual consumption (observability) is child 7; this child only wires the
+  // settings → harness path so /reload re-applies them.
+  const retry = resolvedSettings.retry?.provider;
+  if (retry && (retry.timeoutMs !== undefined || retry.maxRetries !== undefined || retry.maxRetryDelayMs !== undefined)) {
+    await harness.setStreamOptions({
+      ...(retry.timeoutMs !== undefined ? { timeoutMs: retry.timeoutMs } : {}),
+      ...(retry.maxRetries !== undefined ? { maxRetries: retry.maxRetries } : {}),
+      ...(retry.maxRetryDelayMs !== undefined ? { maxRetryDelayMs: retry.maxRetryDelayMs } : {}),
+    });
+  }
+
+  return {
+    harness,
+    env,
+    models,
+    model,
+    session,
+    sessionPath,
+    cwd,
+    resolvedSettings,
+    systemPrompt,
+    cliOverrides: {
+      provider: options.provider,
+      model: options.model,
+      thinkingLevel: options.thinkingLevel,
+    },
+  };
 }

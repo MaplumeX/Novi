@@ -1,0 +1,242 @@
+import { afterEach, describe, expect, it } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
+import {
+  mergeSettings,
+  resolveSettings,
+  writeSettings,
+  applyPatch,
+  getAgentsMdCandidates,
+  loadSettings,
+  type NoviSettings,
+} from "./settings.js";
+
+describe("mergeSettings", () => {
+  it("merges flat keys with project overriding global", () => {
+    const g: NoviSettings = { defaultProvider: "anthropic", defaultModel: "claude-a" };
+    const p: NoviSettings = { defaultModel: "claude-b" };
+    const out = mergeSettings(g, p);
+    expect(out.defaultProvider).toBe("anthropic");
+    expect(out.defaultModel).toBe("claude-b");
+  });
+
+  it("shallow-merges nested objects (one level deep)", () => {
+    const g: NoviSettings = {
+      compaction: { enabled: true, reserveTokens: 1000, keepRecentTokens: 2000 },
+    };
+    const p: NoviSettings = { compaction: { reserveTokens: 500 } };
+    const out = mergeSettings(g, p);
+    expect(out.compaction).toEqual({ enabled: true, reserveTokens: 500, keepRecentTokens: 2000 });
+  });
+
+  it("merges retry one level deep (project.provider replaces global.provider)", () => {
+    // mergeSettings is one level deep: `retry` is merged, but `provider` (a
+    // nested object beyond one level) is replaced wholesale by project.
+    const g: NoviSettings = { retry: { provider: { timeoutMs: 30, maxRetries: 2 } } };
+    const p: NoviSettings = { retry: { provider: { maxRetries: 5 } } };
+    const out = mergeSettings(g, p);
+    expect(out.retry?.provider).toEqual({ maxRetries: 5 });
+  });
+
+  it("handles empty layers", () => {
+    expect(mergeSettings({}, {})).toEqual({});
+  });
+
+  it("takes project value when global is absent", () => {
+    const out = mergeSettings({}, { defaultProvider: "openai" });
+    expect(out.defaultProvider).toBe("openai");
+  });
+
+  it("takes global value when project is absent", () => {
+    const out = mergeSettings({ defaultProvider: "anthropic" }, {});
+    expect(out.defaultProvider).toBe("anthropic");
+  });
+});
+
+describe("resolveSettings", () => {
+  it("marks cli overrides as 'cli'", () => {
+    const merged: NoviSettings = { defaultProvider: "anthropic" };
+    const layers = { global: { defaultProvider: "anthropic" } as NoviSettings | null, project: null };
+    const out = resolveSettings(merged, layers, { provider: "openai" });
+    expect(out.defaultProvider).toBe("openai");
+    expect(out._sources["defaultProvider"]).toBe("cli");
+  });
+
+  it("marks project-sourced values as 'project'", () => {
+    const merged: NoviSettings = { defaultModel: "claude-a" };
+    const layers = { global: null, project: { defaultModel: "claude-a" } as NoviSettings | null };
+    const out = resolveSettings(merged, layers, {});
+    expect(out._sources["defaultModel"]).toBe("project");
+  });
+
+  it("marks global-sourced values as 'global'", () => {
+    const merged: NoviSettings = { defaultProvider: "anthropic" };
+    const layers = { global: { defaultProvider: "anthropic" } as NoviSettings | null, project: null };
+    const out = resolveSettings(merged, layers, {});
+    expect(out._sources["defaultProvider"]).toBe("global");
+  });
+
+  it("marks absent values as 'default'", () => {
+    const out = resolveSettings(null, { global: null, project: null }, {});
+    expect(out._sources["defaultProvider"]).toBe("default");
+    expect(out._sources["defaultModel"]).toBe("default");
+    expect(out._sources["defaultThinkingLevel"]).toBe("default");
+    expect(out._sources["compaction.enabled"]).toBe("default");
+    expect(out._sources["retry.provider.timeoutMs"]).toBe("default");
+  });
+
+  it("marks nested compaction leaves by their source", () => {
+    const merged: NoviSettings = {
+      compaction: { enabled: true, reserveTokens: 1000, keepRecentTokens: 2000 },
+    };
+    const layers = {
+      global: { compaction: { enabled: true, keepRecentTokens: 2000 } } as NoviSettings | null,
+      project: { compaction: { reserveTokens: 1000 } } as NoviSettings | null,
+    };
+    const out = resolveSettings(merged, layers, {});
+    expect(out._sources["compaction.enabled"]).toBe("global");
+    expect(out._sources["compaction.reserveTokens"]).toBe("project");
+    expect(out._sources["compaction.keepRecentTokens"]).toBe("global");
+  });
+
+  it("marks nested retry.provider leaves by their source", () => {
+    const merged: NoviSettings = { retry: { provider: { timeoutMs: 30, maxRetries: 5 } } };
+    const layers = {
+      global: { retry: { provider: { timeoutMs: 30 } } } as NoviSettings | null,
+      project: { retry: { provider: { maxRetries: 5 } } } as NoviSettings | null,
+    };
+    const out = resolveSettings(merged, layers, {});
+    expect(out._sources["retry.provider.timeoutMs"]).toBe("global");
+    expect(out._sources["retry.provider.maxRetries"]).toBe("project");
+    expect(out._sources["retry.provider.maxRetryDelayMs"]).toBe("default");
+  });
+});
+
+describe("applyPatch", () => {
+  it("sets a top-level key", () => {
+    const out = applyPatch({}, { defaultProvider: "openai" });
+    expect(out).toEqual({ defaultProvider: "openai" });
+  });
+
+  it("sets a nested key creating intermediate objects", () => {
+    const out = applyPatch({}, { "compaction.enabled": false });
+    expect(out).toEqual({ compaction: { enabled: false } });
+  });
+
+  it("merges into an existing nested object", () => {
+    const out = applyPatch({ compaction: { enabled: true } }, { "compaction.reserveTokens": 500 });
+    expect(out).toEqual({ compaction: { enabled: true, reserveTokens: 500 } });
+  });
+
+  it("removes a key when value is null", () => {
+    const out = applyPatch({ defaultProvider: "openai" }, { defaultProvider: null });
+    expect(out).toEqual({});
+  });
+
+  it("sets deep retry.provider keys", () => {
+    const out = applyPatch({}, { "retry.provider.maxRetries": 3 });
+    expect(out).toEqual({ retry: { provider: { maxRetries: 3 } } });
+  });
+});
+
+describe("getAgentsMdCandidates", () => {
+  it("includes the global ~/.novi/AGENTS.md first", () => {
+    const home = "/home/user";
+    const out = getAgentsMdCandidates("/home/user/projects/app", home);
+    expect(out[0]).toBe(path.resolve("/home/user/.novi/AGENTS.md"));
+  });
+
+  it("includes cwd's own AGENTS.md last", () => {
+    const home = "/home/user";
+    const out = getAgentsMdCandidates("/home/user/projects/app", home);
+    const last = out[out.length - 1];
+    expect(last).toBe(path.resolve("/home/user/projects/app/AGENTS.md"));
+  });
+
+  it("walks parent directories from farthest to nearest", () => {
+    const home = "/home/user";
+    const out = getAgentsMdCandidates("/home/user/projects/app", home);
+    // Filter out the global ~/.novi/AGENTS.md to inspect parent-dir order.
+    const parents = out.filter((p) => !p.includes(path.join(home, ".novi")));
+    // parents should be: /home/user/projects/AGENTS.md, then .../app/AGENTS.md last
+    // The farthest ancestor (/home) AGENTS.md... actually path.dirname(/home/user/projects/app) = /home/user/projects
+    // The ancestors collected start from cwd's parent up.
+    // Order: farthest ancestor first → root, then closer. Then cwd last.
+    expect(parents[parents.length - 1]).toBe(path.resolve("/home/user/projects/app/AGENTS.md"));
+    // The ancestor closest to cwd (excluding cwd itself) should be projects/AGENTS.md
+    expect(parents[parents.length - 2]).toBe(path.resolve("/home/user/projects/AGENTS.md"));
+  });
+
+  it("deduplicates when cwd is the home directory", () => {
+    const home = "/home/user";
+    const out = getAgentsMdCandidates(home, home);
+    // Should not error and should contain the global entry + cwd entry (same dir, but different filename).
+    const globalEntry = out.find((p) => p === path.resolve(home, ".novi", "AGENTS.md"));
+    const cwdEntry = out.find((p) => p === path.resolve(home, "AGENTS.md"));
+    expect(globalEntry).toBeDefined();
+    expect(cwdEntry).toBeDefined();
+  });
+});
+
+describe("writeSettings + loadSettings (round-trip)", () => {
+  const cleanups: Array<() => Promise<void>> = [];
+
+  afterEach(async () => {
+    while (cleanups.length) await cleanups.pop()!();
+  });
+
+  async function setup(): Promise<{ env: NodeExecutionEnv; cwd: string }> {
+    const cwd = await mkdtemp(path.join(tmpdir(), "novi-settings-"));
+    const env = new NodeExecutionEnv({ cwd, shellEnv: process.env });
+    cleanups.push(async () => {
+      await env.cleanup();
+      await rm(cwd, { recursive: true, force: true });
+    });
+    return { env, cwd };
+  }
+
+  it("writes a new settings file and loads it back", async () => {
+    const { env, cwd } = await setup();
+    const target = path.join(cwd, ".novi", "settings.json");
+    await writeSettings(env, target, { defaultProvider: "openai", "compaction.enabled": true });
+
+    const result = await loadSettings(env, cwd);
+    expect(result.merged?.defaultProvider).toBe("openai");
+    expect(result.merged?.compaction?.enabled).toBe(true);
+    expect(result.diagnostics).toEqual([]);
+  });
+
+  it("merges into an existing settings file", async () => {
+    const { env, cwd } = await setup();
+    const target = path.join(cwd, ".novi", "settings.json");
+    await writeSettings(env, target, { defaultProvider: "openai" });
+    await writeSettings(env, target, { "compaction.reserveTokens": 500 });
+
+    const result = await loadSettings(env, cwd);
+    expect(result.merged?.defaultProvider).toBe("openai");
+    expect(result.merged?.compaction?.reserveTokens).toBe(500);
+  });
+
+  it("returns null merged and empty diagnostics when no settings file exists", async () => {
+    const { env, cwd } = await setup();
+    const result = await loadSettings(env, cwd);
+    expect(result.merged).toBeNull();
+    expect(result.diagnostics).toEqual([]);
+  });
+
+  it("emits a diagnostic when settings JSON is corrupt", async () => {
+    const { env, cwd } = await setup();
+    const target = path.join(cwd, ".novi", "settings.json");
+    const dirResult = await env.createDir(path.dirname(target), { recursive: true });
+    if (!dirResult.ok) throw new Error(`createDir failed: ${dirResult.error.message}`);
+    const writeResult = await env.writeFile(target, "{ not valid json");
+    if (!writeResult.ok) throw new Error(`writeFile failed: ${writeResult.error.message}`);
+
+    const result = await loadSettings(env, cwd);
+    expect(result.merged).toBeNull();
+    expect(result.diagnostics.length).toBeGreaterThan(0);
+    expect(result.diagnostics[0]).toContain("project");
+  });
+});

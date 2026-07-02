@@ -13,6 +13,7 @@ const { values } = parseArgs({
   options: {
     provider: { type: "string" },
     model: { type: "string" },
+    thinking: { type: "string", short: "t" },
     cwd: { type: "string" },
     resume: { type: "string" },
     help: { type: "boolean", short: "h", default: false },
@@ -31,6 +32,7 @@ if (values.help) {
       "Options:",
       "  --provider <id>   Provider id (default: anthropic)",
       "  --model <id>      Model id under the provider (default: claude-sonnet-4-5)",
+      "  --thinking <lvl>  Thinking level: off|minimal|low|medium|high|xhigh",
       "  --cwd <dir>       Working directory (default: process.cwd())",
       "  --resume <path>   Resume an existing session JSONL file",
       "  -h, --help        Show this help",
@@ -40,13 +42,21 @@ if (values.help) {
 }
 
 try {
-  const { harness, session, sessionPath, models } = await bootstrap({
+  const result = await bootstrap({
     cwd: values.cwd,
     provider: values.provider,
     model: values.model,
+    thinkingLevel: values.thinking as
+      | "off"
+      | "minimal"
+      | "low"
+      | "medium"
+      | "high"
+      | "xhigh"
+      | undefined,
     resumePath: values.resume,
   });
-  renderApp(harness, session, sessionPath, models, getSessionsDir());
+  renderApp(result, getSessionsDir());
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
   fail(`Novi: ${message}`);

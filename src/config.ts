@@ -10,15 +10,3 @@ export function getNoviDir(): string {
 export function getSessionsDir(): string {
   return path.join(getNoviDir(), "sessions");
 }
-
-/**
- * Candidate system-prompt file paths, in priority order:
- *   1. project-local `.novi/system-prompt.md`
- *   2. user-level `~/.novi/system-prompt.md`
- */
-export function getSystemPromptCandidates(cwd: string): string[] {
-  return [
-    path.join(cwd, ".novi", "system-prompt.md"),
-    path.join(getNoviDir(), "system-prompt.md"),
-  ];
-}

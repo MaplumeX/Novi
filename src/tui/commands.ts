@@ -7,8 +7,12 @@ import type {
   SessionTreeEntry,
   ThinkingLevel,
 } from "@earendil-works/pi-agent-core/node";
-import type { JsonlSessionMetadata } from "@earendil-works/pi-agent-core/node";
+import type { JsonlSessionMetadata, ExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import type { Models, TextContent } from "@earendil-works/pi-ai";
+import type { HarnessHandle } from "./harness-handle.js";
+import type { ResolvedSettings } from "../settings.js";
+import { loadSettings, resolveSettings } from "../settings.js";
+import type { BootstrapResult } from "../bootstrap.js";
 
 export interface ParsedCommand {
   name: string;
@@ -44,6 +48,21 @@ export interface CommandContext {
   exit: () => void;
   /** Emit a (possibly multi-line) notice line into the TUI output area. */
   print: (text: string) => void;
+  // --- config-personalization (child 1) ---
+  /** Replaceable harness holder (for /reload, /new, /resume). */
+  handle: HarnessHandle;
+  /** Overlay setter: open the settings form (or future overlays). */
+  setOverlay: (overlay: null | { kind: "settings" }) => void;
+  /** Execution env (for settings file reads/writes). */
+  env: ExecutionEnv;
+  /** Working directory. */
+  cwd: string;
+  /** System-prompt provider (reused by harness rebuild). */
+  systemPrompt: BootstrapResult["systemPrompt"];
+  /** CLI overrides for settings re-resolution. */
+  cliOverrides: { provider?: string; model?: string; thinkingLevel?: ThinkingLevel };
+  /** Update the resolved-settings state (after a /settings save). */
+  setSettings: (s: ResolvedSettings) => void;
 }
 
 export interface Command {
@@ -264,6 +283,38 @@ export const COMMANDS: readonly Command[] = [
         return `  ${e.id}  ${e.type}${summary ? `  ${summary}` : ""}`;
       });
       ctx.print(["Session tree:", ...lines].join("\n"));
+    },
+  },
+  {
+    name: "settings",
+    description: "Open the interactive settings form",
+    run: async (ctx) => {
+      ctx.setOverlay({ kind: "settings" });
+    },
+  },
+  {
+    name: "reload",
+    description: "Reload settings, skills, prompts, and context files",
+    run: async (ctx) => {
+      if (!ctx.isIdle) {
+        ctx.print("Harness is busy; /reload requires idle.");
+        return;
+      }
+      try {
+        await ctx.handle.replace({ reloadResources: true });
+        // Re-read settings.json so the /settings form reflects the on-disk
+        // state. (Model/thinking/streamOptions are replayed from the old
+        // harness by design; settings file changes to those fields take
+        // effect on next full restart, not mid-session.)
+        const loaded = await loadSettings(ctx.env, ctx.cwd);
+        for (const diagnostic of loaded.diagnostics) {
+          ctx.print(`warning: ${diagnostic}`);
+        }
+        ctx.setSettings(resolveSettings(loaded.merged, loaded.layers, ctx.cliOverrides));
+        ctx.print("Reloaded settings, skills, prompts, and context files.");
+      } catch (e) {
+        ctx.print(`Reload failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
     },
   },
   {

@@ -52,6 +52,8 @@ interface InputBoxProps {
   onHistoryDown: () => void;
   /** Shift+Tab: cycle the thinking level (off→minimal→…→xhigh→off). */
   onCycleThinking: () => void;
+  /** Terminal width for full-width dividers. */
+  terminalWidth: number;
 }
 
 /**
@@ -80,6 +82,7 @@ export function InputBox({
   onHistoryUp,
   onHistoryDown,
   onCycleThinking,
+  terminalWidth,
 }: InputBoxProps): React.ReactElement {
   // --- Slash command list state ---
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
@@ -345,7 +348,7 @@ export function InputBox({
 
   return (
     <Box flexDirection="column">
-      <Text color={theme.dim}>{divider()}</Text>
+      <Text color={theme.dim}>{divider(terminalWidth)}</Text>
       <Text>
         <Text color={theme.accent} bold>{icons.prompt} </Text>
         {before}

@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Text, useApp, useInput, render } from "ink";
+import { Text, useApp, useInput, render, useStdout } from "ink";
 import type { Models } from "@earendil-works/pi-ai";
 import { JsonlSessionRepo } from "@earendil-works/pi-agent-core/node";
 import type { JsonlSessionMetadata } from "@earendil-works/pi-agent-core/node";
@@ -72,6 +72,7 @@ function App({
 
   const state = useHarnessState(handle.harness, handle.session);
   const { exit } = useApp();
+  const terminalWidth = useStdout().stdout?.columns ?? 80;
   const [notice, setNotice] = useState<string[]>([]);
   const [overlay, setOverlay] = useState<Overlay>(null);
   const [settings, setSettings] = useState(resolvedSettings);
@@ -254,15 +255,6 @@ function App({
             </Text>
           ))
         : null}
-      <StatusBar
-        phase={state.phase}
-        model={state.model}
-        thinkingLevel={state.thinkingLevel}
-        activeToolNames={state.activeToolNames}
-        queue={state.queue}
-        lastUsage={state.lastUsage}
-        cumulativeUsage={state.cumulativeUsage}
-      />
       {overlay === null ? (
         <InputBox
           phase={state.phase}
@@ -281,6 +273,7 @@ function App({
           onAltUp={handleAltUp}
           onHistoryUp={handleHistoryUp}
           onHistoryDown={handleHistoryDown}
+          terminalWidth={terminalWidth}
         />
       ) : overlay.kind === "settings" ? (
         <SettingsForm
@@ -342,7 +335,13 @@ function App({
           onCancel={() => setOverlay(null)}
         />
       ) : null}
-      <Text color={theme.dim}>{divider()}</Text>
+      <Text color={theme.dim}>{divider(terminalWidth)}</Text>
+      <StatusBar
+        model={state.model}
+        thinkingLevel={state.thinkingLevel}
+        lastUsage={state.lastUsage}
+        cumulativeUsage={state.cumulativeUsage}
+      />
       <Text color={theme.dim}>session: {handle.sessionPath}</Text>
       <Text color={theme.dim}>
         /help for commands · Ctrl-C to exit · Ctrl-O: {toolExpanded ? "collapse" : "expand"}

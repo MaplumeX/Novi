@@ -28,10 +28,10 @@ subscription:
 // StatusBar.tsx
 type StatusBarProps = Pick<
   HarnessState,
-  "phase" | "model" | "thinkingLevel" | "activeToolNames" | "queue"
+  "model" | "thinkingLevel" | "lastUsage" | "cumulativeUsage"
 >;
 
-export function StatusBar({ phase, model, … }: StatusBarProps): React.ReactElement { … }
+export function StatusBar({ model, thinkingLevel, … }: StatusBarProps): React.ReactElement { … }
 ```
 
 Use `Pick<HarnessState, …>` to declare exactly which slices a component needs.
@@ -96,8 +96,12 @@ export function MessageList(…): React.ReactElement { … }
 ## Composition
 
 - Compose via children / fragments, not deep prop drilling. `App` returns a
-  `<>` fragment with `MessageList`, `StatusBar`, and either `InputBox` or an
-  overlay component (see below) as siblings.
+  `<>` fragment whose top-to-bottom order is: `MessageList`, `notice` lines,
+  `InputBox` (or an overlay), a full-width divider, `StatusBar`, then the
+  session/keybinding hint lines. `StatusBar` lives **below** the input box,
+  separated by a divider, so the editor prompt stays anchored to the
+  conversation; it shows only `model` · `thinkingLevel` · `usage` (no phase
+  indicator, no tools/queue counts).
 - Keyed lists use the index for short-lived render output (acceptable for
   markdown tokens / notice lines):
   ```tsx
@@ -201,8 +205,10 @@ import { theme } from "../theme.js";
 - `theme.dim` (`"dim"`) is the semantic replacement for `dimColor`. Ink
   resolves `color="dim"` to a chalk dim modifier, so it is functionally
   equivalent.
-- `divider(width?)` produces a fixed-width `─` line; no dynamic terminal
-  width detection is used.
+- `divider(width?)` produces a `─` line of the given width. Callers pass
+  the live terminal width from `useStdout().stdout?.columns ?? 80` so
+  dividers span the full screen; the `width` argument defaults to
+  `DIVIDER_WIDTH` (40) only as a fallback.
 - When adding a new color role, add it to `theme.ts` first, then consume it
   via `theme.*` — do not add a new hardcoded color literal in a component.
 - `theme.ts` also exports an `icons` constant registry — all visual glyphs

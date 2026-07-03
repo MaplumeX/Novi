@@ -5,7 +5,7 @@ import type { HarnessState } from "./useHarnessState.js";
 import { Markdown } from "./Markdown.js";
 import { ToolCallBlock } from "./ToolCallBlock.js";
 import { Spinner } from "./components/Spinner.js";
-import { DIVIDER_WIDTH, icons, theme } from "./theme.js";
+import { icons, theme } from "./theme.js";
 
 interface MessageListProps {
   messages: AgentMessage[];
@@ -32,16 +32,6 @@ function findToolResult(messages: AgentMessage[], toolCallId: string): ToolResul
   );
 }
 
-/** Render markdown text indented under a dim `│` guide column (row layout). */
-function GuideText({ children }: { children: React.ReactNode }): React.ReactElement {
-  return (
-    <Box flexDirection="row">
-      <Text color={theme.dim}>{icons.guide} </Text>
-      <Box flexDirection="column">{children}</Box>
-    </Box>
-  );
-}
-
 /** Render an assistant message, iterating its content array. */
 function renderAssistantMessage(
   message: Extract<AgentMessage, { role: "assistant" }>,
@@ -54,11 +44,7 @@ function renderAssistantMessage(
 
   const flushText = (key: string): void => {
     if (textBuffer.length > 0) {
-      parts.push(
-        <GuideText key={key}>
-          <Markdown text={textBuffer} />
-        </GuideText>,
-      );
+      parts.push(<Markdown key={key} text={textBuffer} />);
       textBuffer = "";
     }
   };
@@ -70,21 +56,10 @@ function renderAssistantMessage(
         break;
       case "thinking": {
         flushText(`md-${i}`);
-        if (toolExpanded && part.thinking.length > 0) {
-          parts.push(
-            <Box key={`think-${i}`} flexDirection="column">
-              <Text color={theme.dim}>{icons.separatorDotted.repeat(DIVIDER_WIDTH)}</Text>
-              <GuideText>
-                <Text color={theme.dim}>{part.thinking}</Text>
-              </GuideText>
-            </Box>,
-          );
-        } else {
-          const firstLine = part.thinking.split("\n")[0]?.slice(0, 60) ?? "";
+        if (part.thinking.length > 0) {
           parts.push(
             <Text key={`think-${i}`} color={theme.dim}>
-              {icons.guide} {firstLine}
-              {part.thinking.length > 60 ? "…" : ""}
+              {part.thinking}
             </Text>,
           );
         }
@@ -175,10 +150,7 @@ export function MessageList({
         </Box>
       ) : null}
       {streamingThinking.length > 0 ? (
-        <Text color={theme.dim}>
-          {icons.guide} {streamingThinking.split("\n")[0]?.slice(0, 60) ?? ""}
-          {streamingThinking.length > 60 ? "…" : ""}
-        </Text>
+        <Text color={theme.dim}>{streamingThinking}</Text>
       ) : null}
       {streamingText.length > 0 ? <Markdown text={streamingText} /> : null}
     </Box>

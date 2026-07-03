@@ -680,3 +680,36 @@ Deleted 9 slash commands (goto, abort, help, thinking, tree, tools, history, que
 ### Next Steps
 
 - None - task complete
+
+
+## Session 21: TUI cleanup: thinking blocks, status bar, input border
+
+**Date**: 2026-07-03
+**Task**: TUI cleanup: thinking blocks, status bar, input border
+**Branch**: `main`
+
+### Summary
+
+Cleaned up three TUI rendering details: (1) thinking blocks now always render fully with no guide column or dotted separator decorations, and assistant markdown text no longer wraps in a GuideText │ column; (2) StatusBar moved below InputBox (separated by a full-width divider), dropped the phase indicator and tools/queue counts, keeping only model/thinkingLevel/usage; (3) dividers now span the terminal width via useStdout().columns. Updated frontend component-guidelines spec to reflect the new StatusBar props, layout order, and divider convention.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `97fc24f` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

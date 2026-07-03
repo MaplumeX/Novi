@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { parseCommand, runCommand, COMMANDS, nextThinkingLevel, THINKING_LEVELS } from "./commands.js";
+import { parseCommand, runCommand, nextThinkingLevel, THINKING_LEVELS } from "./commands.js";
 import type { CommandContext } from "./commands.js";
 
 /** Build a mock CommandContext with a fake harness carrying promptTemplates + prompt spy. */
@@ -47,21 +47,21 @@ describe("parseCommand", () => {
   });
 
   it("collapses extra whitespace in args", () => {
-    expect(parseCommand("/thinking   high")).toEqual({
-      name: "thinking",
+    expect(parseCommand("/model   high")).toEqual({
+      name: "model",
       args: "high",
     });
   });
 
   it("preserves spaces inside multi-word args", () => {
-    expect(parseCommand("/goto  some entry id here")).toEqual({
-      name: "goto",
-      args: "some entry id here",
+    expect(parseCommand("/compact  keep it  short")).toEqual({
+      name: "compact",
+      args: "keep it  short",
     });
   });
 
   it("handles leading whitespace and multiple slashes", () => {
-    expect(parseCommand("  //help")).toEqual({ name: "help", args: "" });
+    expect(parseCommand("  //quit")).toEqual({ name: "quit", args: "" });
   });
 
   it("returns empty name for a slash-only input", () => {
@@ -78,14 +78,6 @@ describe("parseCommand", () => {
 
   it("parses /compact with no arguments", () => {
     expect(parseCommand("/compact")).toEqual({ name: "compact", args: "" });
-  });
-
-  it("parses /goto with an id", () => {
-    expect(parseCommand("/goto abc123")).toEqual({ name: "goto", args: "abc123" });
-  });
-
-  it("parses /tree with no arguments", () => {
-    expect(parseCommand("/tree")).toEqual({ name: "tree", args: "" });
   });
 });
 
@@ -178,12 +170,12 @@ describe("runCommand — prompt-template fallback", () => {
 
   it("builtin commands take priority over same-name templates", async () => {
     const { ctx, promptSpy } = makeCtx({
-      promptTemplates: [{ name: "help", content: "should not be used" }],
+      promptTemplates: [{ name: "quit", content: "should not be used" }],
     });
-    await runCommand("/help", ctx);
+    await runCommand("/quit", ctx);
     expect(promptSpy).not.toHaveBeenCalled();
-    // /help prints the command list; verify it did run.
-    expect(ctx.print).toHaveBeenCalled();
+    // /quit calls ctx.exit(); verify it did run.
+    expect(ctx.exit).toHaveBeenCalled();
   });
 
   it("rejects template expansion when harness is busy", async () => {
@@ -200,13 +192,17 @@ describe("runCommand — prompt-template fallback", () => {
     const { ctx, promptSpy } = makeCtx({ promptTemplates: [] });
     await runCommand("/nonexistent", ctx);
     expect(promptSpy).not.toHaveBeenCalled();
-    expect(ctx.print).toHaveBeenCalledWith("Unknown command: /nonexistent. Try /help.");
+    expect(ctx.print).toHaveBeenCalledWith(
+      "Unknown command: /nonexistent. Try /quit /model /session /new /resume /name /compact /settings /reload.",
+    );
   });
 
   it("surfaces empty command notice", async () => {
     const { ctx } = makeCtx({});
     await runCommand("/", ctx);
-    expect(ctx.print).toHaveBeenCalledWith("Empty command. Try /help.");
+    expect(ctx.print).toHaveBeenCalledWith(
+      "Empty command. Try /quit /model /session /new /resume /name /compact /settings /reload.",
+    );
   });
 });
 
@@ -311,38 +307,5 @@ describe("runCommand — /model", () => {
     await runCommand("/model nope", ctx);
     expect(setModelSpy).not.toHaveBeenCalled();
     expect(ctx.print).toHaveBeenCalledWith("Model not found: anthropic/nope");
-  });
-});
-
-describe("runCommand — /templates", () => {
-  it("lists name and description of loaded templates", async () => {
-    const { ctx } = makeCtx({
-      promptTemplates: [
-        { name: "review", description: "Review code", content: "x" },
-        { name: "test", description: "Run tests", content: "y" },
-      ],
-    });
-    await runCommand("/templates", ctx);
-    expect(ctx.print).toHaveBeenCalledWith(
-      "Prompt templates:\n  /review — Review code\n  /test — Run tests",
-    );
-  });
-
-  it("omits description separator when template has no description", async () => {
-    const { ctx } = makeCtx({
-      promptTemplates: [{ name: "plain", content: "z" }],
-    });
-    await runCommand("/templates", ctx);
-    expect(ctx.print).toHaveBeenCalledWith("Prompt templates:\n  /plain");
-  });
-
-  it("reports when no templates are loaded", async () => {
-    const { ctx } = makeCtx({ promptTemplates: [] });
-    await runCommand("/templates", ctx);
-    expect(ctx.print).toHaveBeenCalledWith("No prompt templates loaded.");
-  });
-
-  it("/templates is registered in COMMANDS", () => {
-    expect(COMMANDS.find((c) => c.name === "templates")).toBeDefined();
   });
 });

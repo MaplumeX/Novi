@@ -244,7 +244,7 @@ export function InputBox({
     // ↑/↓ three-state dispatch: slash list → multi-line → input history
     if (key.upArrow) {
       if (slashActive) {
-        setSlashSelectedIndex((i) => Math.max(0, i - 1));
+        setSlashSelectedIndex((i) => (i - 1 + matchedCommands.length) % matchedCommands.length);
         return;
       }
       if (state.text.includes("\n")) { setState(moveLineUp); return; }
@@ -253,7 +253,7 @@ export function InputBox({
     }
     if (key.downArrow) {
       if (slashActive) {
-        setSlashSelectedIndex((i) => Math.min(matchedCommands.length - 1, i + 1));
+        setSlashSelectedIndex((i) => (i + 1) % matchedCommands.length);
         return;
       }
       if (state.text.includes("\n")) { setState(moveLineDown); return; }
@@ -339,6 +339,10 @@ export function InputBox({
 
   const slashSelected = Math.min(slashSelectedIndex, Math.max(0, matchedCommands.length - 1));
 
+  const maxNameWidth = matchedCommands.length > 0
+    ? Math.max(...matchedCommands.map((c) => c.name.length))
+    : 0;
+
   return (
     <Box flexDirection="column">
       <Text color={theme.dim}>{divider()}</Text>
@@ -361,7 +365,7 @@ export function InputBox({
             {matchedCommands.map((cmd, i) => (
               <Text key={cmd.name} wrap="truncate">
                 {i === slashSelected ? "→ " : "  "}
-                /{cmd.name} — {cmd.description}
+                {`/${cmd.name}`.padEnd(maxNameWidth + 3)}  {cmd.description}
               </Text>
             ))}
           </Box>

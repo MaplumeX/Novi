@@ -1,4 +1,3 @@
-import { promises as fs } from "node:fs";
 import path from "node:path";
 import {
   JsonlSessionRepo,
@@ -9,7 +8,6 @@ import {
 import type {
   AgentHarness,
   Session,
-  SessionTreeEntry,
   ThinkingLevel,
   JsonlSessionMetadata,
   ExecutionEnv,
@@ -20,7 +18,6 @@ import type { ResolvedSettings } from "../settings.js";
 import { loadSettings, resolveSettings } from "../settings.js";
 import type { BootstrapResult } from "../bootstrap.js";
 import type { QueueState } from "./useHarnessState.js";
-import { messageText } from "./queue-helpers.js";
 import { summarizeUsage, formatTokens, formatCost } from "./usage.js";
 
 export interface ParsedCommand {
@@ -150,75 +147,13 @@ async function loadSessionDisplayName(
   return name;
 }
 
-async function listSessionFiles(sessionsDir: string): Promise<Array<{ name: string; mtime: Date }>> {
-  let entries: string[];
-  try {
-    entries = await fs.readdir(sessionsDir);
-  } catch {
-    return [];
-  }
-  const files: Array<{ name: string; mtime: Date }> = [];
-  for (const entry of entries) {
-    const fullPath = path.join(sessionsDir, entry);
-    let stat;
-    try {
-      stat = await fs.stat(fullPath);
-    } catch {
-      continue;
-    }
-    if (stat.isDirectory()) {
-      // Session files live one level below the root (per-cwd subdirectories).
-      let nested: string[];
-      try {
-        nested = await fs.readdir(fullPath);
-      } catch {
-        continue;
-      }
-      for (const n of nested) {
-        if (!n.endsWith(".jsonl")) continue;
-        const np = path.join(fullPath, n);
-        try {
-          const ns = await fs.stat(np);
-          files.push({ name: `${path.basename(entry)}/${n}`, mtime: ns.mtime });
-        } catch {
-          // skip unreadable entries
-        }
-      }
-    } else if (entry.endsWith(".jsonl")) {
-      files.push({ name: entry, mtime: stat.mtime });
-    }
-  }
-  files.sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
-  return files.slice(0, 20);
-}
-
-/** Command registry, ordered for `/help` display. */
+/** Command registry. */
 export const COMMANDS: readonly Command[] = [
-  {
-    name: "help",
-    description: "List available commands",
-    run: async (ctx) => {
-      const lines = COMMANDS.map((c) => `  /${c.name} — ${c.description}`);
-      ctx.print(["Commands:", ...lines].join("\n"));
-    },
-  },
   {
     name: "quit",
     description: "Exit Novi",
     run: async (ctx) => {
       ctx.exit();
-    },
-  },
-  {
-    name: "abort",
-    description: "Abort the current turn",
-    run: async (ctx) => {
-      try {
-        await ctx.harness.abort();
-        ctx.print("Aborted current turn.");
-      } catch (e) {
-        ctx.print(`Abort failed: ${e instanceof Error ? e.message : String(e)}`);
-      }
     },
   },
   {
@@ -273,57 +208,6 @@ export const COMMANDS: readonly Command[] = [
       } catch (e) {
         ctx.print(`Switch failed: ${e instanceof Error ? e.message : String(e)}`);
       }
-    },
-  },
-  {
-    name: "thinking",
-    description: "Set the thinking level (off|minimal|low|medium|high|xhigh)",
-    run: async (ctx, args) => {
-      if (!args) {
-        ctx.print(`Current thinking level: ${ctx.harness.getThinkingLevel()}`);
-        return;
-      }
-      if (!THINKING_LEVELS.includes(args as ThinkingLevel)) {
-        ctx.print(`Unknown level "${args}". Valid: ${THINKING_LEVELS.join(", ")}`);
-        return;
-      }
-      try {
-        await ctx.harness.setThinkingLevel(args as ThinkingLevel);
-        ctx.print(`Thinking level set to ${args}.`);
-      } catch (e) {
-        ctx.print(`Switch failed: ${e instanceof Error ? e.message : String(e)}`);
-      }
-    },
-  },
-  {
-    name: "tools",
-    description: "List active tools",
-    run: async (ctx) => {
-      const tools = ctx.harness.getActiveTools();
-      if (tools.length === 0) {
-        ctx.print("No active tools.");
-        return;
-      }
-      ctx.print(
-        [
-          "Active tools:",
-          ...tools.map((t) => `  - ${t.name} — ${t.label}: ${t.description}`),
-        ].join("\n"),
-      );
-    },
-  },
-  {
-    name: "history",
-    description: "List recent session files",
-    run: async (ctx) => {
-      const files = await listSessionFiles(ctx.sessionsDir);
-      if (files.length === 0) {
-        ctx.print(`No session files found in ${ctx.sessionsDir}`);
-        return;
-      }
-      ctx.print(
-        ["Recent sessions:", ...files.map((f) => `  ${f.name}  (${f.mtime.toISOString()})`)].join("\n"),
-      );
     },
   },
   {
@@ -462,28 +346,6 @@ export const COMMANDS: readonly Command[] = [
     },
   },
   {
-    name: "tree",
-    description: "List session tree entries",
-    run: async (ctx) => {
-      let entries: SessionTreeEntry[];
-      try {
-        entries = await ctx.session.getEntries();
-      } catch (e) {
-        ctx.print(`Failed to read tree: ${e instanceof Error ? e.message : String(e)}`);
-        return;
-      }
-      if (entries.length === 0) {
-        ctx.print("Session tree is empty.");
-        return;
-      }
-      const lines = entries.map((e) => {
-        const summary = entrySummary(e).slice(0, 40);
-        return `  ${e.id}  ${e.type}${summary ? `  ${summary}` : ""}`;
-      });
-      ctx.print(["Session tree:", ...lines].join("\n"));
-    },
-  },
-  {
     name: "settings",
     description: "Open the interactive settings form",
     run: async (ctx) => {
@@ -515,69 +377,6 @@ export const COMMANDS: readonly Command[] = [
       }
     },
   },
-  {
-    name: "queue",
-    description: "Show queued steer/followUp/nextTurn messages",
-    run: async (ctx) => {
-      const { steer, followUp, nextTurn } = ctx.queue;
-      const total = steer.length + followUp.length + nextTurn.length;
-      if (total === 0) {
-        ctx.print("Queue is empty.");
-        return;
-      }
-      const lines: string[] = ["Queue:"];
-      for (const m of steer) lines.push(`  [steer]     ${messageText(m).slice(0, 80)}`);
-      for (const m of followUp) lines.push(`  [followUp]  ${messageText(m).slice(0, 80)}`);
-      for (const m of nextTurn) lines.push(`  [nextTurn]  ${messageText(m).slice(0, 80)}`);
-      ctx.print(lines.join("\n"));
-    },
-  },
-  {
-    name: "templates",
-    description: "List available prompt templates",
-    run: async (ctx) => {
-      const templates = ctx.harness.getResources().promptTemplates ?? [];
-      if (templates.length === 0) {
-        ctx.print("No prompt templates loaded.");
-        return;
-      }
-      ctx.print(
-        [
-          "Prompt templates:",
-          ...templates.map((t) => `  /${t.name}${t.description ? ` — ${t.description}` : ""}`),
-        ].join("\n"),
-      );
-    },
-  },
-  {
-    name: "goto",
-    description: "Jump to a session entry by id",
-    run: async (ctx, args) => {
-      const id = args.trim().split(/\s+/)[0];
-      if (!id) {
-        ctx.print("Usage: /goto <id>  (use /tree to list ids)");
-        return;
-      }
-      if (!ctx.isIdle) {
-        ctx.print("Harness is busy; /goto requires idle.");
-        return;
-      }
-      try {
-        const result = await ctx.harness.navigateTree(id, { summarize: true });
-        if (result.cancelled) {
-          ctx.print("Navigation cancelled.");
-          return;
-        }
-        // `session_tree` event triggers a branch reload in useHarnessState.
-        ctx.print(`Switched to ${id}.`);
-        if (result.editorText) {
-          ctx.print(`Editor text: ${result.editorText}`);
-        }
-      } catch (e) {
-        ctx.print(`Goto failed: ${e instanceof Error ? e.message : String(e)}`);
-      }
-    },
-  },
 ];
 
 /** Execute a `/name args` input line against the registry. */
@@ -587,7 +386,7 @@ export async function runCommand(
 ): Promise<void> {
   const { name, args } = parseCommand(line);
   if (!name) {
-    ctx.print("Empty command. Try /help.");
+    ctx.print("Empty command. Try /quit /model /session /new /resume /name /compact /settings /reload.");
     return;
   }
   const command = COMMANDS.find((c) => c.name === name);
@@ -611,37 +410,5 @@ export async function runCommand(
     });
     return;
   }
-  ctx.print(`Unknown command: /${name}. Try /help.`);
-}
-
-/**
- * Best-effort short preview of a session tree entry for `/tree`.
- *
- * Display-only: never throws across the message-content union.
- */
-function entrySummary(entry: SessionTreeEntry): string {
-  switch (entry.type) {
-    case "message":
-      return messageText(entry.message);
-    case "compaction":
-    case "branch_summary":
-      return entry.summary;
-    case "label":
-      return entry.label ?? "";
-    case "model_change":
-      return `${entry.provider}/${entry.modelId}`;
-    case "thinking_level_change":
-      return entry.thinkingLevel;
-    case "active_tools_change":
-      return entry.activeToolNames.join(",");
-    case "session_info":
-      return entry.name ?? "";
-    case "custom":
-    case "custom_message":
-      return entry.customType;
-    case "leaf":
-      return entry.targetId ?? "";
-    default:
-      return "";
-  }
+  ctx.print(`Unknown command: /${name}. Try /quit /model /session /new /resume /name /compact /settings /reload.`);
 }

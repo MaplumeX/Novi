@@ -646,3 +646,37 @@ Made the /model slash command interactive: /model (no args) now opens an arrow-k
 ### Next Steps
 
 - None - task complete
+
+
+## Session 20: Slash command list refinement
+
+**Date**: 2026-07-03
+**Task**: Slash command list refinement
+**Branch**: `main`
+
+### Summary
+
+Deleted 9 slash commands (goto, abort, help, thinking, tree, tools, history, queue, templates), added circular wrap-around navigation, and replaced the em-dash separator with computed padding for column-aligned descriptions in the picker.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4932ff4` | (see git log) |
+| `8e8e803` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

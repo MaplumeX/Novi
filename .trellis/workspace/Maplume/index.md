@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 19
-- **Last Active**: 2026-07-02
+- **Total Sessions**: 20
+- **Last Active**: 2026-07-03
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~648 | Active |
+| `journal-1.md` | ~682 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 20 | 2026-07-03 | Slash command list refinement | `4932ff4`, `8e8e803` | `main` |
 | 19 | 2026-07-02 | Interactive /model picker overlay | `0228af9`, `180de60` | `main` |
 | 18 | 2026-07-02 | TUI interaction details parity audit (D1-D3) | `76125cf` | `main` |
 | 17 | 2026-07-02 | TUI Visual Redesign | `960e2aa` | `main` |

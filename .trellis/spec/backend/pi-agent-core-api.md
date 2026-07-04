@@ -58,6 +58,26 @@ const accepted = findEnvKeys("anthropic", ALL_SET); // ["ANTHROPIC_OAUTH_TOKEN",
 - 对于 ambient-only provider（如 `amazon-bedrock`、`google-vertex` 默认 ADC），`findEnvKeys` 返回 `undefined` —— 这些 provider 没有简单 env var key，向导应展示「请用 ambient 凭证（profile/ADC）手动配置」并跳过 key 录入。
 - 不要把 provider→env-var 映射复制到 Novi 代码里——会随 pi-ai 漂移。始终用上述 sentinel trick 查询。
 
+### 自定义 provider / models.json（loadCustomModels）
+
+Novi 用 `~/.novi/models.json` + `<cwd>/.novi/models.json`（项目层，受 trust gate）定义 pi 兼容子集的自定义 provider。`pi-ai` **不提供** models.json loader；Novi 自建 `src/models-loader.ts`。
+
+**关键 API 入口**（已验证公开可达）：
+- `createProvider(input: CreateProviderOptions)` 与 `envApiKeyAuth(name, envVars)` 都从 **root `@earendil-works/pi-ai` 入口** 导出（`./auth/helpers` 和 `./models` 不是 package.json `exports` 暴露的 subpath，**不要直接 import `@earendil-works/pi-ai/auth/helpers`**）。
+- Stream API 工厂从 `@earendil-works/pi-ai/api/*.lazy` subpath 导出（这是 exports 暴露的路径）：`anthropicMessagesApi` / `openAICompletionsApi` / `openAIResponsesApi` / `mistralConversationsApi` / `azureOpenAIResponsesApi` / `bedrockConverseStreamApi` / `googleGenerativeAIApi`（注意全大写 `IA`）/ `googleVertexApi` / `openAICodexResponsesApi`。
+- `builtinModels()` 返回 `MutableModels`；`models.setProvider(provider)` upsert（同名 provider override builtin）。
+
+`apiKey` 解析两种语义：
+- `"$ENV_VAR"` → `envApiKeyAuth(name, [VAR])`：`getAuth()` 在 resolve 时读 env；var 未设置 → 返回 `undefined`（未配置，`/model` 不显示，对齐 pi）。
+- 字面量（如 `"ollama"`）→ 自定义 resolver `literalApiKeyAuth()` 始终返回 `{auth:{apiKey: literal}}`（始终 configured）。**不要**用 `envApiKeyAuth` 传字面量 key——它只读 env var。
+
+装配位置：`bootstrap()` 在 `builtinModels()` **之后** `loadCustomModels(env, cwd, {includeProject: trusted})`，逐个 `models.setProvider(p)`。`probeProviderConfigured`（onboarding）同样装配（受 trust gate，ask→never）。custom providers 不需 `replayHarnessState` 复刻——`replace` 复用同一个 `BootstrapResult.models` 实例，注册持久。
+
+### transport / queue modes
+
+- `AgentHarnessStreamOptions.transport?: Transport`（`"sse"|"websocket"|"websocket-cached"|"auto"`）由 `setStreamOptions` 一次调用与 retry 字段一起透传。`getStreamOptions()` 已含 transport，`replayHarnessState` 通过 `setStreamOptions(old.getStreamOptions())` 自动复刻。
+- `QueueMode = "all" | "one-at-a-time"`。`getSteeringMode()/setSteeringMode()` + `getFollowUpMode()/setFollowUpMode()` 存在；`replayHarnessState` 需显式 `setSteeringMode(old.getSteeringMode())` + `setFollowUpMode(old.getFollowUpMode())`（不像 transport，它们不在 streamOptions 里）。bootstrap 在 settings 存在时调用对应 setter。
+
 ## AgentHarnessOptions 关键字段
 
 需**同时**传 `models: Models` 和 `model: Model`：

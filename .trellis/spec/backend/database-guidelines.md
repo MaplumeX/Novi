@@ -44,15 +44,19 @@ const session = await repo.open({ path } as JsonlSessionMetadata);
 
 ## TODO Store
 
-`tools/todo.ts` keeps a module-level singleton array (`const store: Todo[]`).
-Scope: a single process lifetime. The tool `execute` API exposes no sessionId,
-so a process-wide list is the accepted design — it is **not** safe for
-multi-session isolation.
+`tools/todo.ts` keeps a module-level `Map<string, Todo[]>` bucketed by
+sessionId. Each session gets its own list; `createTodoTool(sessionId)` closes
+over the sessionId and scopes all operations to `store.get(sessionId) ?? []`.
+`createBuiltinTools(env, sessionId)` threads the session id through to the
+tool factory. Scope: a single app process lifetime — the store is in-memory
+only and never persisted to disk. `/new`/`/resume` switching sessions gives
+each session an isolated todo list; switching back to an old session restores
+its previous todos.
 
 ```ts
-export function createTodoTool(): AgentTool<typeof Parameters, TodoDetails> { … }
-/** Reset the singleton store. Test-only escape hatch. */
-export function __resetTodoStoreForTests(): void { store.length = 0; }
+export function createTodoTool(sessionId: string): AgentTool<typeof Parameters, TodoDetails> { … }
+/** Reset the store. Test-only escape hatch. */
+export function __resetTodoStoreForTests(): void { store.clear(); }
 ```
 
 ---

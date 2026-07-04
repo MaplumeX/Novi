@@ -21,11 +21,13 @@ relevant `AgentHarnessEvent` into a single `HarnessState` object:
 export function useHarnessState(
   harness: AgentHarness,
   session?: Session<JsonlSessionMetadata>,
+  compactionSettings?: CompactionSettings,
 ): HarnessState {
   const [state, setState] = useState<HarnessState>(() => ({ … }));
   // …
   useEffect(() => {
     let cancelled = false;
+    if (compactionSettings) compactor.setSettings(compactionSettings);
     const unsubscribe = harness.subscribe((event) => {
       switch (event.type) {
         case "turn_start": setState(…); break;
@@ -33,7 +35,7 @@ export function useHarnessState(
       }
     });
     return () => { cancelled = true; unsubscribe(); };
-  }, [harness, session]);
+  }, [harness, session, compactionSettings]);
 
   return state;
 }
@@ -45,10 +47,13 @@ Key conventions enforced here:
   components consume `HarnessState`, never raw events.
 - **Cleanup on unmount.** The `useEffect` returns an unsubscribe + `cancelled`
   flag so async reloads after unmount are ignored.
-- **Dependencies.** `[harness, session]` — re-subscribes if either identity
-  changes. In practice these come from `handle.harness` / `handle.session`,
+- **Dependencies.** `[harness, session, compactionSettings]` — re-subscribes if
+  any identity changes. In practice these come from `handle.harness` /
+  `handle.session` / `App`'s `useMemo(resolveCompactionSettings(settings))`,
   so `handle.replace()` (which sets a new handle with a new harness) triggers
-  re-subscription automatically.
+  re-subscription automatically. `/reload` updating `settings` recomputes
+  `compactionSettings`, which also re-runs the effect and syncs
+  `compactor.setSettings()`.
 - **Synchronous ref mirror.** A `useRef<AgentMessage[]>` mirrors
   `messages` so post-turn handlers (`settled`) can read the latest history
   outside React's render cycle.
@@ -73,9 +78,13 @@ const [state, setState] = useState<HarnessState>(() => ({
 
 ### Persistent instance via `useState` factory
 
-When a helper class must survive re-subscribes, store it with `useState`:
+When a helper class must survive re-subscribes, store it with `useState`.
+The `AutoCompactor` is seeded with initial compaction settings and updated
+via `setSettings` on every effect run:
 ```ts
-const [compactor] = useState(() => new AutoCompactor());
+const [compactor] = useState(() => new AutoCompactor(compactionSettings));
+// in the subscribe effect:
+if (compactionSettings) compactor.setSettings(compactionSettings);
 ```
 
 ### Fire-and-forget with optimistic phase

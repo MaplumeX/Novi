@@ -52,15 +52,29 @@ Display components (MessageList, StatusBar, InputBox)
 `App.tsx` holds a `HarnessHandle` (not a raw `AgentHarness`) as `useState`.
 The handle's `replace()` method rebuilds the harness and calls `setHandle`,
 which changes `handle.harness` identity. Since `useHarnessState` depends on
-`[harness, session]`, this automatically triggers unsubscribe → re-subscribe
-→ `reloadMessages()`. This is the mechanism behind `/reload` and session
-switching (`/new`, `/resume`).
+`[harness, session, compactionSettings]`, this automatically triggers
+unsubscribe → re-subscribe → `reloadMessages()`. This is the mechanism behind
+`/reload` and session switching (`/new`, `/resume`).
+
+`replace()` returns `{ diagnostics: string[] }` — resource-load warnings
+from skill/template files are surfaced by the caller (`/reload`, `/new`,
+`/resume` print each as `warning: …`). `/reload` passes `resolvedSettings`
+so `replayHarnessState` re-resolves model/thinking/stream/queue-modes from
+disk; `/new`/`/resume` omit it to preserve the current runtime config.
+
+Compaction settings flow through React state: `App.tsx` computes
+`const compactionSettings = useMemo(() => resolveCompactionSettings(settings), [settings])`
+and passes it as the third argument to `useHarnessState`. When `/reload`
+updates `settings`, the memo recomputes → the effect re-runs →
+`compactor.setSettings(compactionSettings)` syncs the new thresholds/enabled
+flag.
 
 ```tsx
 const [handle, setHandle] = useState<HarnessHandle>(() =>
-  createHarnessHandle({ harness, session, sessionPath }, { env, models, cwd, systemPrompt, setHandle }),
+  createHarnessHandle({ harness, session, sessionPath, trusted }, { env, models, cwd, systemPrompt, setHandle }),
 );
-const state = useHarnessState(handle.harness, handle.session);
+const compactionSettings = useMemo(() => resolveCompactionSettings(settings), [settings]);
+const state = useHarnessState(handle.harness, handle.session, compactionSettings);
 ```
 
 ### Overlay state

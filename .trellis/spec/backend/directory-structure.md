@@ -28,7 +28,7 @@ src/
 ├── compaction.ts           # AutoCompactor: turn debounce + threshold check
 ├── *.test.ts               # Co-located tests alongside their source
 ├── tools/                  # Built-in tool set, one file per tool
-│   ├── index.ts            # createBuiltinTools(env) — thin wrapper over registry
+│   ├── index.ts            # createBuiltinTools(env, sessionId) — thin wrapper over registry
 │   ├── registry.ts         # BuiltinToolRegistry: add/buildAll/names
 │   ├── shared.ts           # Shared helpers (unwrap / textResult / sliceLines …)
 │   ├── bash.ts             # Each tool: createXxxTool(env): AgentTool
@@ -38,7 +38,7 @@ src/
 │   ├── ls.ts
 │   ├── glob.ts
 │   ├── grep.ts
-│   ├── todo.ts             # Exception: no env dependency (in-memory singleton)
+│   ├── todo.ts             # In-memory per-session todo store (Map<string, Todo[]>)
 │   └── __tests__/          # Tool tests + helpers.ts (setupEnv / getTool / writeFixture)
 └── tui/                    # Frontend layer (see frontend/directory-structure.md)
 ```

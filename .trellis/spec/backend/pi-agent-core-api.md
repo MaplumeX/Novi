@@ -75,8 +75,8 @@ Novi 用 `~/.novi/models.json` + `<cwd>/.novi/models.json`（项目层，受 tru
 
 ### transport / queue modes
 
-- `AgentHarnessStreamOptions.transport?: Transport`（`"sse"|"websocket"|"websocket-cached"|"auto"`）由 `setStreamOptions` 一次调用与 retry 字段一起透传。`getStreamOptions()` 已含 transport，`replayHarnessState` 通过 `setStreamOptions(old.getStreamOptions())` 自动复刻。
-- `QueueMode = "all" | "one-at-a-time"`。`getSteeringMode()/setSteeringMode()` + `getFollowUpMode()/setFollowUpMode()` 存在；`replayHarnessState` 需显式 `setSteeringMode(old.getSteeringMode())` + `setFollowUpMode(old.getFollowUpMode())`（不像 transport，它们不在 streamOptions 里）。bootstrap 在 settings 存在时调用对应 setter。
+- `AgentHarnessStreamOptions.transport?: Transport`（`"sse"|"websocket"|"websocket-cached"|"auto"`）由 `setStreamOptions` 一次调用与 retry 字段一起透传。`replayHarnessState` 在 `/new`/`/resume` 路径通过 `setStreamOptions(old.getStreamOptions())` 自动复刻；在 `/reload` 路径（传 `resolvedSettings`）从 settings 的 `retry.provider.*`/`transport` 重建（仅设置出现的字段，缺失字段从 old harness 重放）。
+- `QueueMode = "all" | "one-at-a-time"`。`getSteeringMode()/setSteeringMode()` + `getFollowUpMode()/setFollowUpMode()` 存在；`replayHarnessState` 在 `/new`/`/resume` 路径需显式 `setSteeringMode(old.getSteeringMode())` + `setFollowUpMode(old.getFollowUpMode())`（不像 transport，它们不在 streamOptions 里）；在 `/reload` 路径从 settings 的 `steeringMode`/`followUpMode` 重解析（缺失时回退到 old harness）。bootstrap 在 settings 存在时调用对应 setter。
 
 ## AgentHarnessOptions 关键字段
 
@@ -115,7 +115,7 @@ new AgentHarness({ env, session, models, model, systemPrompt, /* optional: */ to
 
 要默认全部 active，必须显式：
 ```ts
-const tools = createBuiltinTools(env);
+const tools = createBuiltinTools(env, sessionId);
 await harness.setTools(tools, tools.map(t => t.name));
 ```
 
@@ -136,8 +136,20 @@ export interface HarnessHandle {
   harness: AgentHarness;
   session: Session<JsonlSessionMetadata>;
   sessionPath: string;
-  /** 重建 harness 并 setState。session 省略=复用当前(/reload)；传入=切换(child 4)。 */
-  replace: (next: ReplaceOptions) => Promise<void>;
+  /** trust gate flag from bootstrap (cwd-scoped, not re-resolved on replace). */
+  trusted: boolean;
+  /** 重建 harness 并 setState。session 省略=复用当前(/reload)；传入=切换(/new//resume)。
+   *  resolvedSettings 省略=从 old harness 重放 model/thinking/stream/queue（/new//resume）；
+   *  传入=从 disk settings 重解析（/reload）。
+   *  返回 { diagnostics } —— resource 加载警告 + model 重解析降级警告。 */
+  replace: (next: ReplaceOptions) => Promise<{ diagnostics: string[] }>;
+}
+
+export interface ReplaceOptions {
+  session?: Session<JsonlSessionMetadata>;
+  sessionPath?: string;
+  reloadResources?: boolean;
+  resolvedSettings?: ResolvedSettings;
 }
 ```
 
@@ -148,8 +160,10 @@ export interface HarnessHandle {
 2. unsubscribe()                       // useHarnessState useEffect cleanup 自动做
 3. session = next.session ?? old.session  // /reload 复用；/new /resume 传入新 session
 4. new AgentHarness({ env, session, models, model: old.getModel(), systemPrompt })
-5. await replayHarnessState(newHarness, oldHarness, env, cwd, { reloadResources })
+5. const { diagnostics } = await replayHarnessState(
+     newHarness, oldHarness, env, cwd, sessionMeta.id, models, opts)
 6. setHandle(newHandle)                // 触发 useHarnessState 重订阅
+7. return { diagnostics }              // 调用方逐条打印 warning
 ```
 
 ### replayHarnessState —— 全走 public getter
@@ -162,32 +176,56 @@ export async function replayHarnessState(
   oldHarness: AgentHarness,
   env: ExecutionEnv,
   cwd: string,
-  opts: { reloadResources?: boolean } = {},
-): Promise<void> {
-  // 1. Tools: 重建 built-in set + 恢复 activeToolNames（从 old.getActiveTools()）
-  const tools = createBuiltinTools(env);
+  sessionId: string,
+  models: Models,
+  opts: { reloadResources?: boolean; trusted?: boolean; resolvedSettings?: ResolvedSettings } = {},
+): Promise<{ diagnostics: string[] }> {
+  const diagnostics: string[] = [];
+
+  // 1. Tools: 重建 built-in set（传 sessionId 供 todo 分桶）+ 恢复 activeToolNames
+  const tools = createBuiltinTools(env, sessionId);
   const activeToolNames = oldHarness.getActiveTools().map(t => t.name);
   await newHarness.setTools(tools, activeToolNames);  // ← 必须传 activeToolNames！
 
-  // 2. Model + thinking level
-  await newHarness.setModel(oldHarness.getModel());
-  await newHarness.setThinkingLevel(oldHarness.getThinkingLevel());
+  if (opts.resolvedSettings) {
+    // /reload path: 从 disk settings 重解析 model/thinking/stream/queue-modes
+    const rs = opts.resolvedSettings;
+    const model = models.getModel(rs.defaultProvider ?? DEFAULT_PROVIDER, rs.defaultModel ?? DEFAULT_MODEL_ID);
+    if (model) await newHarness.setModel(model);
+    else { await newHarness.setModel(oldHarness.getModel()); diagnostics.push(`model "…" not found; keeping current`); }
+    await newHarness.setThinkingLevel(rs.defaultThinkingLevel ?? DEFAULT_THINKING_LEVEL);
+    // streamOptions: 仅设置 settings 中出现的 retry/transport 字段，否则从 old harness 重放
+    await newHarness.setStreamOptions(/* merged retry/transport or old.getStreamOptions() */);
+    await newHarness.setSteeringMode(rs.steeringMode ?? oldHarness.getSteeringMode());
+    await newHarness.setFollowUpMode(rs.followUpMode ?? oldHarness.getFollowUpMode());
+  } else {
+    // /new /resume path: 从 old harness 重放（保持当前运行时配置）
+    await newHarness.setModel(oldHarness.getModel());
+    await newHarness.setThinkingLevel(oldHarness.getThinkingLevel());
+    await newHarness.setStreamOptions(oldHarness.getStreamOptions());
+    await newHarness.setSteeringMode(oldHarness.getSteeringMode());
+    await newHarness.setFollowUpMode(oldHarness.getFollowUpMode());
+  }
 
-  // 3. Stream options (timeout/retry)
-  await newHarness.setStreamOptions(oldHarness.getStreamOptions());
-
-  // 4. Resources: reload from disk 或 carry over
+  // 2. Resources: reload from disk 或 carry over
   if (opts.reloadResources) {
-    const loaded = await loadResources(env, cwd);
+    const loaded = await loadResources(env, cwd, { includeProject: opts.trusted !== false });
     await newHarness.setResources({ skills: loaded.skills, promptTemplates: loaded.promptTemplates });
+    diagnostics.push(...loaded.diagnostics);  // 不再静默丢弃
   } else {
     await newHarness.setResources(oldHarness.getResources());
   }
+
+  return { diagnostics };
 }
 ```
 
 > **关键**：`setTools(tools)` 不传第二参数会沿用上一次的 `activeToolNames`（见上节），
 > 但新 harness 初值为 `[]`，所以 replay **必须**显式传 `activeToolNames`，否则 0 个工具 active。
+>
+> `/reload`（传 `resolvedSettings`）重解析 model/thinking/stream/queue-modes；`/new`/`/resume`
+> （不传）从 old harness 重放以保持当前运行时配置。`loadResources` 的 diagnostics 不再
+> 丢弃，随返回值传回调用方打印。
 
 ### 递归闭包模式
 
@@ -229,9 +267,13 @@ if (opts.reloadResources) {
 
 ### useHarnessState 依赖
 
-`useHarnessState(handle.harness, handle.session)` 的 `useEffect` 依赖数组为 `[harness, session]`。
+`useHarnessState(handle.harness, handle.session, compactionSettings)` 的 `useEffect` 依赖数组为 `[harness, session, compactionSettings]`。
 当 `handle.replace` 调 `setHandle` 时，`handle.harness` identity 变化 → effect cleanup
 （`unsubscribe()`）自动执行 → 新 effect 以新 harness 重订阅 + `reloadMessages()`。
+
+`compactionSettings` 由 `App.tsx` 经 `useMemo(() => resolveCompactionSettings(settings), [settings])`
+计算后传入。effect 开始时调 `compactor.setSettings(compactionSettings)` 同步注入 ——
+`/reload` 后 settings state 变化 → compactionSettings 重算 → effect 重跑 → compactor 更新。
 
 ### 已验证的 public getter/setter
 
@@ -244,11 +286,15 @@ if (opts.reloadResources) {
 | `getActiveTools()` | replay active tool names |
 | `getResources()` | carry over resources |
 | `getStreamOptions()` | replay stream options |
+| `getSteeringMode()` | replay steering mode |
+| `getFollowUpMode()` | replay follow-up mode |
 | `setModel(model)` | set on new harness |
 | `setThinkingLevel(level)` | set on new harness |
 | `setTools(tools, activeToolNames?)` | set on new harness |
 | `setResources(resources)` | set on new harness |
 | `setStreamOptions(opts)` | set on new harness |
+| `setSteeringMode(mode)` | set on new harness |
+| `setFollowUpMode(mode)` | set on new harness |
 | `waitForIdle()` | 确保不在 turn 中 |
 | `subscribe(fn)` → `unsubscribe` | 事件订阅/重订阅 |
 

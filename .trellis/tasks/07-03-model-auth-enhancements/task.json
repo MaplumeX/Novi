@@ -3,7 +3,7 @@
   "name": "model-auth-enhancements",
   "title": "model auth enhancements (custom provider, scoped models, transport, queue modes)",
   "description": "",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

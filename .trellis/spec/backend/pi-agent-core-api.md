@@ -184,6 +184,29 @@ function makeReplace(old: HarnessHandle): HarnessHandle["replace"] {
 }
 ```
 
+### trust gate 与 harness 重建的交互
+
+`HarnessHandle.trusted: boolean`（bootstrap 时写入）决定 `/reload`、`/new`、`/resume` 触发 `replace({reloadResources:true})` 时 `loadResources` 是否加载 project 层：
+
+```ts
+// harness-handle.ts replayHarnessState
+if (opts.reloadResources) {
+  const loaded = await loadResources(env, cwd, { includeProject: opts.trusted !== false });
+  ...
+}
+```
+
+- `/reload` 复用旧 `handle.trusted`（信任是 cwd 级，不随 session 变，replace 时不重新解析 trust）。
+- 信任决策**不热重载**：`/trust` 只写 `trust.json`，下次启动才生效（镜像 pi）。运行中 session 的 settings/resources 已装配，半途切换 trust 会引入不可逆状态机复杂度。
+- `BootstrapResult.trusted` 在 `createHarnessHandle` 初始化时传入；context files（AGENTS.md/SYSTEM.md/APPEND_SYSTEM.md）**始终加载**，不受 trust gate 影响。
+
+### trust gate 在 bootstrap 装配中的位置
+
+`bootstrap(options, { trusted })`（默认 `true` 向后兼容）把 `trusted` 透传给 `loadSettings`、`loadResources`、`loadCustomModels`（child 1）的 `includeProject` 选项。**probe 与 main 各解一次 trust**：
+- `probeProviderConfigured`（onboarding）在 bootstrap 之前运行，是同步路径、无 overlay 能力，内部调 `resolveProjectTrust({isHeadless:true})`，`ask`→`never`（保守解，避免加载未信任的 project settings 探测 provider）。
+- cli.ts main 流程在 probe 之后调一次完整 `resolveProjectTrust`：TUI 模式下 `ask` 且有 gated 资源 → 渲染独立 `TrustPrompt` overlay（renderApp 前，仿 OnboardingWizard），否则走 db decision / `defaultProjectTrust` / headless ask→never。
+- 二者结果可能不同：probe 漏读 project settings 的 provider 配置 → 触发 onboarding（正确：不该用未信任配置）；信任后重启即可。
+
 ### useHarnessState 依赖
 
 `useHarnessState(handle.harness, handle.session)` 的 `useEffect` 依赖数组为 `[harness, session]`。

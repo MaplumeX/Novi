@@ -779,3 +779,37 @@ Custom providers (models.json), scoped models (Ctrl+P), transport, queue modes, 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 24: harness completeness: model auth + project trust
+
+**Date**: 2026-07-04
+**Task**: harness completeness: model auth + project trust
+**Branch**: `main`
+
+### Summary
+
+Implemented two child tasks under auth-and-trust-completeness: (1) project trust gate mirroring pi — trust.json, --approve/--no-approve, TrustPrompt overlay, bootstrap includeProject threading, /trust command, HarnessHandle.trusted reuse; (2) model auth enhancements without OAuth — pi-compatible models.json loader (custom providers, $VAR/literal apiKey), scoped models (Ctrl+P), transport + queue modes via setStreamOptions/setSteeringMode/setFollowUpMode, --list-models, /scoped-models. Spec updated with both contracts. 299 tests pass (2 pre-existing settings.test.ts failures unrelated).
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7b11f19` | (see git log) |
+| `5e89e9c` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

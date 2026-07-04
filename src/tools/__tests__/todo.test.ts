@@ -54,4 +54,33 @@ describe("todo tool", () => {
       await cleanup();
     }
   });
+
+  it("isolates todos per sessionId", async () => {
+    const { env, cleanup } = await setupEnv();
+    try {
+      const toolA = getTool(env, "todo", "session-a");
+      const toolB = getTool(env, "todo", "session-b");
+
+      // Add a todo in session A.
+      await toolA.execute("t", { action: "add", content: "task A" });
+
+      // Session B should see no todos.
+      const listB = await toolB.execute("t", { action: "list" });
+      const todosB = (listB.details as { todos: { content: string }[] }).todos;
+      expect(todosB).toEqual([]);
+
+      // Session A should see its own todo.
+      const listA = await toolA.execute("t", { action: "list" });
+      const todosA = (listA.details as { todos: { content: string }[] }).todos;
+      expect(todosA.map((t) => t.content)).toEqual(["task A"]);
+
+      // Adding in session B does not leak into session A.
+      await toolB.execute("t", { action: "add", content: "task B" });
+      const listA2 = await toolA.execute("t", { action: "list" });
+      const todosA2 = (listA2.details as { todos: { content: string }[] }).todos;
+      expect(todosA2.map((t) => t.content)).toEqual(["task A"]);
+    } finally {
+      await cleanup();
+    }
+  });
 });

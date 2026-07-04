@@ -66,7 +66,7 @@ describe("replayHarnessState", () => {
     });
     const newHarness = makeMockHarness();
 
-    await replayHarnessState(newHarness, oldHarness, env, cwd, { reloadResources: false });
+    await replayHarnessState(newHarness, oldHarness, env, cwd, "test-session", { reloadResources: false });
 
     // setTools called with built-in tools + active names from old.
     const setToolsCall = newHarness.calls.find((c) => c[0] === "setTools");
@@ -94,7 +94,7 @@ describe("replayHarnessState", () => {
     });
     const newHarness = makeMockHarness();
 
-    await replayHarnessState(newHarness, oldHarness, env, cwd, { reloadResources: true });
+    await replayHarnessState(newHarness, oldHarness, env, cwd, "test-session", { reloadResources: true });
 
     // setResources with freshly-loaded resources (empty dirs → empty skills).
     const setResCall = newHarness.calls.find((c) => c[0] === "setResources");
@@ -116,7 +116,7 @@ describe("replayHarnessState", () => {
     const newHarness = makeMockHarness();
 
     // trusted=false → project layer skipped → skills should be empty.
-    await replayHarnessState(newHarness, oldHarness, env, cwd, {
+    await replayHarnessState(newHarness, oldHarness, env, cwd, "test-session", {
       reloadResources: true,
       trusted: false,
     });
@@ -133,7 +133,7 @@ describe("replayHarnessState", () => {
     });
     const newHarness = makeMockHarness();
 
-    await replayHarnessState(newHarness, oldHarness, env, cwd, {});
+    await replayHarnessState(newHarness, oldHarness, env, cwd, "test-session", {});
 
     expect(newHarness.calls.find((c) => c[0] === "setSteeringMode")?.[1]).toBe("all");
     expect(newHarness.calls.find((c) => c[0] === "setFollowUpMode")?.[1]).toBe("all");

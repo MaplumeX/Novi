@@ -3,10 +3,10 @@ import type { ExecutionEnv } from "@earendil-works/pi-agent-core/node";
 
 /**
  * Factory that builds a single {@link AgentTool} from a shared
- * {@link ExecutionEnv}. Tools that have no env dependency (e.g. `todo`)
- * simply ignore the parameter.
+ * {@link ExecutionEnv} and the current session id. Tools that don't need the
+ * session id (most tools) simply ignore the second parameter.
  */
-export type ToolFactory = (env: ExecutionEnv) => AgentTool;
+export type ToolFactory = (env: ExecutionEnv, sessionId: string) => AgentTool;
 
 interface ToolRegistration {
   name: string;
@@ -28,9 +28,9 @@ export class BuiltinToolRegistry {
     return this;
   }
 
-  /** Build every registered tool, closing over `env`. */
-  buildAll(env: ExecutionEnv): AgentTool[] {
-    return this.entries.map((entry) => entry.factory(env));
+  /** Build every registered tool, closing over `env` and `sessionId`. */
+  buildAll(env: ExecutionEnv, sessionId: string): AgentTool[] {
+    return this.entries.map((entry) => entry.factory(env, sessionId));
   }
 
   /** Registered tool names, in insertion order. */

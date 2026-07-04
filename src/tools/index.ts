@@ -19,12 +19,13 @@ const registry = new BuiltinToolRegistry()
   .add("ls", (env) => createLsTool(env))
   .add("glob", (env) => createGlobTool(env))
   .add("grep", (env) => createGrepTool(env))
-  .add("todo", () => createTodoTool());
+  .add("todo", (_env, sessionId) => createTodoTool(sessionId));
 
 /**
  * Build the full set of built-in tools, each closing over the shared
- * {@link ExecutionEnv}. Register via `harness.setTools(createBuiltinTools(env))`.
+ * {@link ExecutionEnv} and the active session id. Register via
+ * `harness.setTools(createBuiltinTools(env, sessionId))`.
  */
-export function createBuiltinTools(env: ExecutionEnv): AgentTool[] {
-  return registry.buildAll(env);
+export function createBuiltinTools(env: ExecutionEnv, sessionId: string): AgentTool[] {
+  return registry.buildAll(env, sessionId);
 }

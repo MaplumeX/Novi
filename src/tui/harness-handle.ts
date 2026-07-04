@@ -63,10 +63,11 @@ export async function replayHarnessState(
   oldHarness: AgentHarness,
   env: ExecutionEnv,
   cwd: string,
+  sessionId: string,
   opts: { reloadResources?: boolean; trusted?: boolean } = {},
 ): Promise<void> {
   // Tools: re-create the built-in set and restore the active-tool selection.
-  const tools = createBuiltinTools(env);
+  const tools = createBuiltinTools(env, sessionId);
   const activeToolNames = oldHarness.getActiveTools().map((t) => t.name);
   await newHarness.setTools(tools, activeToolNames);
 
@@ -128,6 +129,7 @@ export function createHarnessHandle(
       // 3. Determine session.
       const session = next.session ?? old.session;
       const sessionPath = next.sessionPath ?? old.sessionPath;
+      const sessionMeta = await session.getMetadata();
       // 4. Build the new harness, reusing the old model.
       const newHarness = new AgentHarness({
         env,
@@ -139,7 +141,7 @@ export function createHarnessHandle(
       // 5. Replay state from old → new. Trust decision is reused from the old
       //    handle (trust is cwd-scoped, not session-scoped; re-resolving would
       //    require a fresh trust prompt mid-session, which we don't support).
-      await replayHarnessState(newHarness, old.harness, env, cwd, {
+      await replayHarnessState(newHarness, old.harness, env, cwd, sessionMeta.id, {
         reloadResources: next.reloadResources,
         trusted: old.trusted,
       });

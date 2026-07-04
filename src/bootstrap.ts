@@ -280,7 +280,7 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
   // Register the built-in tool set. `setTools` keeps the previous
   // `activeToolNames` when none are passed, so pass all names explicitly to
   // activate every tool by default.
-  const tools = createBuiltinTools(env);
+  const tools = createBuiltinTools(env, metadata.id);
   await harness.setTools(tools, tools.map((t) => t.name));
 
   // Load skills + prompt templates (user + project) and publish them to the

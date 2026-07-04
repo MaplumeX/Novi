@@ -19,8 +19,8 @@ export async function setupEnv(): Promise<{ env: NodeExecutionEnv; cwd: string; 
 }
 
 /** Look up a tool by name from the full built-in set. */
-export function getTool(env: NodeExecutionEnv, name: string): AgentTool {
-  const tool = createBuiltinTools(env).find((t) => t.name === name);
+export function getTool(env: NodeExecutionEnv, name: string, sessionId = "test-session"): AgentTool {
+  const tool = createBuiltinTools(env, sessionId).find((t) => t.name === name);
   if (!tool) throw new Error(`tool "${name}" not found in createBuiltinTools`);
   return tool;
 }

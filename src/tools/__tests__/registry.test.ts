@@ -25,16 +25,19 @@ describe("BuiltinToolRegistry", () => {
     expect(r.names()).toEqual(["a", "b", "c"]);
   });
 
-  it("buildAll invokes factories with env", () => {
-    let received: ExecutionEnv | null = null;
-    const r = new BuiltinToolRegistry().add("x", (env) => {
-      received = env;
+  it("buildAll invokes factories with env and sessionId", () => {
+    let receivedEnv: ExecutionEnv | null = null;
+    let receivedSessionId: string | null = null;
+    const r = new BuiltinToolRegistry().add("x", (env, sessionId) => {
+      receivedEnv = env;
+      receivedSessionId = sessionId;
       return stubTool("x");
     });
-    const tools = r.buildAll(stubEnv);
+    const tools = r.buildAll(stubEnv, "sess-1");
     expect(tools).toHaveLength(1);
     expect(tools[0].name).toBe("x");
-    expect(received).toBe(stubEnv);
+    expect(receivedEnv).toBe(stubEnv);
+    expect(receivedSessionId).toBe("sess-1");
   });
 
   it("names of empty registry is empty", () => {

@@ -15,6 +15,7 @@ import { DEFAULT_SYSTEM_PROMPT } from "./default-system-prompt.js";
 import { createBuiltinTools } from "./tools/index.js";
 import { loadResources } from "./resources.js";
 import { loadCustomModels } from "./models-loader.js";
+import { loadHooks, registerHooks } from "./hooks/index.js";
 import {
   loadCredentials,
   injectCredentialsIntoEnv,
@@ -294,6 +295,14 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
     skills: loaded.skills,
     promptTemplates: loaded.promptTemplates,
   });
+
+  // Load and register user/project hook scripts (trust gate applies to the
+  // project layer). Diagnostics are non-fatal warnings surfaced to stderr.
+  const hookConfig = await loadHooks(env, cwd, { includeProject: trusted });
+  for (const diagnostic of hookConfig.diagnostics) {
+    process.stderr.write(`warning: ${diagnostic}\n`);
+  }
+  registerHooks(harness, hookConfig, { env, cwd, sessionId: metadata.id });
 
   // Retry/provider options: pass through to the harness via setStreamOptions.
   // transport is forwarded together with retry fields (single setStreamOptions

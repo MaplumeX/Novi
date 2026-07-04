@@ -7,6 +7,7 @@ import type {
 import type { Models } from "@earendil-works/pi-ai";
 import { createBuiltinTools } from "../tools/index.js";
 import { loadResources } from "../resources.js";
+import { loadHooks, registerHooks } from "../hooks/index.js";
 import type { ResolvedSettings } from "../settings.js";
 import { DEFAULT_PROVIDER, DEFAULT_MODEL_ID, DEFAULT_THINKING_LEVEL } from "../bootstrap.js";
 
@@ -155,6 +156,22 @@ export async function replayHarnessState(
     diagnostics.push(...loaded.diagnostics);
   } else {
     await newHarness.setResources(oldHarness.getResources());
+  }
+
+  // Hooks: re-load manifests and re-register dispatchers. Handler closures
+  // bind to a specific harness instance, so they must be re-created on every
+  // rebuild. Trust gate is reused from the old handle (cwd-scoped).
+  try {
+    const hookConfig = await loadHooks(env, cwd, {
+      includeProject: opts.trusted !== false,
+    });
+    registerHooks(newHarness, hookConfig, { env, cwd, sessionId });
+    diagnostics.push(...hookConfig.diagnostics);
+  } catch (e) {
+    // Hook registration must never block harness rebuild.
+    diagnostics.push(
+      `hooks: failed to reload: ${e instanceof Error ? e.message : String(e)}`,
+    );
   }
 
   return { diagnostics };

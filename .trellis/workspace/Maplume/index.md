@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 22
+- **Total Sessions**: 23
 - **Last Active**: 2026-07-04
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~748 | Active |
+| `journal-1.md` | ~781 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 23 | 2026-07-04 | model-auth-enhancements implemented | `5e89e9c` | `main` |
 | 22 | 2026-07-04 | project-trust-gate implemented | `7b11f19` | `main` |
 | 21 | 2026-07-03 | TUI cleanup: thinking blocks, status bar, input border | `97fc24f` | `main` |
 | 20 | 2026-07-03 | Slash command list refinement | `4932ff4`, `8e8e803` | `main` |

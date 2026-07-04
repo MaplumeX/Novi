@@ -746,3 +746,36 @@ Added startup trust gate mirroring pi: trust.json + --approve/--no-approve + Tru
 ### Next Steps
 
 - None - task complete
+
+
+## Session 23: model-auth-enhancements implemented
+
+**Date**: 2026-07-04
+**Task**: model-auth-enhancements implemented
+**Branch**: `main`
+
+### Summary
+
+Custom providers (models.json), scoped models (Ctrl+P), transport, queue modes, --list-models. Mirrors pi configurability without OAuth.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5e89e9c` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "check 阶段对照 backend 代码标准与禁用模式审查"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "审查 models-loader 降级路径是否完整、diagnostics 是否正确收集"}
+{"file": ".trellis/spec/backend/pi-agent-core-api.md", "reason": "审查 createProvider/setProvider/setStreamOptions/queue mode setter 调用是否符合公开 API 契约，无内部 API 依赖"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "审查 TUI 改动（App.tsx/SettingsForm/commands）符合 frontend 质量标准"}

@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/pi-agent-core-api.md", "reason": "MutableModels.setProvider / createProvider / setStreamOptions(transport) / setSteeringMode / setFollowUpMode / replayHarnessState 公开 API 契约，models-loader 与 bootstrap 接入必须遵循"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "models.json 解析失败、未知 api、缺字段需按降级原则（stderr warning + 跳过，不阻塞启动）"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "文件型资源加载约定（两层 global+project、project override、diagnostics 收集）"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "backend 代码标准与禁用模式"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "App.tsx scopedModels state 与 Ctrl+P 绑定需遵循 useHarnessState 单一事件边界、不污染 phase 模型"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "SettingsForm 新增字段编辑、scoped-models overlay 需遵循组件模式"}

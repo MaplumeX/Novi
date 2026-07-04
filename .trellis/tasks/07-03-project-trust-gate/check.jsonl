@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "check 阶段对照 backend 代码标准审查 trust.ts / bootstrap 改动 / cli 分支"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "审查 trust.json 降级、saveTrust 失败、hasGatedResources 的错误路径是否完整且不阻塞启动"}
+{"file": ".trellis/spec/backend/pi-agent-core-api.md", "reason": "审查 bootstrap trusted 参数、HarnessHandle.trusted 复用、replace 路径符合公开 API 契约"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "审查 TrustPrompt overlay 与 /trust 命令符合 frontend 质量标准"}

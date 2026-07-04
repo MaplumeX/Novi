@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/pi-agent-core-api.md", "reason": "HarnessHandle.replace / replayHarnessState 复刻路径，trusted 字段需在此路由；bootstrap 受 gate 后 loadSettings/loadResources 调用契约"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "trust.json 解析失败、saveTrust 写入失败的降级原则（{}+stderr warning、best-effort 0600，不阻塞启动）"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "文件型数据（trust.json）读写约定，两层资源加载（global+project）的 includeProject 选项改造"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "trust 决策来源展示、/trust 命令提示信息（restart to apply）的 stderr/stdout 约定"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "TrustPrompt 独立 overlay 需保持 useHarnessState 边界纯净，不引入 App phase 模型污染"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "TrustPrompt 独立 render 模式仿 OnboardingWizard，需遵循组件约定"}

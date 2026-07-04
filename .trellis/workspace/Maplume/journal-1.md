@@ -846,3 +846,37 @@ Fixed 4 harness-layer defects: R1 compaction settings now consumed via resolveCo
 ### Next Steps
 
 - None - task complete
+
+
+## Session 26: Novi agent hook mechanism
+
+**Date**: 2026-07-04
+**Task**: Novi agent hook mechanism
+**Branch**: `main`
+
+### Summary
+
+Introduced user/project-configurable hook mechanism for the Novi agent harness. New src/hooks/ module (types, loader, field-mapping, runner, registry, index) with manifest-based hook config (~/.novi/hooks/hooks.json + <cwd>/.novi/hooks/hooks.json, trust-gated). MVP exposes 4 events: before_agent_start, tool_call, tool_result, session_before_compact. Scripts spawned as child processes with stdin=event JSON (snake_case), stdout=result JSON; 10s default timeout (SIGTERM->500ms->SIGKILL); exit 2 = blocking error (auto-block for tool_call). Integrated into bootstrap.ts (register after setResources) and harness-handle.ts replayHarnessState (re-register on /reload, /new, /resume). Updated pi-agent-core-api spec with on()/emitHook contract and hook mechanism documentation. 350/352 tests pass (2 pre-existing settings.test.ts env-pollution failures unrelated).
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `127833e` | (see git log) |
+| `1778810` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

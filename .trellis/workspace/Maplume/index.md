@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 26
+- **Total Sessions**: 27
 - **Last Active**: 2026-07-04
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~882 | Active |
+| `journal-1.md` | ~916 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 27 | 2026-07-04 | Web search and fetch tools | `1494002`, `28dbd39` | `main` |
 | 26 | 2026-07-04 | Novi agent hook mechanism | `127833e`, `1778810` | `main` |
 | 25 | 2026-07-04 | harness completeness fixes (R1-R4) | `d314ea7` | `main` |
 | 24 | 2026-07-04 | harness completeness: model auth + project trust | `7b11f19`, `5e89e9c` | `main` |

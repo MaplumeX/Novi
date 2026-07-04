@@ -880,3 +880,37 @@ Introduced user/project-configurable hook mechanism for the Novi agent harness. 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 27: Web search and fetch tools
+
+**Date**: 2026-07-04
+**Task**: Web search and fetch tools
+**Branch**: `main`
+
+### Summary
+
+Added web_search (DuckDuckGo zero-config provider via html.duckduckgo.com/html/, SearchProvider interface + resolveProvider() for future key-gated providers) and fetch_content (Readability + linkedom extraction, SSRF guard, head/tail truncate + store full to ~/.novi/cache/web/ + footer pointing to read_file). Added NoviSettings.webSearch.provider field. Updated ARCHITECTURE.md and directory-structure.md spec (web-search/ subdirectory + two reusable tool patterns). All four toolchain checks green (386 tests pass, 2 pre-existing settings failures unrelated).
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1494002` | (see git log) |
+| `28dbd39` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/pi-agent-core-api.md", "reason": "AgentHarness 公共 API 契约：steer/followUp/abort/prompt/subscribe 的调用约束、session 创建、setTools activeToolNames 行为、事件类型联合。网关层完全依赖这些公共 API。"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "backend 目录组织约定：一文件一模块、工厂函数命名 createXxx、co-located tests、tools/ 子目录模式。gateway/ 子系统需遵循同约定。"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "失败降级不阻断原则：单渠道启动失败→diagnostic+skip、配置解析失败→空层+警告。网关的 N3 非功能需求与此一致。"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "诊断输出规范：stderr warnings、启动错误路径。网关进程的日志需遵循同模式。"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "代码质量标准与禁止模式：依赖方向单向、事件边界单一化、无数据库。网关层 N1/N2 非功能需求与此对应。"}

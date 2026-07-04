@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "check 阶段质量标准：依赖方向单向（gateway/ 不碰 TUI 内部）、事件边界单一化（event-bridge.ts 唯一投影点）、无数据库（session 走 JsonlSessionRepo）。"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "check 失败降级：单渠道启动失败不崩网关、配置解析失败 diagnostic+skip。验证 N3 约束。"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "check 目录组织：gateway/ 子系统一文件一模块、工厂函数命名、co-located tests（gateway/*.test.ts）。"}
+{"file": ".trellis/spec/backend/pi-agent-core-api.md", "reason": "check harness 公共 API 使用正确性：steer/followUp 可在 turn 中调用、prompt 需 idle、setTools 必须传 activeToolNames、subscribe 返回 unsubscribe。"}

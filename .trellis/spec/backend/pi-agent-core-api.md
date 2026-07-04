@@ -296,7 +296,69 @@ if (opts.reloadResources) {
 | `setSteeringMode(mode)` | set on new harness |
 | `setFollowUpMode(mode)` | set on new harness |
 | `waitForIdle()` | 确保不在 turn 中 |
-| `subscribe(fn)` → `unsubscribe` | 事件订阅/重订阅 |
+| `subscribe(fn)` → `unsubscribe` | 事件订阅/重订阅（单向监听，不能返回 result） |
+| `on(type, handler)` → `unsubscribe` | 注册 hook handler（可返回 result 影响流程） |
+
+## hook 注册契约（on + emitHook）
+
+`AgentHarness` 有两条独立的事件派发路径：
+
+- **`subscribe(listener)`**：单向监听 `AgentHarnessEvent` 流（`agent_start`/`message_update`/`session_compact` 等），listener 不能返回 result。TUI/headless 用它渲染状态。
+- **`on(type, handler)`**：注册 hook handler，**handler 返回 result 会影响流程**（阻断工具、改写结果、取消 compaction）。Novi 的用户可配置 hook 机制（`src/hooks/`）用它接入。
+
+### `on(type, handler)` 签名（已正式声明）
+
+`agent-harness.d.ts:91` 正式声明了带完整泛型类型签名的 `on()`：
+
+```ts
+on<TType extends keyof AgentHarnessEventResultMap>(
+  type: TType,
+  handler: (event: Extract<AgentHarnessOwnEvent, { type: TType }>) =>
+    Promise<AgentHarnessEventResultMap[TType]> | AgentHarnessEventResultMap[TType],
+): () => void;
+```
+
+**不需要类型断言**——`harness.on("tool_call", dispatcher)` 直接可用，TS 会按 `AgentHarnessEventResultMap["tool_call"] = ToolCallResult | undefined` 推断返回类型。
+
+### emitHook 语义
+
+core `emitHook(event)`（`agent-harness.js:178-194`）顺序执行该事件所有注册 handler，**最后一个返回非 undefined 的 result 胜出**，返回给 core 的 beforeToolCall/afterToolCall/compact 等调用点。handler 抛错会被 `normalizeHookError` 包装后 re-throw（会中断 turn）。
+
+### 可 hook 事件与 result 类型
+
+来自 `types.d.ts` 的 `AgentHarnessEventResultMap`：
+
+| 事件 type | result 类型 | 能力 |
+|---|---|---|
+| `before_agent_start` | `BeforeAgentStartResult` | 可改 messages / systemPrompt |
+| `context` | `ContextResult` | 可改 messages |
+| `before_provider_request` | `BeforeProviderRequestResult` | 可 patch streamOptions |
+| `before_provider_payload` | `BeforeProviderPayloadResult` | 可改 payload |
+| `after_provider_response` | undefined | 只读 |
+| `tool_call` | `ToolCallResult` | 可 block + reason |
+| `tool_result` | `ToolResultPatch` | 可改写 content/details/isError/terminate |
+| `session_before_compact` | `SessionBeforeCompactResult` | 可 cancel / 提供 compaction |
+| `session_compact` | undefined | 只读通知 |
+| `session_before_tree` | `SessionBeforeTreeResult` | 可 cancel / 改 summary |
+| 其余（`model_update`/`settled`/`abort` 等） | undefined | 只读通知 |
+
+core 派发给 hook handler 的事件字段（camelCase，来自 `agent-harness.js`）：
+- `tool_call`：`{toolCallId, toolName, input}`
+- `tool_result`：`{toolCallId, toolName, input, content, details, isError}`
+- `before_agent_start`：`{prompt, images, systemPrompt, resources}`
+- `session_before_compact`：`{preparation, signal}`
+
+### Novi hook 机制（`src/hooks/`）
+
+Novi 在 core `on()` 之上构建了用户可配置的脚本 hook 层：
+
+- **配置**：`~/.novi/hooks/hooks.json`（用户层）+ `<cwd>/.novi/hooks/hooks.json`（项目层，受 trust gate）。schema 仿 Claude Code：`{ hooks: { <event>: [{ matcher?: string, hooks: [{ command, args?, timeoutMs? }] }] } }`。
+- **加载**：`loadHooks(env, cwd, {includeProject: trusted})` 读两层 manifest，合并 matcher 组（user 在前，project 追加），未知事件名/非法 JSON/schema 不符 → diagnostic 警告（不阻塞）。
+- **注册**：`registerHooks(harness, config, {env, cwd, sessionId})` 对每个事件调 `harness.on(type, dispatcher)`。dispatcher 闭包做 matcher 过滤 → spawn 脚本 → 解析 stdout → 转 core result。
+- **IPC**：stdin = 事件 JSON（snake_case 字段 + `session_id`/`cwd`/`hook_event_name`）；stdout = `{ result: { ... } }`（snake_case，Novi 转 camelCase）；空 stdout + exit 0 = no-op；exit 2 = 阻断错误（`tool_call` 自动 `{block:true, reason:<stderr>}`）；默认 10s 超时（SIGTERM→500ms→SIGKILL）。
+- **字段映射**：`field-mapping.ts` 用显式映射表（非通用转换），避免泄漏 `signal`/`resources`/`preparation.settings` 等内部字段给脚本。
+- **MVP 暴露 4 事件**：`before_agent_start`/`tool_call`/`tool_result`/`session_before_compact`。`SUPPORTED_EVENTS` Set 控制白名单，扩展只需加成员。
+- **harness 重建重放**：`replayHarnessState` 在 `/reload`/`/new`/`/resume` 时重新 `loadHooks` + `registerHooks`（handler 闭包绑定具体 harness 实例，无法跨实例 carry over）。try/catch 降级为 diagnostic，不阻塞重建。
 
 ## systemPrompt 回调约定
 

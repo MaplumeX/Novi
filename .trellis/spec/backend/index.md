@@ -19,7 +19,7 @@ This directory contains guidelines for backend development. Fill in each file wi
 | [Error Handling](./error-handling.md) | Error types, handling strategies | ✅ Filled |
 | [Quality Guidelines](./quality-guidelines.md) | Code standards, forbidden patterns | ✅ Filled |
 | [Logging Guidelines](./logging-guidelines.md) | Diagnostic output (stderr warnings, startup errors) | ✅ Filled |
-| [pi-agent-core API 契约](./pi-agent-core-api.md) | 已验证的 pi-agent-core / pi-ai 公开 API（Node 入口、session、models、harness 事件） | ✅ Filled |
+| [pi-agent-core API 契约](./pi-agent-core-api.md) | 已验证的 pi-agent-core / pi-ai 公开 API（Node 入口、session、models、harness 事件、hook 注册） | ✅ Filled |
 
 ---
 

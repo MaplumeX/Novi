@@ -15,6 +15,8 @@ import {
 } from "./trust.js";
 import { loadSettings, resolveSettings } from "./settings.js";
 import { renderTrustPrompt } from "./tui/TrustPrompt.js";
+import { builtinModels } from "@earendil-works/pi-ai/providers/all";
+import { loadCustomModels } from "./models-loader.js";
 
 function fail(message: string): never {
   process.stderr.write(`${message}\n`);
@@ -32,6 +34,11 @@ const { values, positionals } = parseArgs({
     mode: { type: "string" },
     approve: { type: "boolean", short: "a", default: false },
     "no-approve": { type: "boolean", default: false },
+    transport: { type: "string" },
+    "steering-mode": { type: "string" },
+    "follow-up-mode": { type: "string" },
+    models: { type: "string" },
+    "list-models": { type: "boolean", default: false },
     help: { type: "boolean", short: "h", default: false },
   },
   allowPositionals: true,
@@ -64,6 +71,11 @@ if (values.help) {
       "  --mode <mode>     Headless mode: \"json\" streams all events as JSONL",
       "  -a, --approve     Trust project-local files for this run",
       "  --no-approve      Ignore project-local files for this run",
+      "  --transport <t>   Provider transport: sse|websocket|websocket-cached|auto",
+      "  --steering-mode <m>   Steering queue mode: one-at-a-time|all",
+      "  --follow-up-mode <m>  Follow-up queue mode: one-at-a-time|all",
+      "  --models <pats>   Comma-separated scoped-model patterns for Ctrl+P",
+      "  --list-models [s] List configured models (optional search filter), then exit",
       "  -h, --help        Show this help",
     ].join("\n") + "\n",
   );
@@ -76,7 +88,7 @@ if (values.print && values.mode === "json") {
 
 const promptText = positionals.join(" ");
 
-const isHeadless = values.print || values.mode === "json";
+const isHeadless = values.print || values.mode === "json" || values["list-models"];
 
 const cliOverrides = {
   provider: values.provider,
@@ -89,6 +101,17 @@ const cliOverrides = {
     | "high"
     | "xhigh"
     | undefined,
+  transport: values.transport as
+    | "sse"
+    | "websocket"
+    | "websocket-cached"
+    | "auto"
+    | undefined,
+  steeringMode: values["steering-mode"] as "one-at-a-time" | "all" | undefined,
+  followUpMode: values["follow-up-mode"] as "one-at-a-time" | "all" | undefined,
+  scopedModels: values.models
+    ? values.models.split(",").map((s) => s.trim()).filter((s) => s.length > 0)
+    : undefined,
 };
 
 const bootstrapOptions = {
@@ -102,6 +125,46 @@ const bootstrapOptions = {
 // credentials/settings, then bootstrap() loads them). Headless mode never
 // starts an interactive wizard — it prints guidance and exits.
 async function main(): Promise<void> {
+  // --- --list-models [search]: print configured models and exit ---
+  // Lightweight: env + creds + settings + custom providers, no session/harness.
+  if (values["list-models"]) {
+    const search = promptText.toLowerCase();
+    const cwd = values.cwd ?? process.cwd();
+    const env = new NodeExecutionEnv({ cwd, shellEnv: process.env });
+    try {
+      // creds + settings, project layer gated conservatively (ask→never).
+      const { loadCredentials, injectCredentialsIntoEnv } = await import("./credentials.js");
+      const creds = await loadCredentials(env);
+      injectCredentialsIntoEnv(creds, process.env);
+      const trustDb = await loadTrust(env);
+      const decision = resolveProjectTrust(cwd, trustDb, { isHeadless: true });
+      const settingsLoad = await loadSettings(env, cwd, { includeProject: decision === "always" });
+      for (const d of settingsLoad.diagnostics) process.stderr.write(`warning: ${d}\n`);
+      const models = builtinModels();
+      const custom = await loadCustomModels(env, cwd, { includeProject: decision === "always" });
+      for (const d of custom.diagnostics) process.stderr.write(`warning: ${d}\n`);
+      for (const p of custom.providers) models.setProvider(p);
+      // Only list models from configured providers (getAuth resolves without
+      // a network call), mirroring the /model command's filtering.
+      const lines: string[] = [];
+      for (const provider of models.getProviders()) {
+        const providerModels = models.getModels(provider.id);
+        if (providerModels.length === 0) continue;
+        const auth = await models.getAuth(providerModels[0]!);
+        if (!auth) continue;
+        for (const m of providerModels) {
+          const label = `${provider.id}/${m.id}  ${m.name}`;
+          if (search && !label.toLowerCase().includes(search)) continue;
+          lines.push(label);
+        }
+      }
+      process.stdout.write(lines.join("\n") + (lines.length > 0 ? "\n" : ""));
+    } finally {
+      await env.cleanup();
+    }
+    process.exit(0);
+  }
+
   try {
     const probeEnv = new NodeExecutionEnv({ cwd: process.cwd(), shellEnv: process.env });
     let probeResult;

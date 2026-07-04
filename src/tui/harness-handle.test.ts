@@ -12,6 +12,8 @@ function makeMockHarness(overrides: Partial<{
   model: unknown;
   thinkingLevel: string;
   streamOptions: unknown;
+  steeringMode: string;
+  followUpMode: string;
   resources: unknown;
 }> = {}): AgentHarness & { calls: Array<[string, ...unknown[]]> } {
   const calls: Array<[string, ...unknown[]]> = [];
@@ -22,11 +24,15 @@ function makeMockHarness(overrides: Partial<{
     setModel: async (m: unknown) => { calls.push(["setModel", m]); },
     setThinkingLevel: async (l: unknown) => { calls.push(["setThinkingLevel", l]); },
     setStreamOptions: async (o: unknown) => { calls.push(["setStreamOptions", o]); },
+    setSteeringMode: async (m: unknown) => { calls.push(["setSteeringMode", m]); },
+    setFollowUpMode: async (m: unknown) => { calls.push(["setFollowUpMode", m]); },
     setResources: async (r: unknown) => { calls.push(["setResources", r]); },
     getActiveTools: () => overrides.activeTools ?? [{ name: "read_file" }, { name: "bash" }],
     getModel: () => overrides.model ?? { id: "test-model", provider: "test" },
     getThinkingLevel: () => overrides.thinkingLevel ?? "medium",
     getStreamOptions: () => overrides.streamOptions ?? { maxRetries: 3 },
+    getSteeringMode: () => overrides.steeringMode ?? "one-at-a-time",
+    getFollowUpMode: () => overrides.followUpMode ?? "one-at-a-time",
     getResources: () => overrides.resources ?? { skills: [], promptTemplates: [] },
   };
   return Object.assign(mock as unknown as AgentHarness, { calls });
@@ -72,6 +78,10 @@ describe("replayHarnessState", () => {
     expect(newHarness.calls.find((c) => c[0] === "setThinkingLevel")?.[1]).toBe("high");
     expect(newHarness.calls.find((c) => c[0] === "setStreamOptions")?.[1]).toEqual({ maxRetries: 5, timeoutMs: 60000 });
 
+    // Queue modes replayed from old (defaults: one-at-a-time).
+    expect(newHarness.calls.find((c) => c[0] === "setSteeringMode")?.[1]).toBe("one-at-a-time");
+    expect(newHarness.calls.find((c) => c[0] === "setFollowUpMode")?.[1]).toBe("one-at-a-time");
+
     // setResources with old's resources (since reloadResources=false).
     const setResCall = newHarness.calls.find((c) => c[0] === "setResources");
     expect(setResCall?.[1]).toEqual({ skills: [{ name: "s1" }], promptTemplates: [] });
@@ -113,5 +123,19 @@ describe("replayHarnessState", () => {
     const setResCall = newHarness.calls.find((c) => c[0] === "setResources");
     expect(setResCall).toBeDefined();
     expect((setResCall![1] as { skills: { name: string }[] }).skills).toEqual([]);
+  });
+
+  it("replays custom queue modes (steeringMode/followUpMode) from old harness", async () => {
+    const { env, cwd } = await setup();
+    const oldHarness = makeMockHarness({
+      steeringMode: "all",
+      followUpMode: "all",
+    });
+    const newHarness = makeMockHarness();
+
+    await replayHarnessState(newHarness, oldHarness, env, cwd, {});
+
+    expect(newHarness.calls.find((c) => c[0] === "setSteeringMode")?.[1]).toBe("all");
+    expect(newHarness.calls.find((c) => c[0] === "setFollowUpMode")?.[1]).toBe("all");
   });
 });

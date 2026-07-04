@@ -15,11 +15,13 @@ import type {
 import type { Models } from "@earendil-works/pi-ai";
 import type { HarnessHandle } from "./harness-handle.js";
 import type { ResolvedSettings } from "../settings.js";
-import { loadSettings, resolveSettings } from "../settings.js";
+import { loadSettings, resolveSettings, writeSettings } from "../settings.js";
 import type { BootstrapResult } from "../bootstrap.js";
 import type { QueueState } from "./useHarnessState.js";
 import { summarizeUsage, formatTokens, formatCost } from "./usage.js";
 import { loadTrust, resolveProjectTrust, saveTrust, hasGatedResources } from "../trust.js";
+import { matchScopedModels } from "./scoped-models.js";
+import { getNoviDir } from "../config.js";
 
 export interface ParsedCommand {
   name: string;
@@ -413,6 +415,65 @@ export const COMMANDS: readonly Command[] = [
     },
   },
   {
+    name: "scoped-models",
+    description: "Manage scoped models for Ctrl+P cycling (/scoped-models [add|remove|clear] <pattern>)",
+    run: async (ctx, args) => {
+      const trimmed = args.trim();
+      const current: string[] = ctx.settings.scopedModels ?? [];
+      if (!trimmed) {
+        // No args: list current patterns + matched models.
+        if (current.length === 0) {
+          ctx.print("No scoped models configured. Usage: /scoped-models add <provider/id-pattern>");
+          return;
+        }
+        const all: { provider: string; id: string }[] = [];
+        for (const provider of ctx.models.getProviders()) {
+          for (const m of ctx.models.getModels(provider.id)) {
+            all.push({ provider: provider.id, id: m.id });
+          }
+        }
+        const matched = matchScopedModels(current, all);
+        const lines = [
+          "Scoped patterns:",
+          ...current.map((p) => `  ${p}`),
+          "Matched models:",
+          ...matched.map((m) => `  ${m.provider}/${m.id}`),
+        ];
+        ctx.print(lines.join("\n"));
+        return;
+      }
+      const spaceIdx = trimmed.search(/\s/);
+      const sub = spaceIdx === -1 ? trimmed : trimmed.slice(0, spaceIdx);
+      const rest = spaceIdx === -1 ? "" : trimmed.slice(spaceIdx + 1).trim();
+      let next: string[];
+      if (sub === "clear") {
+        next = [];
+      } else if ((sub === "add" || sub === "remove") && rest) {
+        if (sub === "add") {
+          next = current.includes(rest) ? current : [...current, rest];
+        } else {
+          next = current.filter((p) => p !== rest);
+        }
+      } else {
+        ctx.print("Usage: /scoped-models [add <pattern> | remove <pattern> | clear]");
+        return;
+      }
+      const targetPath = path.join(getNoviDir(), "settings.json");
+      try {
+        await writeSettings(ctx.env, targetPath, {
+          scopedModels: next.length > 0 ? next : null,
+        });
+        ctx.print(
+          next.length > 0
+            ? `Updated scopedModels (${next.length}). Run /reload or restart to apply.`
+            : "Cleared scopedModels. Run /reload or restart to apply.",
+        );
+      } catch (e) {
+        ctx.print(`Save failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    },
+  },
+  {
     name: "reload",
     description: "Reload settings, skills, prompts, and context files",
     run: async (ctx) => {
@@ -446,7 +507,7 @@ export async function runCommand(
 ): Promise<void> {
   const { name, args } = parseCommand(line);
   if (!name) {
-    ctx.print("Empty command. Try /quit /model /session /new /resume /name /compact /settings /trust /reload.");
+    ctx.print("Empty command. Try /quit /model /session /new /resume /name /compact /settings /trust /scoped-models /reload.");
     return;
   }
   const command = COMMANDS.find((c) => c.name === name);
@@ -470,5 +531,5 @@ export async function runCommand(
     });
     return;
   }
-  ctx.print(`Unknown command: /${name}. Try /quit /model /session /new /resume /name /compact /settings /trust /reload.`);
+  ctx.print(`Unknown command: /${name}. Try /quit /model /session /new /resume /name /compact /settings /trust /scoped-models /reload.`);
 }

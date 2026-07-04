@@ -7,6 +7,7 @@ import { loadSettings, resolveSettings, type SettingsCliOverrides } from "./sett
 import { loadCredentials, injectCredentialsIntoEnv } from "./credentials.js";
 import { DEFAULT_PROVIDER, DEFAULT_MODEL_ID } from "./bootstrap.js";
 import { loadTrust, resolveProjectTrust } from "./trust.js";
+import { loadCustomModels } from "./models-loader.js";
 
 /**
  * A sentinel env that reports *every* env var as set. Passing it to
@@ -80,6 +81,15 @@ export async function probeProviderConfigured(
   const resolved = resolveSettings(loadResult.merged, loadResult.layers, cli);
 
   const models = builtinModels();
+  // Register custom providers from models.json (project layer gated by trust)
+  // so getAuth() can resolve them during the probe.
+  const custom = await loadCustomModels(env, process.cwd(), { includeProject: trusted });
+  for (const diagnostic of custom.diagnostics) {
+    process.stderr.write(`warning: ${diagnostic}\n`);
+  }
+  for (const provider of custom.providers) {
+    models.setProvider(provider);
+  }
   const provider = cli.provider ?? resolved.defaultProvider ?? DEFAULT_PROVIDER;
   const modelId = cli.model ?? resolved.defaultModel;
   const model = resolveCandidateModel(models, provider, modelId);

@@ -74,8 +74,15 @@ export async function replayHarnessState(
   await newHarness.setModel(oldHarness.getModel());
   await newHarness.setThinkingLevel(oldHarness.getThinkingLevel());
 
-  // Stream options (timeout/retry/etc).
+  // Stream options (timeout/retry/etc + transport).
   await newHarness.setStreamOptions(oldHarness.getStreamOptions());
+
+  // Queue delivery modes (steering/followUp): replayed so a harness rebuild
+  // (e.g. /reload) preserves the settings-applied queue mode.
+  const steeringMode = oldHarness.getSteeringMode();
+  await newHarness.setSteeringMode(steeringMode);
+  const followUpMode = oldHarness.getFollowUpMode();
+  await newHarness.setFollowUpMode(followUpMode);
 
   // Resources: reload from disk or carry over the previous snapshot.
   // When reloading, honor the trust gate: untrusted → skip project layer.

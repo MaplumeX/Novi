@@ -223,7 +223,7 @@ describe("runCommand — prompt-template fallback", () => {
     await runCommand("/nonexistent", ctx);
     expect(promptSpy).not.toHaveBeenCalled();
     expect(ctx.print).toHaveBeenCalledWith(
-      "Unknown command: /nonexistent. Try /quit /model /session /new /resume /name /compact /settings /trust /reload.",
+      "Unknown command: /nonexistent. Try /quit /model /session /new /resume /name /compact /settings /trust /scoped-models /reload.",
     );
   });
 
@@ -231,7 +231,7 @@ describe("runCommand — prompt-template fallback", () => {
     const { ctx } = makeCtx({});
     await runCommand("/", ctx);
     expect(ctx.print).toHaveBeenCalledWith(
-      "Empty command. Try /quit /model /session /new /resume /name /compact /settings /trust /reload.",
+      "Empty command. Try /quit /model /session /new /resume /name /compact /settings /trust /scoped-models /reload.",
     );
   });
 });
@@ -435,6 +435,51 @@ describe("/trust", () => {
     await runCommand("/trust", ctx);
     expect(ctx.print).toHaveBeenCalledWith(
       expect.stringContaining("Gated resources present: yes"),
+    );
+  });
+});
+
+describe("/scoped-models", () => {
+  const cleanups: Array<() => Promise<void>> = [];
+  const realHome = process.env.HOME;
+  let home: string;
+
+  afterEach(async () => {
+    while (cleanups.length) await cleanups.pop()!();
+    if (home) await import("node:fs/promises").then((fs) => fs.rm(home, { recursive: true, force: true }));
+    process.env.HOME = realHome;
+  });
+
+  async function setup(): Promise<{ ctx: CommandContext; env: unknown }> {
+    const { mkdtemp } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const nodePath = await import("node:path");
+    const { NodeExecutionEnv } = await import("@earendil-works/pi-agent-core/node");
+    home = await mkdtemp(nodePath.join(tmpdir(), "novi-scoped-cmd-"));
+    process.env.HOME = home;
+    const cwd = await mkdtemp(nodePath.join(tmpdir(), "novi-scoped-cwd-"));
+    const env = new NodeExecutionEnv({ cwd, shellEnv: process.env });
+    cleanups.push(async () => {
+      await env.cleanup();
+      await import("node:fs/promises").then((fs) => fs.rm(cwd, { recursive: true, force: true }));
+    });
+    const { ctx } = makeTrustCtx({ cwd, env, settings: { _sources: {}, scopedModels: [] } });
+    return { ctx, env };
+  }
+
+  it("prints guidance when no patterns configured and no args", async () => {
+    const { ctx } = await setup();
+    await runCommand("/scoped-models", ctx);
+    expect(ctx.print).toHaveBeenCalledWith(
+      expect.stringContaining("No scoped models configured"),
+    );
+  });
+
+  it("rejects an invalid subcommand", async () => {
+    const { ctx } = await setup();
+    await runCommand("/scoped-models frobnicate x", ctx);
+    expect(ctx.print).toHaveBeenCalledWith(
+      expect.stringContaining("Usage: /scoped-models"),
     );
   });
 });

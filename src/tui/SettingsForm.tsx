@@ -31,11 +31,18 @@ interface FieldDef {
 const THINKING_LEVELS: readonly string[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
 const TRUST_OPTIONS: readonly string[] = ["ask", "always", "never"];
 
+const TRANSPORT_OPTIONS: readonly string[] = ["sse", "websocket", "websocket-cached", "auto"];
+const QUEUE_MODE_OPTIONS: readonly string[] = ["one-at-a-time", "all"];
+
 const FIELDS: readonly FieldDef[] = [
   { key: "defaultProvider", label: "defaultProvider", type: "text" },
   { key: "defaultModel", label: "defaultModel", type: "text" },
   { key: "defaultThinkingLevel", label: "defaultThinkingLevel", type: "select", options: THINKING_LEVELS },
   { key: "defaultProjectTrust", label: "defaultProjectTrust", type: "select", options: TRUST_OPTIONS },
+  { key: "transport", label: "transport", type: "select", options: TRANSPORT_OPTIONS },
+  { key: "steeringMode", label: "steeringMode", type: "select", options: QUEUE_MODE_OPTIONS },
+  { key: "followUpMode", label: "followUpMode", type: "select", options: QUEUE_MODE_OPTIONS },
+  { key: "scopedModels", label: "scopedModels (comma-sep)", type: "text" },
   { key: "compaction.enabled", label: "compaction.enabled", type: "toggle" },
   { key: "compaction.reserveTokens", label: "compaction.reserveTokens", type: "number" },
   { key: "compaction.keepRecentTokens", label: "compaction.keepRecentTokens", type: "number" },
@@ -120,6 +127,13 @@ export function SettingsForm({
           if (typeof val === "number" && Number.isNaN(val)) val = undefined;
         } else if (f.type === "toggle") {
           val = editBuffer === "true";
+        } else if (f.key === "scopedModels") {
+          // comma-separated text → string[] (trim, drop empties)
+          val = editBuffer
+            .split(",")
+            .map((s) => s.trim())
+            .filter((s) => s.length > 0);
+          if ((val as string[]).length === 0) val = undefined;
         }
         setDraft((prev) => ({ ...prev, [f.key]: val }));
         setEditing(null);

@@ -85,6 +85,11 @@ describe("resolveSettings", () => {
     expect(out._sources["defaultThinkingLevel"]).toBe("default");
     expect(out._sources["compaction.enabled"]).toBe("default");
     expect(out._sources["retry.provider.timeoutMs"]).toBe("default");
+    expect(out._sources["defaultProjectTrust"]).toBe("default");
+    expect(out._sources["transport"]).toBe("default");
+    expect(out._sources["steeringMode"]).toBe("default");
+    expect(out._sources["followUpMode"]).toBe("default");
+    expect(out._sources["scopedModels"]).toBe("default");
   });
 
   it("marks nested compaction leaves by their source", () => {
@@ -138,6 +143,56 @@ describe("resolveSettings", () => {
       { provider: "openai" },
     );
     expect(cli._sources.defaultProjectTrust).toBe("global");
+  });
+
+  it("marks transport/steeringMode/followUpMode with cli/project/global/default", () => {
+    // cli override
+    const c = resolveSettings(null, { global: null, project: null }, {
+      transport: "websocket",
+      steeringMode: "all",
+      followUpMode: "one-at-a-time",
+    });
+    expect(c._sources.transport).toBe("cli");
+    expect(c._sources.steeringMode).toBe("cli");
+    expect(c._sources.followUpMode).toBe("cli");
+    expect(c.transport).toBe("websocket");
+    // project-sourced
+    const p = resolveSettings(
+      { transport: "sse" } as NoviSettings,
+      { global: null, project: { transport: "sse" } as NoviSettings | null },
+      {},
+    );
+    expect(p._sources.transport).toBe("project");
+    // global-sourced
+    const g = resolveSettings(
+      { steeringMode: "all" } as NoviSettings,
+      { global: { steeringMode: "all" } as NoviSettings | null, project: null },
+      {},
+    );
+    expect(g._sources.steeringMode).toBe("global");
+    // absent → default
+    const d = resolveSettings(null, { global: null, project: null }, {});
+    expect(d._sources.followUpMode).toBe("default");
+  });
+
+  it("marks scopedModels with cli/project/global/default (cli replaces, no merge)", () => {
+    const c = resolveSettings(
+      { scopedModels: ["anthropic/old"] } as NoviSettings,
+      { global: { scopedModels: ["anthropic/old"] } as NoviSettings | null, project: null },
+      { scopedModels: ["openai/*"] },
+    );
+    expect(c._sources.scopedModels).toBe("cli");
+    expect(c.scopedModels).toEqual(["openai/*"]);
+    // project-sourced
+    const p = resolveSettings(
+      { scopedModels: ["a/*"] } as NoviSettings,
+      { global: null, project: { scopedModels: ["a/*"] } as NoviSettings | null },
+      {},
+    );
+    expect(p._sources.scopedModels).toBe("project");
+    // absent → default
+    const d = resolveSettings(null, { global: null, project: null }, {});
+    expect(d._sources.scopedModels).toBe("default");
   });
 });
 

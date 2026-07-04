@@ -27,6 +27,14 @@ export interface NoviSettings {
   };
   /** Fallback project-trust behavior when no saved decision applies. Global-only. */
   defaultProjectTrust?: "ask" | "always" | "never";
+  /** Preferred provider transport for providers that support multiple. */
+  transport?: "sse" | "websocket" | "websocket-cached" | "auto";
+  /** Steering queue delivery mode. */
+  steeringMode?: "one-at-a-time" | "all";
+  /** Follow-up queue delivery mode. */
+  followUpMode?: "one-at-a-time" | "all";
+  /** Glob patterns for scoped model cycling (Ctrl+P). Format: `provider/id`. */
+  scopedModels?: string[];
 }
 
 /** Which layer sourced a given setting leaf. */
@@ -58,6 +66,10 @@ export interface SettingsCliOverrides {
   provider?: string;
   model?: string;
   thinkingLevel?: ThinkingLevel;
+  transport?: "sse" | "websocket" | "websocket-cached" | "auto";
+  steeringMode?: "one-at-a-time" | "all";
+  followUpMode?: "one-at-a-time" | "all";
+  scopedModels?: string[];
 }
 
 /**
@@ -195,6 +207,46 @@ export function resolveSettings(
       _sources.defaultProjectTrust = projectVal !== undefined ? "project" : globalVal !== undefined ? "global" : "default";
     } else {
       _sources.defaultProjectTrust = "default";
+    }
+  }
+
+  // transport / steeringMode / followUpMode: top-level scalars with cli override.
+  for (const { name, cliKey } of [
+    { name: "transport", cliKey: "transport" as const },
+    { name: "steeringMode", cliKey: "steeringMode" as const },
+    { name: "followUpMode", cliKey: "followUpMode" as const },
+  ] as const) {
+    const cliVal = cli[cliKey];
+    if (cliVal !== undefined) {
+      (settings as Record<string, unknown>)[name] = cliVal;
+      _sources[name] = "cli";
+    } else {
+      const projectVal = (layers.project as Record<string, unknown> | null)?.[name];
+      const globalVal = (layers.global as Record<string, unknown> | null)?.[name];
+      const mergedVal = (merged as Record<string, unknown> | null)?.[name];
+      if (mergedVal !== undefined) {
+        _sources[name] = projectVal !== undefined ? "project" : globalVal !== undefined ? "global" : "default";
+      } else {
+        _sources[name] = "default";
+      }
+    }
+  }
+
+  // scopedModels: top-level array, cli override replaces (no merge).
+  {
+    const cliVal = cli.scopedModels;
+    if (cliVal !== undefined) {
+      (settings as Record<string, unknown>).scopedModels = cliVal;
+      _sources.scopedModels = "cli";
+    } else {
+      const projectVal = (layers.project as Record<string, unknown> | null)?.scopedModels;
+      const globalVal = (layers.global as Record<string, unknown> | null)?.scopedModels;
+      const mergedVal = (merged as Record<string, unknown> | null)?.scopedModels;
+      if (mergedVal !== undefined) {
+        _sources.scopedModels = projectVal !== undefined ? "project" : globalVal !== undefined ? "global" : "default";
+      } else {
+        _sources.scopedModels = "default";
+      }
     }
   }
 

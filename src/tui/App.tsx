@@ -18,6 +18,7 @@ import {
 } from "./harness-handle.js";
 import { insert, type EditorState } from "./editor-state.js";
 import { messageText, restoreText } from "./queue-helpers.js";
+import { matchScopedModels, nextScopedIndex } from "./scoped-models.js";
 import type { BootstrapResult } from "../bootstrap.js";
 import { theme, divider } from "./theme.js";
 
@@ -34,6 +35,7 @@ interface AppProps {
   systemPrompt: BootstrapResult["systemPrompt"];
   resolvedSettings: BootstrapResult["resolvedSettings"];
   cliOverrides: BootstrapResult["cliOverrides"];
+  scopedModels: string[];
 }
 
 function App({
@@ -45,6 +47,7 @@ function App({
   systemPrompt,
   resolvedSettings,
   cliOverrides,
+  scopedModels,
 }: AppProps): React.ReactElement {
   // ref so the handle created in the useState initializer can reach it.
   // setHandle is assigned immediately after useState returns, well before any
@@ -214,6 +217,48 @@ function App({
     print(`Thinking: ${next}`);
   }
 
+  /** Ctrl+P / Shift+Ctrl+P: cycle scoped models (settings.scopedModels). */
+  function handleCycleScopedModel(reverse: boolean): void {
+    if (scopedModels.length === 0) {
+      print("No scoped models configured. Set scopedModels in /settings.");
+      return;
+    }
+    // Build the full configured-provider model list (same logic as /model).
+    void (async () => {
+      try {
+        const all: { provider: string; id: string }[] = [];
+        for (const provider of models.getProviders()) {
+          const providerModels = models.getModels(provider.id);
+          if (providerModels.length === 0) continue;
+          const auth = await models.getAuth(providerModels[0]!);
+          if (!auth) continue;
+          for (const m of providerModels) all.push({ provider: provider.id, id: m.id });
+        }
+        const scoped = matchScopedModels(scopedModels, all);
+        if (scoped.length === 0) {
+          print("No models match the scopedModels patterns.");
+          return;
+        }
+        const current = handle.harness.getModel();
+        const currentIdx = scoped.findIndex(
+          (e) => e.provider === current.provider && e.id === current.id,
+        );
+        const start = currentIdx >= 0 ? currentIdx : 0;
+        const nextIdx = nextScopedIndex(start, scoped.length, reverse);
+        const target = scoped[nextIdx]!;
+        const model = models.getModel(target.provider, target.id);
+        if (!model) {
+          print(`Scoped model not found: ${target.provider}/${target.id}`);
+          return;
+        }
+        await handle.harness.setModel(model);
+        print(`Model: ${target.provider}/${target.id}`);
+      } catch (e) {
+        print(`Switch failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    })();
+  }
+
   async function handleCommand(text: string): Promise<void> {
     try {
       await runCommand(text, commandCtx);
@@ -224,9 +269,14 @@ function App({
 
   // Ctrl-C aborts the current turn / exits. When an overlay is open, Ctrl-C
   // closes the overlay instead. Ctrl-O toggles tool call expansion.
+  // Ctrl-P / Shift-Ctrl-P cycle scoped models.
   useInput((value, key) => {
     if (key.ctrl && value === "o") {
       setToolExpanded((v) => !v);
+      return;
+    }
+    if (key.ctrl && value === "p") {
+      handleCycleScopedModel(key.shift);
       return;
     }
     if (key.ctrl && value === "c") {
@@ -391,6 +441,7 @@ export function renderApp(bootstrapResult: BootstrapResult, sessionsDir: string)
       systemPrompt={systemPrompt}
       resolvedSettings={resolvedSettings}
       cliOverrides={cliOverrides}
+      scopedModels={bootstrapResult.scopedModels}
     />,
   );
 }

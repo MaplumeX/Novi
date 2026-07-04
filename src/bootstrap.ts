@@ -14,6 +14,7 @@ import { getNoviDir, getSessionsDir } from "./config.js";
 import { DEFAULT_SYSTEM_PROMPT } from "./default-system-prompt.js";
 import { createBuiltinTools } from "./tools/index.js";
 import { loadResources } from "./resources.js";
+import { loadCustomModels } from "./models-loader.js";
 import {
   loadCredentials,
   injectCredentialsIntoEnv,
@@ -72,6 +73,8 @@ export interface BootstrapResult {
   cliOverrides: { provider?: string; model?: string; thinkingLevel?: ThinkingLevel };
   /** Whether project-level resources were loaded (trust gate result). */
   trusted: boolean;
+  /** Scoped-model patterns from settings (for Ctrl+P cycling). */
+  scopedModels: string[];
 }
 
 /**
@@ -250,6 +253,16 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
   const sessionPath = metadata.path;
 
   const models = builtinModels();
+  // Register custom providers from ~/.novi/models.json + <cwd>/.novi/models.json
+  // (project layer gated by trust). Same-id provider overrides built-in
+  // (setProvider upsert). Diagnostics are non-fatal warnings.
+  const custom = await loadCustomModels(env, cwd, { includeProject: trusted });
+  for (const diagnostic of custom.diagnostics) {
+    process.stderr.write(`warning: ${diagnostic}\n`);
+  }
+  for (const provider of custom.providers) {
+    models.setProvider(provider);
+  }
   const provider = resolvedSettings.defaultProvider ?? DEFAULT_PROVIDER;
   const model = await resolveModel(models, provider, resolvedSettings.defaultModel);
 
@@ -283,15 +296,30 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
   });
 
   // Retry/provider options: pass through to the harness via setStreamOptions.
-  // Actual consumption (observability) is child 7; this child only wires the
-  // settings → harness path so /reload re-applies them.
+  // transport is forwarded together with retry fields (single setStreamOptions
+  // call). Actual consumption (observability) is child 7; this child only
+  // wires the settings → harness path so /reload re-applies them.
   const retry = resolvedSettings.retry?.provider;
-  if (retry && (retry.timeoutMs !== undefined || retry.maxRetries !== undefined || retry.maxRetryDelayMs !== undefined)) {
+  const transport = resolvedSettings.transport;
+  if (
+    transport !== undefined ||
+    (retry && (retry.timeoutMs !== undefined || retry.maxRetries !== undefined || retry.maxRetryDelayMs !== undefined))
+  ) {
     await harness.setStreamOptions({
-      ...(retry.timeoutMs !== undefined ? { timeoutMs: retry.timeoutMs } : {}),
-      ...(retry.maxRetries !== undefined ? { maxRetries: retry.maxRetries } : {}),
-      ...(retry.maxRetryDelayMs !== undefined ? { maxRetryDelayMs: retry.maxRetryDelayMs } : {}),
+      ...(transport !== undefined ? { transport } : {}),
+      ...(retry?.timeoutMs !== undefined ? { timeoutMs: retry.timeoutMs } : {}),
+      ...(retry?.maxRetries !== undefined ? { maxRetries: retry.maxRetries } : {}),
+      ...(retry?.maxRetryDelayMs !== undefined ? { maxRetryDelayMs: retry.maxRetryDelayMs } : {}),
     });
+  }
+
+  // Queue delivery modes (steering/followUp): applied at bootstrap so settings
+  // take effect immediately; replayed on harness rebuild by replayHarnessState.
+  if (resolvedSettings.steeringMode) {
+    await harness.setSteeringMode(resolvedSettings.steeringMode);
+  }
+  if (resolvedSettings.followUpMode) {
+    await harness.setFollowUpMode(resolvedSettings.followUpMode);
   }
 
   return {
@@ -310,5 +338,6 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
       thinkingLevel: options.thinkingLevel,
     },
     trusted,
+    scopedModels: resolvedSettings.scopedModels ?? [],
   };
 }

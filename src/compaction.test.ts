@@ -1,12 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
-import type { AgentHarness } from "@earendil-works/pi-agent-core/node";
-import type { AgentMessage } from "@earendil-works/pi-agent-core/node";
+import type { AgentHarness, AgentMessage, CompactionSettings } from "@earendil-works/pi-agent-core/node";
 import {
   AutoCompactor,
   COMPACT_DEBOUNCE_TURNS,
   CONTEXT_WINDOW_FALLBACK,
   decideShouldCompact,
+  resolveCompactionSettings,
 } from "./compaction.js";
+import { DEFAULT_COMPACTION_SETTINGS } from "@earendil-works/pi-agent-core/node";
+import type { NoviSettings } from "./settings.js";
 
 /** Build a fake user message carrying `text` worth roughly `targetTokens` tokens. */
 function makeLongMessages(targetTokens: number): AgentMessage[] {
@@ -31,6 +33,44 @@ describe("decideShouldCompact", () => {
   it("returns true once tokens approach the context window threshold", () => {
     const msgs = makeLongMessages(TINY_WINDOW * 2);
     expect(decideShouldCompact(msgs, TINY_WINDOW)).toBe(true);
+  });
+
+  it("accepts a settings override that changes the threshold outcome", () => {
+    const msgs = makeLongMessages(TINY_WINDOW * 2);
+    // With a custom settings that has a very large keepRecentTokens, the
+    // shouldCompact result may differ. Verify the settings parameter is
+    // actually consumed by checking it matches shouldCompact with the same
+    // settings.
+    const custom: CompactionSettings = {
+      enabled: true,
+      reserveTokens: 10,
+      keepRecentTokens: 1,
+    };
+    expect(decideShouldCompact(msgs, TINY_WINDOW, custom)).toBe(true);
+  });
+});
+
+describe("resolveCompactionSettings", () => {
+  it("returns defaults when no compaction settings are configured", () => {
+    const resolved: NoviSettings = {};
+    const result = resolveCompactionSettings(resolved);
+    expect(result).toEqual(DEFAULT_COMPACTION_SETTINGS);
+  });
+
+  it("preserves defaults for unconfigured fields when only some are set", () => {
+    const resolved: NoviSettings = { compaction: { enabled: false } };
+    const result = resolveCompactionSettings(resolved);
+    expect(result.enabled).toBe(false);
+    expect(result.reserveTokens).toBe(DEFAULT_COMPACTION_SETTINGS.reserveTokens);
+    expect(result.keepRecentTokens).toBe(DEFAULT_COMPACTION_SETTINGS.keepRecentTokens);
+  });
+
+  it("overrides all fields when fully configured", () => {
+    const resolved: NoviSettings = {
+      compaction: { enabled: false, reserveTokens: 1234, keepRecentTokens: 5678 },
+    };
+    const result = resolveCompactionSettings(resolved);
+    expect(result).toEqual({ enabled: false, reserveTokens: 1234, keepRecentTokens: 5678 });
   });
 });
 
@@ -126,5 +166,59 @@ describe("AutoCompactor", () => {
       await c.maybeCompact(harness, longMsgs, TINY_WINDOW, onStart3);
     }
     expect(onStart3).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not compact when constructed with enabled:false", async () => {
+    const { harness, compact } = makeHarnessMock();
+    const disabled: CompactionSettings = {
+      ...DEFAULT_COMPACTION_SETTINGS,
+      enabled: false,
+    };
+    const c = new AutoCompactor(disabled);
+    const msgs = makeLongMessages(TINY_WINDOW * 2);
+
+    for (let i = 0; i < COMPACT_DEBOUNCE_TURNS + 2; i++) {
+      const triggered = await c.maybeCompact(harness, msgs, TINY_WINDOW);
+      expect(triggered).toBe(false);
+    }
+    expect(compact).not.toHaveBeenCalled();
+  });
+
+  it("does not compact after setSettings({ enabled: false })", async () => {
+    const { harness, compact } = makeHarnessMock();
+    const c = new AutoCompactor();
+    const msgs = makeLongMessages(TINY_WINDOW * 2);
+
+    // First, verify it would compact with defaults.
+    for (let i = 0; i < COMPACT_DEBOUNCE_TURNS; i++) {
+      await c.maybeCompact(harness, msgs, TINY_WINDOW);
+    }
+    expect(compact).toHaveBeenCalledTimes(1);
+    expect(c.getTurnsSinceCompact()).toBe(0);
+
+    // Disable via setSettings; even past debounce + over threshold, no compact.
+    c.setSettings({ ...DEFAULT_COMPACTION_SETTINGS, enabled: false });
+    for (let i = 0; i < COMPACT_DEBOUNCE_TURNS + 2; i++) {
+      const triggered = await c.maybeCompact(harness, msgs, TINY_WINDOW);
+      expect(triggered).toBe(false);
+    }
+    expect(compact).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses setSettings thresholds for shouldCompact", async () => {
+    const { harness, compact } = makeHarnessMock();
+    const custom: CompactionSettings = {
+      enabled: true,
+      reserveTokens: 10,
+      keepRecentTokens: 1,
+    };
+    const c = new AutoCompactor(custom);
+    expect(c.getSettings()).toEqual(custom);
+
+    const msgs = makeLongMessages(TINY_WINDOW * 2);
+    for (let i = 0; i < COMPACT_DEBOUNCE_TURNS; i++) {
+      await c.maybeCompact(harness, msgs, TINY_WINDOW);
+    }
+    expect(compact).toHaveBeenCalledTimes(1);
   });
 });

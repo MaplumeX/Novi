@@ -7,7 +7,11 @@ import type {
 } from "@earendil-works/pi-agent-core/node";
 import type { JsonlSessionMetadata } from "@earendil-works/pi-agent-core/node";
 import type { Api, Model } from "@earendil-works/pi-ai";
-import { AutoCompactor, CONTEXT_WINDOW_FALLBACK } from "../compaction.js";
+import {
+  AutoCompactor,
+  CONTEXT_WINDOW_FALLBACK,
+} from "../compaction.js";
+import type { CompactionSettings } from "@earendil-works/pi-agent-core/node";
 import {
   addUsage,
   lastUsageSummary,
@@ -77,6 +81,7 @@ export interface HarnessState {
 export function useHarnessState(
   harness: AgentHarness,
   session?: Session<JsonlSessionMetadata>,
+  compactionSettings?: CompactionSettings,
 ): HarnessState {
   // Dependency array below is [harness, session]; callers passing
   // handle.harness / handle.session get re-subscription on replace().
@@ -99,10 +104,17 @@ export function useHarnessState(
   // which fires after the final `message_end` of the same tick).
   const messagesRef = useRef<AgentMessage[]>([]);
   // Auto-compactor instance persists across subscribe/unsubscribe cycles.
-  const [compactor] = useState(() => new AutoCompactor());
+  // Initial settings come from the caller (App.tsx computes them via
+  // resolveCompactionSettings); setSettings is called on every effect run so
+  // /reload-triggered settings changes propagate to the compactor.
+  const [compactor] = useState(() => new AutoCompactor(compactionSettings));
 
   useEffect(() => {
     let cancelled = false;
+
+    // Sync the compactor's settings whenever this effect re-runs (e.g. after
+    // /reload changes the resolved settings and App re-computes them).
+    if (compactionSettings) compactor.setSettings(compactionSettings);
 
     // Pull MessageEntry → message from a branch and sync both the ref (for
     // synchronous reads) and React state (for rendering).
@@ -277,7 +289,7 @@ export function useHarnessState(
       cancelled = true;
       unsubscribe();
     };
-  }, [harness, session]);
+  }, [harness, session, compactionSettings]);
 
   return state;
 }

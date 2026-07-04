@@ -1,9 +1,10 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Text, useApp, useInput, render, useStdout } from "ink";
 import type { Models } from "@earendil-works/pi-ai";
 import { JsonlSessionRepo } from "@earendil-works/pi-agent-core/node";
 import type { JsonlSessionMetadata } from "@earendil-works/pi-agent-core/node";
 import { useHarnessState } from "./useHarnessState.js";
+import { resolveCompactionSettings } from "../compaction.js";
 import { MessageList } from "./MessageList.js";
 import { StatusBar } from "./StatusBar.js";
 import { InputBox } from "./InputBox.js";
@@ -74,12 +75,14 @@ function App({
   setHandleRef.current = setHandle;
   void initialHandle;
 
-  const state = useHarnessState(handle.harness, handle.session);
+  const [settings, setSettings] = useState(resolvedSettings);
+  const compactionSettings = useMemo(() => resolveCompactionSettings(settings), [settings]);
+
+  const state = useHarnessState(handle.harness, handle.session, compactionSettings);
   const { exit } = useApp();
   const terminalWidth = useStdout().stdout?.columns ?? 80;
   const [notice, setNotice] = useState<string[]>([]);
   const [overlay, setOverlay] = useState<Overlay>(null);
-  const [settings, setSettings] = useState(resolvedSettings);
   const [editorState, setEditorState] = useState<EditorState>({ text: "", cursor: 0 });
   const [toolExpanded, setToolExpanded] = useState(false);
   const [inputHistory, setInputHistory] = useState<string[]>([]);

@@ -91,4 +91,27 @@ describe("replayHarnessState", () => {
     expect(setResCall).toBeDefined();
     expect(setResCall![1]).toEqual({ skills: [], promptTemplates: [] });
   });
+
+  it("skips project resources on reload when trusted=false (gate)", async () => {
+    const { env, cwd } = await setup();
+    // Plant a project skill so it WOULD be loaded if includeProject were true.
+    const { mkdir, writeFile } = await import("node:fs/promises");
+    const skillsDir = path.join(cwd, ".novi", "skills", "proj-skill");
+    await mkdir(skillsDir, { recursive: true });
+    await writeFile(
+      path.join(skillsDir, "SKILL.md"),
+      "---\nname: proj-skill\ndescription: a project skill\n---\n# Proj Skill\n",
+    );
+    const oldHarness = makeMockHarness();
+    const newHarness = makeMockHarness();
+
+    // trusted=false → project layer skipped → skills should be empty.
+    await replayHarnessState(newHarness, oldHarness, env, cwd, {
+      reloadResources: true,
+      trusted: false,
+    });
+    const setResCall = newHarness.calls.find((c) => c[0] === "setResources");
+    expect(setResCall).toBeDefined();
+    expect((setResCall![1] as { skills: { name: string }[] }).skills).toEqual([]);
+  });
 });

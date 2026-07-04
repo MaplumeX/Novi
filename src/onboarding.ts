@@ -6,6 +6,7 @@ import type { ProviderEnv } from "@earendil-works/pi-ai";
 import { loadSettings, resolveSettings, type SettingsCliOverrides } from "./settings.js";
 import { loadCredentials, injectCredentialsIntoEnv } from "./credentials.js";
 import { DEFAULT_PROVIDER, DEFAULT_MODEL_ID } from "./bootstrap.js";
+import { loadTrust, resolveProjectTrust } from "./trust.js";
 
 /**
  * A sentinel env that reports *every* env var as set. Passing it to
@@ -67,7 +68,15 @@ export async function probeProviderConfigured(
   const creds = await loadCredentials(env);
   injectCredentialsIntoEnv(creds, process.env);
 
-  const loadResult = await loadSettings(env, process.cwd());
+  // Resolve trust conservatively: probe runs before bootstrap, in both headless
+  // and TUI paths, with no overlay/prompt ability. So "ask" is treated as
+  // "never" here — project settings do NOT participate in provider probing
+  // when untrusted (mirrors pi: untrusted project settings are not loaded).
+  const trustDb = await loadTrust(env);
+  const decision = resolveProjectTrust(env.cwd, trustDb, { isHeadless: true });
+  const trusted = decision === "always";
+
+  const loadResult = await loadSettings(env, process.cwd(), { includeProject: trusted });
   const resolved = resolveSettings(loadResult.merged, loadResult.layers, cli);
 
   const models = builtinModels();

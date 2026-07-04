@@ -112,6 +112,33 @@ describe("resolveSettings", () => {
     expect(out._sources["retry.provider.maxRetries"]).toBe("project");
     expect(out._sources["retry.provider.maxRetryDelayMs"]).toBe("default");
   });
+
+  it("marks defaultProjectTrust with its source (global/project/default)", () => {
+    // global-sourced
+    const g = resolveSettings(
+      { defaultProjectTrust: "always" } as NoviSettings,
+      { global: { defaultProjectTrust: "always" } as NoviSettings | null, project: null },
+      {},
+    );
+    expect(g._sources.defaultProjectTrust).toBe("global");
+    // project-sourced
+    const p = resolveSettings(
+      { defaultProjectTrust: "never" } as NoviSettings,
+      { global: null, project: { defaultProjectTrust: "never" } as NoviSettings | null },
+      {},
+    );
+    expect(p._sources.defaultProjectTrust).toBe("project");
+    // absent → default
+    const d = resolveSettings(null, { global: null, project: null }, {});
+    expect(d._sources.defaultProjectTrust).toBe("default");
+    // NOT a CLI override (per-run trust goes via --approve/--no-approve)
+    const cli = resolveSettings(
+      { defaultProjectTrust: "always" } as NoviSettings,
+      { global: { defaultProjectTrust: "always" } as NoviSettings | null, project: null },
+      { provider: "openai" },
+    );
+    expect(cli._sources.defaultProjectTrust).toBe("global");
+  });
 });
 
 describe("applyPatch", () => {

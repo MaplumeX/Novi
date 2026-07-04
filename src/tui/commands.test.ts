@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { parseCommand, runCommand, nextThinkingLevel, THINKING_LEVELS } from "./commands.js";
 import type { CommandContext } from "./commands.js";
 
@@ -29,9 +29,39 @@ function makeCtx(opts: {
     systemPrompt: () => "",
     cliOverrides: {},
     setSettings: vi.fn(),
+    settings: { _sources: {} },
     queue: { steer: [], followUp: [], nextTurn: [] },
   } as unknown as CommandContext;
   return { ctx, promptSpy };
+}
+
+/** Build a ctx with a real temp env + cwd so /trust can hit the filesystem. */
+function makeTrustCtx(opts: {
+  cwd: string;
+  env: unknown;
+  settings?: Record<string, unknown>;
+}): { ctx: CommandContext } {
+  const ctx = {
+    harness: {
+      getResources: () => ({ skills: [], promptTemplates: [] }),
+    },
+    models: {},
+    session: {},
+    sessionsDir: "/tmp/sessions",
+    isIdle: true,
+    exit: vi.fn(),
+    print: vi.fn(),
+    handle: { replace: vi.fn() },
+    setOverlay: vi.fn(),
+    env: opts.env,
+    cwd: opts.cwd,
+    systemPrompt: () => "",
+    cliOverrides: {},
+    setSettings: vi.fn(),
+    settings: opts.settings ?? { _sources: { defaultProjectTrust: "default" } },
+    queue: { steer: [], followUp: [], nextTurn: [] },
+  } as unknown as CommandContext;
+  return { ctx };
 }
 
 describe("parseCommand", () => {
@@ -193,7 +223,7 @@ describe("runCommand — prompt-template fallback", () => {
     await runCommand("/nonexistent", ctx);
     expect(promptSpy).not.toHaveBeenCalled();
     expect(ctx.print).toHaveBeenCalledWith(
-      "Unknown command: /nonexistent. Try /quit /model /session /new /resume /name /compact /settings /reload.",
+      "Unknown command: /nonexistent. Try /quit /model /session /new /resume /name /compact /settings /trust /reload.",
     );
   });
 
@@ -201,7 +231,7 @@ describe("runCommand — prompt-template fallback", () => {
     const { ctx } = makeCtx({});
     await runCommand("/", ctx);
     expect(ctx.print).toHaveBeenCalledWith(
-      "Empty command. Try /quit /model /session /new /resume /name /compact /settings /reload.",
+      "Empty command. Try /quit /model /session /new /resume /name /compact /settings /trust /reload.",
     );
   });
 });
@@ -248,6 +278,7 @@ describe("runCommand — /model", () => {
       systemPrompt: () => "",
       cliOverrides: {},
       setSettings: vi.fn(),
+      settings: { _sources: {} },
       queue: { steer: [], followUp: [], nextTurn: [] },
     } as unknown as CommandContext;
     return { ctx, setModelSpy };
@@ -307,5 +338,103 @@ describe("runCommand — /model", () => {
     await runCommand("/model nope", ctx);
     expect(setModelSpy).not.toHaveBeenCalled();
     expect(ctx.print).toHaveBeenCalledWith("Model not found: anthropic/nope");
+  });
+});
+
+describe("/trust", () => {
+  const cleanups: Array<() => Promise<void>> = [];
+  const realHome = process.env.HOME;
+  let home: string;
+
+  // NOTE: hooking afterEach/import per-test below; define helpers here.
+
+  afterEach(async () => {
+    while (cleanups.length) await cleanups.pop()!();
+    if (home) await import("node:fs/promises").then((fs) => fs.rm(home, { recursive: true, force: true }));
+    process.env.HOME = realHome;
+  });
+
+  it("saves always with cwd + parent hint in the message", async () => {
+    const { mkdtemp, rm, mkdir, writeFile } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const nodePath = await import("node:path");
+    const { NodeExecutionEnv } = await import("@earendil-works/pi-agent-core/node");
+    const { loadTrust } = await import("../trust.js");
+
+    home = await mkdtemp(nodePath.join(tmpdir(), "novi-trust-cmd-"));
+    process.env.HOME = home;
+    const cwd = await mkdtemp(nodePath.join(tmpdir(), "novi-trust-cwd-"));
+    // Create a gated resource so the no-arg status path is meaningful too.
+    await mkdir(nodePath.join(cwd, ".novi"), { recursive: true });
+    await writeFile(nodePath.join(cwd, ".novi", "settings.json"), "{}");
+    const env = new NodeExecutionEnv({ cwd, shellEnv: process.env });
+    cleanups.push(async () => {
+      await env.cleanup();
+      await rm(cwd, { recursive: true, force: true });
+    });
+
+    const { ctx } = makeTrustCtx({ cwd, env });
+    await runCommand("/trust always", ctx);
+    expect(ctx.print).toHaveBeenCalledWith(
+      expect.stringContaining("Restart Novi for it to take effect."),
+    );
+    const db = await loadTrust(env);
+    expect(db[nodePath.resolve(cwd)]).toBe("always");
+    expect(db[nodePath.dirname(nodePath.resolve(cwd))]).toBe("always");
+  });
+
+  it("saves never for cwd only (not parent)", async () => {
+    const { mkdtemp, rm, mkdir, writeFile } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const nodePath = await import("node:path");
+    const { NodeExecutionEnv } = await import("@earendil-works/pi-agent-core/node");
+    const { loadTrust } = await import("../trust.js");
+
+    home = await mkdtemp(nodePath.join(tmpdir(), "novi-trust-cmd-"));
+    process.env.HOME = home;
+    const cwd = await mkdtemp(nodePath.join(tmpdir(), "novi-trust-cwd-"));
+    await mkdir(nodePath.join(cwd, ".novi"), { recursive: true });
+    await writeFile(nodePath.join(cwd, ".novi", "settings.json"), "{}");
+    const env = new NodeExecutionEnv({ cwd, shellEnv: process.env });
+    cleanups.push(async () => {
+      await env.cleanup();
+      await rm(cwd, { recursive: true, force: true });
+    });
+
+    const { ctx } = makeTrustCtx({ cwd, env });
+    await runCommand("/trust never", ctx);
+    const db = await loadTrust(env);
+    expect(db[nodePath.resolve(cwd)]).toBe("never");
+    expect(db[nodePath.dirname(nodePath.resolve(cwd))]).toBeUndefined();
+  });
+
+  it("rejects an invalid argument", async () => {
+    const { ctx } = makeTrustCtx({ cwd: "/tmp", env: {} });
+    await runCommand("/trust maybe", ctx);
+    expect(ctx.print).toHaveBeenCalledWith("Usage: /trust [always|never]. Default is always.");
+  });
+
+  it("shows the current status with no argument", async () => {
+    const { mkdtemp, rm, mkdir, writeFile } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const nodePath = await import("node:path");
+    const { NodeExecutionEnv } = await import("@earendil-works/pi-agent-core/node");
+
+    home = await mkdtemp(nodePath.join(tmpdir(), "novi-trust-cmd-"));
+    process.env.HOME = home;
+    const cwd = await mkdtemp(nodePath.join(tmpdir(), "novi-trust-cwd-"));
+    await mkdir(nodePath.join(cwd, ".novi"), { recursive: true });
+    await writeFile(nodePath.join(cwd, ".novi", "settings.json"), "{}");
+    const env = new NodeExecutionEnv({ cwd, shellEnv: process.env });
+    cleanups.push(async () => {
+      await env.cleanup();
+      await rm(cwd, { recursive: true, force: true });
+    });
+
+    const { ctx } = makeTrustCtx({ cwd, env });
+    await runCommand("/trust", ctx);
+    expect(ctx.print).toHaveBeenCalledWith(
+      expect.stringContaining("Gated resources present: yes"),
+    );
   });
 });

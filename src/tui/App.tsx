@@ -57,6 +57,7 @@ function App({
         harness: initialHandle.harness,
         session: initialHandle.session,
         sessionPath: initialHandle.sessionPath,
+        trusted: initialHandle.trusted,
       },
       {
         env,
@@ -106,6 +107,7 @@ function App({
     systemPrompt,
     cliOverrides,
     setSettings,
+    settings,
     queue: state.queue,
   };
 
@@ -367,7 +369,7 @@ export function renderApp(bootstrapResult: BootstrapResult, sessionsDir: string)
   // useState initializer to call the component's setState, so this initial
   // handle is only used to seed the first render.
   const initialHandle = createHarnessHandle(
-    { harness, session, sessionPath },
+    { harness, session, sessionPath, trusted: bootstrapResult.trusted },
     {
       env,
       models,

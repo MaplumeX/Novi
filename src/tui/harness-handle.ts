@@ -20,6 +20,8 @@ export interface HarnessHandle {
   harness: AgentHarness;
   session: Session<JsonlSessionMetadata>;
   sessionPath: string;
+  /** Whether project-level resources were loaded at bootstrap (trust gate). */
+  trusted: boolean;
   /**
    * Rebuild the harness and update the holder state.
    *
@@ -61,7 +63,7 @@ export async function replayHarnessState(
   oldHarness: AgentHarness,
   env: ExecutionEnv,
   cwd: string,
-  opts: { reloadResources?: boolean } = {},
+  opts: { reloadResources?: boolean; trusted?: boolean } = {},
 ): Promise<void> {
   // Tools: re-create the built-in set and restore the active-tool selection.
   const tools = createBuiltinTools(env);
@@ -76,8 +78,11 @@ export async function replayHarnessState(
   await newHarness.setStreamOptions(oldHarness.getStreamOptions());
 
   // Resources: reload from disk or carry over the previous snapshot.
+  // When reloading, honor the trust gate: untrusted → skip project layer.
   if (opts.reloadResources) {
-    const loaded = await loadResources(env, cwd);
+    const loaded = await loadResources(env, cwd, {
+      includeProject: opts.trusted !== false,
+    });
     await newHarness.setResources({
       skills: loaded.skills,
       promptTemplates: loaded.promptTemplates,
@@ -100,6 +105,7 @@ export function createHarnessHandle(
     harness: AgentHarness;
     session: Session<JsonlSessionMetadata>;
     sessionPath: string;
+    trusted: boolean;
   },
   deps: CreateHarnessHandleDeps,
 ): HarnessHandle {
@@ -123,15 +129,19 @@ export function createHarnessHandle(
         model: old.harness.getModel(),
         systemPrompt,
       });
-      // 5. Replay state from old → new.
+      // 5. Replay state from old → new. Trust decision is reused from the old
+      //    handle (trust is cwd-scoped, not session-scoped; re-resolving would
+      //    require a fresh trust prompt mid-session, which we don't support).
       await replayHarnessState(newHarness, old.harness, env, cwd, {
         reloadResources: next.reloadResources,
+        trusted: old.trusted,
       });
       // 6. Build the new handle with its own replace closure, then publish.
       const newHandle: HarnessHandle = {
         harness: newHarness,
         session,
         sessionPath,
+        trusted: old.trusted,
         replace: async () => {
           // Placeholder overwritten immediately below (TDZ-safe fixup).
         },
@@ -145,6 +155,7 @@ export function createHarnessHandle(
     harness: initial.harness,
     session: initial.session,
     sessionPath: initial.sessionPath,
+    trusted: initial.trusted,
     replace: async () => {
       // Placeholder overwritten immediately below.
     },

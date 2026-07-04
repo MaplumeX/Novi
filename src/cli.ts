@@ -7,6 +7,14 @@ import { renderApp } from "./tui/App.js";
 import { runPrint, runJson } from "./headless/run.js";
 import { probeProviderConfigured, formatHeadlessGuidance } from "./onboarding.js";
 import { renderOnboardingWizard } from "./tui/OnboardingWizard.js";
+import {
+  loadTrust,
+  hasGatedResources,
+  resolveProjectTrust,
+  saveTrust,
+} from "./trust.js";
+import { loadSettings, resolveSettings } from "./settings.js";
+import { renderTrustPrompt } from "./tui/TrustPrompt.js";
 
 function fail(message: string): never {
   process.stderr.write(`${message}\n`);
@@ -22,11 +30,22 @@ const { values, positionals } = parseArgs({
     resume: { type: "string" },
     print: { type: "boolean", short: "p", default: false },
     mode: { type: "string" },
+    approve: { type: "boolean", short: "a", default: false },
+    "no-approve": { type: "boolean", default: false },
     help: { type: "boolean", short: "h", default: false },
   },
   allowPositionals: true,
   strict: true,
 });
+
+// `--no-approve` has no short form: parseArgs only allows single-character
+// shorts, and `-n` would collide with `-a` when combined as `-na` (parsed as
+// both flags set, where approve wins per resolveProjectTrust priority — the
+// opposite of what the user intended). Spell it out as `--no-approve`.
+
+if (values.approve && values["no-approve"]) {
+  fail("--approve and --no-approve are mutually exclusive");
+}
 
 if (values.help) {
   process.stdout.write(
@@ -43,6 +62,8 @@ if (values.help) {
       "  --resume <path>   Resume an existing session JSONL file",
       "  -p, --print       Print mode: run once, print assistant text, exit (no TUI)",
       "  --mode <mode>     Headless mode: \"json\" streams all events as JSONL",
+      "  -a, --approve     Trust project-local files for this run",
+      "  --no-approve      Ignore project-local files for this run",
       "  -h, --help        Show this help",
     ].join("\n") + "\n",
   );
@@ -107,8 +128,58 @@ async function main(): Promise<void> {
     );
   }
 
+  // --- Project trust gate ---
+  // Resolve trust for the cwd. Only prompt when gated resources exist, the
+  // decision is unresolved ("ask"), and we're in TUI mode. Headless modes
+  // resolve "ask" → "never" (don't load project resources, don't prompt).
+  const cwd = values.cwd ?? process.cwd();
+  const trustEnv = new NodeExecutionEnv({ cwd, shellEnv: process.env });
+  let trusted = true;
   try {
-    const result = await bootstrap(bootstrapOptions);
+    const trustDb = await loadTrust(trustEnv);
+    const gated = await hasGatedResources(trustEnv, cwd);
+    if (gated) {
+      // Read global settings for defaultProjectTrust (project layer excluded:
+      // it's gated). `includeProject: false` is conservative but trust.json
+      // and defaultProjectTrust are global-only anyway.
+      const settingsLoad = await loadSettings(trustEnv, cwd, { includeProject: false });
+      const resolved = resolveSettings(settingsLoad.merged, settingsLoad.layers, cliOverrides);
+      const decision = resolveProjectTrust(cwd, trustDb, {
+        approve: values.approve,
+        noApprove: values["no-approve"],
+        defaultProjectTrust: resolved.defaultProjectTrust,
+        isHeadless,
+      });
+
+      if (decision === "ask" && !isHeadless) {
+        // TUI: show the trust prompt overlay before bootstrap.
+        const choice = await renderTrustPrompt(cwd);
+        if (choice === "abort") {
+          process.exit(0);
+        }
+        // Persist always/never (mirrors pi: write to trust.json, no reload).
+        if (choice === "always" || choice === "never") {
+          await saveTrust(trustEnv, cwd, choice);
+        }
+        trusted = choice === "always" || choice === "once";
+      } else {
+        // Resolved decision (always/never) or headless ask→never.
+        trusted = decision === "always";
+      }
+    }
+  } catch (error) {
+    // Trust resolution failure is non-fatal: default to trusted=false only
+    // would be too disruptive; instead default to trusted (current behavior)
+    // and warn.
+    process.stderr.write(
+      `warning: trust resolution failed: ${error instanceof Error ? error.message : String(error)}\n`,
+    );
+  } finally {
+    await trustEnv.cleanup();
+  }
+
+  try {
+    const result = await bootstrap({ ...bootstrapOptions, trusted });
 
     if (values.print) {
       await runPrint({ result, prompt: promptText });

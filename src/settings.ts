@@ -25,6 +25,8 @@ export interface NoviSettings {
       maxRetryDelayMs?: number;
     };
   };
+  /** Fallback project-trust behavior when no saved decision applies. Global-only. */
+  defaultProjectTrust?: "ask" | "always" | "never";
 }
 
 /** Which layer sourced a given setting leaf. */
@@ -66,15 +68,22 @@ export interface SettingsCliOverrides {
  * Returns the merged result plus the split layers so callers can determine
  * per-leaf provenance via {@link resolveSettings}.
  */
-export async function loadSettings(env: ExecutionEnv, cwd: string): Promise<SettingsLoadResult> {
+export async function loadSettings(
+  env: ExecutionEnv,
+  cwd: string,
+  opts: { includeProject?: boolean } = {},
+): Promise<SettingsLoadResult> {
   const globalPath = path.join(getNoviDir(), "settings.json");
-  const projectPath = path.join(cwd, ".novi", "settings.json");
   const diagnostics: string[] = [];
 
-  const [global, project] = await Promise.all([
-    readSettingsLayer(env, globalPath, "global", diagnostics),
-    readSettingsLayer(env, projectPath, "project", diagnostics),
-  ]);
+  const global = await readSettingsLayer(env, globalPath, "global", diagnostics);
+
+  // Project layer is loaded only when trusted (gate). When `includeProject`
+  // is false (untrusted), skip the project file entirely so its values cannot
+  // influence provider resolution or the merged settings.
+  const project = opts.includeProject === false
+    ? null
+    : await readSettingsLayer(env, path.join(cwd, ".novi", "settings.json"), "project", diagnostics);
 
   const layers: SettingsLayers = { global, project };
   if (!global && !project) {
@@ -171,6 +180,21 @@ export function resolveSettings(
       } else {
         _sources[name] = "default";
       }
+    }
+  }
+
+  // defaultProjectTrust: global-only fallback (not a per-run CLI override;
+  // per-run trust goes through --approve/--no-approve). Source tracks the
+  // layer that provided it (project writes are allowed but have no effect on
+  // the trust decision, which reads global settings only).
+  {
+    const mergedVal = (merged as Record<string, unknown> | null)?.defaultProjectTrust;
+    const projectVal = (layers.project as Record<string, unknown> | null)?.defaultProjectTrust;
+    const globalVal = (layers.global as Record<string, unknown> | null)?.defaultProjectTrust;
+    if (mergedVal !== undefined) {
+      _sources.defaultProjectTrust = projectVal !== undefined ? "project" : globalVal !== undefined ? "global" : "default";
+    } else {
+      _sources.defaultProjectTrust = "default";
     }
   }
 

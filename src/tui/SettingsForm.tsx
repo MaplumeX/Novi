@@ -29,11 +29,13 @@ interface FieldDef {
 }
 
 const THINKING_LEVELS: readonly string[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
+const TRUST_OPTIONS: readonly string[] = ["ask", "always", "never"];
 
 const FIELDS: readonly FieldDef[] = [
   { key: "defaultProvider", label: "defaultProvider", type: "text" },
   { key: "defaultModel", label: "defaultModel", type: "text" },
   { key: "defaultThinkingLevel", label: "defaultThinkingLevel", type: "select", options: THINKING_LEVELS },
+  { key: "defaultProjectTrust", label: "defaultProjectTrust", type: "select", options: TRUST_OPTIONS },
   { key: "compaction.enabled", label: "compaction.enabled", type: "toggle" },
   { key: "compaction.reserveTokens", label: "compaction.reserveTokens", type: "number" },
   { key: "compaction.keepRecentTokens", label: "compaction.keepRecentTokens", type: "number" },

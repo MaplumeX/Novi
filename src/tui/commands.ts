@@ -19,6 +19,7 @@ import { loadSettings, resolveSettings } from "../settings.js";
 import type { BootstrapResult } from "../bootstrap.js";
 import type { QueueState } from "./useHarnessState.js";
 import { summarizeUsage, formatTokens, formatCost } from "./usage.js";
+import { loadTrust, resolveProjectTrust, saveTrust, hasGatedResources } from "../trust.js";
 
 export interface ParsedCommand {
   name: string;
@@ -69,6 +70,8 @@ export interface CommandContext {
   cliOverrides: { provider?: string; model?: string; thinkingLevel?: ThinkingLevel };
   /** Update the resolved-settings state (after a /settings save). */
   setSettings: (s: ResolvedSettings) => void;
+  /** Current resolved settings (read-only view for commands like /trust). */
+  settings: ResolvedSettings;
   /** Queued steer/followUp/nextTurn messages (projected from queue_update). */
   queue: QueueState;
 }
@@ -353,6 +356,63 @@ export const COMMANDS: readonly Command[] = [
     },
   },
   {
+    name: "trust",
+    description: "Save project trust decision (/trust [always|never])",
+    run: async (ctx, args) => {
+      const cwd = ctx.cwd;
+      const arg = args.trim().toLowerCase();
+      if (!arg) {
+        // No argument: show the current trust status + source.
+        try {
+          const db = await loadTrust(ctx.env);
+          const gated = await hasGatedResources(ctx.env, cwd);
+          const settingsLoad = await loadSettings(ctx.env, cwd);
+          const resolved = resolveSettings(settingsLoad.merged, settingsLoad.layers, ctx.cliOverrides);
+          const decision = resolveProjectTrust(cwd, db, {
+            defaultProjectTrust: resolved.defaultProjectTrust,
+            isHeadless: false,
+          });
+          const lines = [
+            `Working directory: ${cwd}`,
+            `Gated resources present: ${gated ? "yes" : "no"}`,
+            `Current decision: ${decision}${gated ? "" : " (no gate — no gated resources)"}`,
+            `defaultProjectTrust: ${resolved.defaultProjectTrust ?? "ask (default)"} [${ctx.settings._sources.defaultProjectTrust ?? "default"}]`,
+          ];
+          // Show the applicable trust.json entry (cwd or nearest parent).
+          let dir = path.resolve(cwd);
+          for (;;) {
+            const entry = db[dir];
+            if (entry) {
+              lines.push(`trust.json entry: ${entry} for ${dir}`);
+              break;
+            }
+            const parent = path.dirname(dir);
+            if (parent === dir) break;
+            dir = parent;
+          }
+          ctx.print(lines.join("\n"));
+        } catch (e) {
+          ctx.print(`Trust status failed: ${e instanceof Error ? e.message : String(e)}`);
+        }
+        return;
+      }
+      if (arg !== "always" && arg !== "never") {
+        ctx.print("Usage: /trust [always|never]. Default is always.");
+        return;
+      }
+      try {
+        await saveTrust(ctx.env, cwd, arg);
+        ctx.print(
+          arg === "always"
+            ? `Saved trust decision "${arg}" for ${cwd} (and parent). Restart Novi for it to take effect.`
+            : `Saved trust decision "${arg}" for ${cwd}. Restart Novi for it to take effect.`,
+        );
+      } catch (e) {
+        ctx.print(`Trust save failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    },
+  },
+  {
     name: "reload",
     description: "Reload settings, skills, prompts, and context files",
     run: async (ctx) => {
@@ -386,7 +446,7 @@ export async function runCommand(
 ): Promise<void> {
   const { name, args } = parseCommand(line);
   if (!name) {
-    ctx.print("Empty command. Try /quit /model /session /new /resume /name /compact /settings /reload.");
+    ctx.print("Empty command. Try /quit /model /session /new /resume /name /compact /settings /trust /reload.");
     return;
   }
   const command = COMMANDS.find((c) => c.name === name);
@@ -410,5 +470,5 @@ export async function runCommand(
     });
     return;
   }
-  ctx.print(`Unknown command: /${name}. Try /quit /model /session /new /resume /name /compact /settings /reload.`);
+  ctx.print(`Unknown command: /${name}. Try /quit /model /session /new /resume /name /compact /settings /trust /reload.`);
 }

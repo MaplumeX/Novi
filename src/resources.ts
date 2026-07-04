@@ -33,18 +33,25 @@ export interface LoadedResources {
 export async function loadResources(
   env: ExecutionEnv,
   cwd: string,
+  opts: { includeProject?: boolean } = {},
 ): Promise<LoadedResources> {
   const userSkillsDir = path.join(getNoviDir(), "skills");
-  const projectSkillsDir = path.join(cwd, ".novi", "skills");
   const userPromptsDir = path.join(getNoviDir(), "prompts");
-  const projectPromptsDir = path.join(cwd, ".novi", "prompts");
+
+  // Project layer (skills/prompts) is loaded only when trusted (gate). When
+  // `includeProject` is false, scan only the user-level directories.
+  const skillSources: Array<{ path: string; source: "user" | "project" }> = [
+    { path: userSkillsDir, source: "user" },
+  ];
+  const promptDirs: string[] = [userPromptsDir];
+  if (opts.includeProject !== false) {
+    skillSources.push({ path: path.join(cwd, ".novi", "skills"), source: "project" });
+    promptDirs.push(path.join(cwd, ".novi", "prompts"));
+  }
 
   const { skills, diagnostics: skillDiagnostics } = await loadSourcedSkills(
     env,
-    [
-      { path: userSkillsDir, source: "user" },
-      { path: projectSkillsDir, source: "project" },
-    ],
+    skillSources,
   );
   // Dedupe by name: later entries overwrite earlier ones. The loader returns
   // skills in input order (user → project), so project wins.
@@ -52,7 +59,7 @@ export async function loadResources(
   for (const { skill } of skills) byName.set(skill.name, skill);
 
   const { promptTemplates, diagnostics: promptDiagnostics } =
-    await loadPromptTemplates(env, [userPromptsDir, projectPromptsDir]);
+    await loadPromptTemplates(env, promptDirs);
 
   const diagnostics: string[] = [];
   for (const d of skillDiagnostics) {

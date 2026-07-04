@@ -43,6 +43,12 @@ export interface BootstrapOptions {
   thinkingLevel?: ThinkingLevel;
   /** Optional path to an existing session file to resume. */
   resumePath?: string;
+  /**
+   * Whether project-level resources (`.novi/settings.json`, `.novi/skills`,
+   * `.novi/prompts`) are trusted and should be loaded. Defaults to `true`
+   * (backward compat). When `false`, only global resources are loaded.
+   */
+  trusted?: boolean;
 }
 
 export interface BootstrapResult {
@@ -64,6 +70,8 @@ export interface BootstrapResult {
   }) => Promise<string>;
   /** Raw CLI overrides (provider/model/thinking) for /settings re-resolution. */
   cliOverrides: { provider?: string; model?: string; thinkingLevel?: ThinkingLevel };
+  /** Whether project-level resources were loaded (trust gate result). */
+  trusted: boolean;
 }
 
 /**
@@ -196,6 +204,7 @@ async function ensureDir(env: ExecutionEnv, dir: string): Promise<void> {
  */
 export async function bootstrap(options: BootstrapOptions = {}): Promise<BootstrapResult> {
   const cwd = options.cwd ?? process.cwd();
+  const trusted = options.trusted !== false; // default true (backward compat)
 
   const env = new NodeExecutionEnv({ cwd, shellEnv: process.env });
 
@@ -211,7 +220,8 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
   await ensureDir(env, sessionsDir);
 
   // Load settings (global + project merge). Parse failures are non-fatal warnings.
-  const loadResult = await loadSettings(env, cwd);
+  // Project layer is skipped when untrusted (trust gate).
+  const loadResult = await loadSettings(env, cwd, { includeProject: trusted });
   for (const diagnostic of loadResult.diagnostics) {
     process.stderr.write(`warning: ${diagnostic}\n`);
   }
@@ -262,7 +272,8 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
 
   // Load skills + prompt templates (user + project) and publish them to the
   // harness. The system-prompt provider reads `resources.skills` each turn.
-  const loaded = await loadResources(env, cwd);
+  // Project layer is skipped when untrusted (trust gate).
+  const loaded = await loadResources(env, cwd, { includeProject: trusted });
   for (const diagnostic of loaded.diagnostics) {
     process.stderr.write(`warning: ${diagnostic}\n`);
   }
@@ -298,5 +309,6 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
       model: options.model,
       thinkingLevel: options.thinkingLevel,
     },
+    trusted,
   };
 }

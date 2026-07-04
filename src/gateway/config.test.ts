@@ -1,0 +1,222 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
+import { loadGatewayConfig, expandEnvValues } from "./config.js";
+
+// `getNoviDir` is imported from `../config.js` by `config.ts`; we mock it so
+// the "global" layer resolves to a temp directory instead of the real ~/.novi.
+let mockedHome = "";
+vi.mock("../config.js", async (importActual) => {
+  const actual = (await importActual()) as Record<string, unknown>;
+  return { ...actual, getNoviDir: () => mockedHome };
+});
+
+async function setupEnv(): Promise<{
+  env: NodeExecutionEnv;
+  cwd: string;
+  home: string;
+  cleanup: () => Promise<void>;
+}> {
+  const cwd = await mkdtemp(path.join(tmpdir(), "novi-gw-cfg-"));
+  const home = await mkdtemp(path.join(tmpdir(), "novi-gw-home-"));
+  const env = new NodeExecutionEnv({ cwd, shellEnv: process.env });
+  return {
+    env,
+    cwd,
+    home,
+    cleanup: async () => {
+      await env.cleanup();
+      await rm(cwd, { recursive: true, force: true });
+      await rm(home, { recursive: true, force: true });
+    },
+  };
+}
+
+async function writeJson(filePath: string, content: unknown): Promise<void> {
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await writeFile(filePath, JSON.stringify(content), "utf8");
+}
+
+describe("expandEnvValues", () => {
+  beforeEach(() => {
+    process.env.TEST_TOKEN = "secret123";
+  });
+  afterEach(() => {
+    delete process.env.TEST_TOKEN;
+  });
+
+  it("expands ${ENV} in string values", () => {
+    expect(expandEnvValues("${TEST_TOKEN}")).toBe("secret123");
+  });
+
+  it("expands ${ENV} inside nested objects and arrays", () => {
+    const input = {
+      a: "prefix-${TEST_TOKEN}-suffix",
+      arr: ["${TEST_TOKEN}", { nested: "${TEST_TOKEN}" }],
+    };
+    const out = expandEnvValues(input);
+    expect(out.a).toBe("prefix-secret123-suffix");
+    expect(out.arr[0]).toBe("secret123");
+    expect((out.arr[1] as { nested: string }).nested).toBe("secret123");
+  });
+
+  it("resolves missing env vars to empty string", () => {
+    expect(expandEnvValues("${NOPE_UNDEFINED}")).toBe("");
+  });
+
+  it("passes through non-string values", () => {
+    expect(expandEnvValues(42)).toBe(42);
+    expect(expandEnvValues(true)).toBe(true);
+    expect(expandEnvValues(null)).toBe(null);
+  });
+});
+
+describe("loadGatewayConfig", () => {
+  const cleanups: Array<() => Promise<void>> = [];
+
+  afterEach(async () => {
+    while (cleanups.length) await cleanups.pop()!();
+  });
+
+  it("applies defaults when fields are missing", async () => {
+    const { env, home, cleanup } = await setupEnv();
+    cleanups.push(cleanup);
+    mockedHome = home;
+
+    const { config } = await loadGatewayConfig(env);
+    expect(config.queue.mode).toBe("steer");
+    expect(config.queue.byChannel).toEqual({});
+    expect(config.stream.editIntervalMs).toBe(1000);
+    expect(config.session.idleTimeoutMs).toBe(86_400_000);
+    expect(config.session.maxConcurrent).toBe(10);
+    expect(config.security.allowlist).toEqual(new Set());
+    expect(config.channels).toEqual([]);
+  });
+
+  it("expands ${ENV} in channel botToken", async () => {
+    process.env.MY_BOT_TOKEN = "tok-xyz";
+    const { env, home, cleanup } = await setupEnv();
+    cleanups.push(cleanup);
+    mockedHome = home;
+
+    await writeJson(
+      path.join(home, "gateway.json"),
+      {
+        channels: [{ type: "telegram", id: "tg", botToken: "${MY_BOT_TOKEN}" }],
+      },
+    );
+
+    const { config } = await loadGatewayConfig(env);
+    expect(config.channels).toHaveLength(1);
+    expect(config.channels[0].botToken).toBe("tok-xyz");
+    delete process.env.MY_BOT_TOKEN;
+  });
+
+  it("loads two layers with project overriding global", async () => {
+    const { env, cwd, home, cleanup } = await setupEnv();
+    cleanups.push(cleanup);
+    mockedHome = home;
+
+    // Global: steer mode, 1 channel.
+    await writeJson(path.join(home, "gateway.json"), {
+      queue: { mode: "followup" },
+      channels: [{ type: "telegram", id: "tg-global", botToken: "g" }],
+    });
+    // Project: steer mode (override), different channel.
+    await writeJson(path.join(cwd, ".novi", "gateway.json"), {
+      queue: { mode: "steer" },
+      channels: [{ type: "telegram", id: "tg-project", botToken: "p" }],
+    });
+
+    const { config } = await loadGatewayConfig(env, { cwd });
+    // Project overrides queue.mode.
+    expect(config.queue.mode).toBe("steer");
+    // Channels array is replaced (not concatenated) by project.
+    expect(config.channels).toHaveLength(1);
+    expect(config.channels[0].id).toBe("tg-project");
+  });
+
+  it("skips project layer when trusted=false", async () => {
+    const { env, cwd, home, cleanup } = await setupEnv();
+    cleanups.push(cleanup);
+    mockedHome = home;
+
+    await writeJson(path.join(home, "gateway.json"), {
+      queue: { mode: "followup" },
+      channels: [{ type: "telegram", id: "tg-global", botToken: "g" }],
+    });
+    await writeJson(path.join(cwd, ".novi", "gateway.json"), {
+      queue: { mode: "interrupt" },
+      channels: [{ type: "telegram", id: "tg-project", botToken: "p" }],
+    });
+
+    const { config } = await loadGatewayConfig(env, { cwd, trusted: false });
+    // Only global layer loaded.
+    expect(config.queue.mode).toBe("followup");
+    expect(config.channels[0].id).toBe("tg-global");
+  });
+
+  it("degrades gracefully on malformed JSON (warnings, no throw)", async () => {
+    const { env, home, cleanup } = await setupEnv();
+    cleanups.push(cleanup);
+    mockedHome = home;
+
+    await mkdir(home, { recursive: true });
+    await writeFile(path.join(home, "gateway.json"), "{ not valid json", "utf8");
+
+    const { config, warnings } = await loadGatewayConfig(env);
+    expect(warnings.length).toBeGreaterThan(0);
+    expect(warnings[0]).toContain("failed to parse");
+    // Falls back to defaults.
+    expect(config.queue.mode).toBe("steer");
+    expect(config.channels).toEqual([]);
+  });
+
+  it("loads a single file via filePath option", async () => {
+    const { env, cwd, cleanup } = await setupEnv();
+    cleanups.push(cleanup);
+
+    const filePath = path.join(cwd, "custom-gateway.json");
+    await writeJson(filePath, {
+      queue: { mode: "interrupt" },
+      channels: [{ type: "telegram", id: "custom", botToken: "t" }],
+    });
+
+    const { config } = await loadGatewayConfig(env, { filePath });
+    expect(config.queue.mode).toBe("interrupt");
+    expect(config.channels[0].id).toBe("custom");
+  });
+
+  it("warns when no channels are configured", async () => {
+    const { env, home, cleanup } = await setupEnv();
+    cleanups.push(cleanup);
+    mockedHome = home;
+
+    await writeJson(path.join(home, "gateway.json"), { queue: { mode: "steer" } });
+
+    const { warnings } = await loadGatewayConfig(env);
+    expect(warnings.some((w) => w.includes("no channels"))).toBe(true);
+  });
+
+  it("skips invalid channel entries with a warning", async () => {
+    const { env, home, cleanup } = await setupEnv();
+    cleanups.push(cleanup);
+    mockedHome = home;
+
+    await writeJson(path.join(home, "gateway.json"), {
+      channels: [
+        { type: "telegram", id: "good", botToken: "t" },
+        { type: "telegram", id: "", botToken: "t" }, // missing id
+        { type: "unknown", id: "x", botToken: "t" }, // unknown type
+      ],
+    });
+
+    const { config, warnings } = await loadGatewayConfig(env);
+    expect(config.channels).toHaveLength(1);
+    expect(config.channels[0].id).toBe("good");
+    expect(warnings.some((w) => w.includes("missing"))).toBe(true);
+    expect(warnings.some((w) => w.includes("unknown type"))).toBe(true);
+  });
+});

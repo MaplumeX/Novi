@@ -39,6 +39,8 @@ const { values, positionals } = parseArgs({
     "follow-up-mode": { type: "string" },
     models: { type: "string" },
     "list-models": { type: "boolean", default: false },
+    gateway: { type: "boolean", default: false },
+    config: { type: "string" },
     help: { type: "boolean", short: "h", default: false },
   },
   allowPositionals: true,
@@ -76,6 +78,8 @@ if (values.help) {
       "  --follow-up-mode <m>  Follow-up queue mode: one-at-a-time|all",
       "  --models <pats>   Comma-separated scoped-model patterns for Ctrl+P",
       "  --list-models [s] List configured models (optional search filter), then exit",
+      "  --gateway         Multi-channel gateway mode (IM bot server; no TUI)",
+      "  --config <path>   Path to gateway.json (gateway mode; default ~/.novi/gateway.json)",
       "  -h, --help        Show this help",
     ].join("\n") + "\n",
   );
@@ -88,7 +92,8 @@ if (values.print && values.mode === "json") {
 
 const promptText = positionals.join(" ");
 
-const isHeadless = values.print || values.mode === "json" || values["list-models"];
+const isHeadless =
+  values.print || values.mode === "json" || values["list-models"] || values.gateway;
 
 const cliOverrides = {
   provider: values.provider,
@@ -242,6 +247,11 @@ async function main(): Promise<void> {
   }
 
   try {
+    if (values.gateway) {
+      const { runGateway } = await import("./gateway/run.js");
+      await runGateway({ ...bootstrapOptions, trusted, configPath: values.config });
+      return;
+    }
     const result = await bootstrap({ ...bootstrapOptions, trusted });
 
     if (values.print) {

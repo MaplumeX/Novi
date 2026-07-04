@@ -5,11 +5,16 @@ import type {
   Session,
   ExecutionEnv,
   ThinkingLevel,
+  AgentTool,
+  AgentHarnessStreamOptions,
+  QueueMode,
+  AgentHarnessResources,
 } from "@earendil-works/pi-agent-core/node";
 import type { Api, Model, Models } from "@earendil-works/pi-ai";
 import { builtinModels } from "@earendil-works/pi-ai/providers/all";
 import { formatSkillsForSystemPrompt } from "@earendil-works/pi-agent-core/node";
-import type { AgentHarnessResources } from "@earendil-works/pi-agent-core/node";
+import type { LoadedResources } from "./resources.js";
+import type { HookConfig } from "./hooks/index.js";
 import { getNoviDir, getSessionsDir } from "./config.js";
 import { DEFAULT_SYSTEM_PROMPT } from "./default-system-prompt.js";
 import { createBuiltinTools } from "./tools/index.js";
@@ -76,6 +81,39 @@ export interface BootstrapResult {
   trusted: boolean;
   /** Scoped-model patterns from settings (for Ctrl+P cycling). */
   scopedModels: string[];
+}
+
+/**
+ * One-time preparation result shared across all gateway sessions.
+ *
+ * Contains the env, credentials, settings, models, system-prompt provider,
+ * resources, hooks config, and derived harness options — everything that can
+ * be reused without re-reading from disk. Per-session harness creation
+ * ({@link createHarnessForSession}) consumes this.
+ */
+export interface GatewayEnv {
+  env: ExecutionEnv;
+  cwd: string;
+  models: Models;
+  model: Model<Api>;
+  resolvedSettings: ResolvedSettings;
+  systemPrompt: (ctx: {
+    env: ExecutionEnv;
+    resources: AgentHarnessResources;
+  }) => Promise<string>;
+  trusted: boolean;
+  /** Loaded skills + prompt templates (user + trusted project). */
+  resources: LoadedResources;
+  /** Parsed hook config ready for `registerHooks`. */
+  hookConfig: HookConfig;
+  /** Derived stream options (may be `{}` when no retry/transport configured). */
+  streamOptions: AgentHarnessStreamOptions;
+  /** Steering queue mode (or `undefined` to use harness default). */
+  steeringMode: QueueMode | undefined;
+  /** Follow-up queue mode (or `undefined` to use harness default). */
+  followUpMode: QueueMode | undefined;
+  /** Thinking level from settings/CLI. */
+  thinkingLevel: ThinkingLevel;
 }
 
 /**
@@ -200,22 +238,19 @@ async function ensureDir(env: ExecutionEnv, dir: string): Promise<void> {
 }
 
 /**
- * Assemble env / session / models / harness.
+ * One-time environment preparation: env / credentials / settings / models /
+ * system-prompt provider / resources / hooks config / derived harness options.
  *
- * Uses the public `JsonlSessionRepo` API (see research/api-deviations.md for why
- * `JsonlSessionStorage` is not used) and `builtinModels()` so provider API keys
- * are auto-read from the environment by pi-ai.
+ * Does NOT create a session or harness — that is the job of
+ * {@link createHarnessForSession}. The returned {@link GatewayEnv} is reused
+ * across all gateway sessions.
  */
-export async function bootstrap(options: BootstrapOptions = {}): Promise<BootstrapResult> {
+export async function prepareGatewayEnv(options: BootstrapOptions = {}): Promise<GatewayEnv> {
   const cwd = options.cwd ?? process.cwd();
-  const trusted = options.trusted !== false; // default true (backward compat)
+  const trusted = options.trusted !== false;
 
   const env = new NodeExecutionEnv({ cwd, shellEnv: process.env });
 
-  // Inject any stored credentials (from ~/.novi/credentials.json) into the
-  // process env before resolving the model, so pi-ai's getAuth sees them.
-  // Only keys absent from the environment are injected — a user who exports an
-  // env var always wins over the stored value.
   const storedCreds = await loadCredentials(env);
   injectCredentialsIntoEnv(storedCreds, process.env);
 
@@ -223,8 +258,6 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
   await ensureDir(env, getNoviDir());
   await ensureDir(env, sessionsDir);
 
-  // Load settings (global + project merge). Parse failures are non-fatal warnings.
-  // Project layer is skipped when untrusted (trust gate).
   const loadResult = await loadSettings(env, cwd, { includeProject: trusted });
   for (const diagnostic of loadResult.diagnostics) {
     process.stderr.write(`warning: ${diagnostic}\n`);
@@ -239,24 +272,7 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
     },
   );
 
-  const repo = new JsonlSessionRepo({ fs: env, sessionsRoot: sessionsDir });
-  let session: Session<JsonlSessionMetadata>;
-  if (options.resumePath) {
-    const absResult = await env.absolutePath(options.resumePath);
-    if (!absResult.ok) {
-      throw new Error(`invalid resume path ${options.resumePath}: ${absResult.error.message}`);
-    }
-    session = await repo.open({ path: absResult.value } as JsonlSessionMetadata);
-  } else {
-    session = await repo.create({ cwd, id: uuidv7() });
-  }
-  const metadata = await session.getMetadata();
-  const sessionPath = metadata.path;
-
   const models = builtinModels();
-  // Register custom providers from ~/.novi/models.json + <cwd>/.novi/models.json
-  // (project layer gated by trust). Same-id provider overrides built-in
-  // (setProvider upsert). Diagnostics are non-fatal warnings.
   const custom = await loadCustomModels(env, cwd, { includeProject: trusted });
   for (const diagnostic of custom.diagnostics) {
     process.stderr.write(`warning: ${diagnostic}\n`);
@@ -269,84 +285,183 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
 
   const systemPrompt = makeSystemPromptProvider(cwd);
 
+  const resources = await loadResources(env, cwd, { includeProject: trusted });
+  for (const diagnostic of resources.diagnostics) {
+    process.stderr.write(`warning: ${diagnostic}\n`);
+  }
+
+  const hookConfig = await loadHooks(env, cwd, { includeProject: trusted });
+  for (const diagnostic of hookConfig.diagnostics) {
+    process.stderr.write(`warning: ${diagnostic}\n`);
+  }
+
+  // Derive stream options from settings (retry + transport).
+  const retry = resolvedSettings.retry?.provider;
+  const transport = resolvedSettings.transport;
+  const streamOptions: AgentHarnessStreamOptions = {
+    ...(transport !== undefined ? { transport } : {}),
+    ...(retry?.timeoutMs !== undefined ? { timeoutMs: retry.timeoutMs } : {}),
+    ...(retry?.maxRetries !== undefined ? { maxRetries: retry.maxRetries } : {}),
+    ...(retry?.maxRetryDelayMs !== undefined ? { maxRetryDelayMs: retry.maxRetryDelayMs } : {}),
+  };
+
+  return {
+    env,
+    cwd,
+    models,
+    model,
+    resolvedSettings,
+    systemPrompt,
+    trusted,
+    resources,
+    hookConfig,
+    streamOptions,
+    steeringMode: resolvedSettings.steeringMode,
+    followUpMode: resolvedSettings.followUpMode,
+    thinkingLevel: resolvedSettings.defaultThinkingLevel ?? DEFAULT_THINKING_LEVEL,
+  };
+}
+
+/** Result of {@link createHarnessForSession}. */
+export interface CreatedSession {
+  harness: AgentHarness;
+  session: Session<JsonlSessionMetadata>;
+  sessionPath: string;
+}
+
+/**
+ * Create a fresh `AgentHarness` + session for one gateway session key.
+ *
+ * Reuses the one-time {@link GatewayEnv} preparation. Each call creates a new
+ * JSONL session and wires tools/resources/hooks/stream options/queue modes onto
+ * a new harness instance.
+ */
+export async function createHarnessForSession(
+  gatewayEnv: GatewayEnv,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- sessionKey will be used by gateway session-lane (Phase 4) for session routing/logging
+  _sessionKey: string,
+): Promise<CreatedSession> {
+  const { env, cwd, models, model, systemPrompt, thinkingLevel, resources, hookConfig } =
+    gatewayEnv;
+
+  const repo = new JsonlSessionRepo({ fs: env, sessionsRoot: getSessionsDir() });
+  const session = await repo.create({ cwd, id: uuidv7() });
+  const metadata = await session.getMetadata();
+  const sessionPath = metadata.path;
+
   const harness = new AgentHarness({
     env,
     session,
     models,
     model,
     systemPrompt,
-    thinkingLevel: resolvedSettings.defaultThinkingLevel ?? DEFAULT_THINKING_LEVEL,
+    thinkingLevel,
   });
 
-  // Register the built-in tool set. `setTools` keeps the previous
-  // `activeToolNames` when none are passed, so pass all names explicitly to
-  // activate every tool by default.
-  const tools = createBuiltinTools(env, metadata.id);
+  // Register the built-in tool set. Must pass all tool names explicitly,
+  // otherwise `setTools` reuses the (empty) initial `activeToolNames`.
+  const tools: AgentTool[] = createBuiltinTools(env, metadata.id);
   await harness.setTools(tools, tools.map((t) => t.name));
 
-  // Load skills + prompt templates (user + project) and publish them to the
-  // harness. The system-prompt provider reads `resources.skills` each turn.
-  // Project layer is skipped when untrusted (trust gate).
-  const loaded = await loadResources(env, cwd, { includeProject: trusted });
-  for (const diagnostic of loaded.diagnostics) {
-    process.stderr.write(`warning: ${diagnostic}\n`);
-  }
   await harness.setResources({
-    skills: loaded.skills,
-    promptTemplates: loaded.promptTemplates,
+    skills: resources.skills,
+    promptTemplates: resources.promptTemplates,
   });
 
-  // Load and register user/project hook scripts (trust gate applies to the
-  // project layer). Diagnostics are non-fatal warnings surfaced to stderr.
-  const hookConfig = await loadHooks(env, cwd, { includeProject: trusted });
-  for (const diagnostic of hookConfig.diagnostics) {
-    process.stderr.write(`warning: ${diagnostic}\n`);
-  }
   registerHooks(harness, hookConfig, { env, cwd, sessionId: metadata.id });
 
-  // Retry/provider options: pass through to the harness via setStreamOptions.
-  // transport is forwarded together with retry fields (single setStreamOptions
-  // call). Actual consumption (observability) is child 7; this child only
-  // wires the settings → harness path so /reload re-applies them.
-  const retry = resolvedSettings.retry?.provider;
-  const transport = resolvedSettings.transport;
-  if (
-    transport !== undefined ||
-    (retry && (retry.timeoutMs !== undefined || retry.maxRetries !== undefined || retry.maxRetryDelayMs !== undefined))
-  ) {
-    await harness.setStreamOptions({
-      ...(transport !== undefined ? { transport } : {}),
-      ...(retry?.timeoutMs !== undefined ? { timeoutMs: retry.timeoutMs } : {}),
-      ...(retry?.maxRetries !== undefined ? { maxRetries: retry.maxRetries } : {}),
-      ...(retry?.maxRetryDelayMs !== undefined ? { maxRetryDelayMs: retry.maxRetryDelayMs } : {}),
-    });
+  // Apply stream options when any are set (avoids a no-op setStreamOptions).
+  const so = gatewayEnv.streamOptions;
+  if (Object.keys(so).length > 0) {
+    await harness.setStreamOptions(so);
   }
 
-  // Queue delivery modes (steering/followUp): applied at bootstrap so settings
-  // take effect immediately; replayed on harness rebuild by replayHarnessState.
-  if (resolvedSettings.steeringMode) {
-    await harness.setSteeringMode(resolvedSettings.steeringMode);
+  if (gatewayEnv.steeringMode) {
+    await harness.setSteeringMode(gatewayEnv.steeringMode);
   }
-  if (resolvedSettings.followUpMode) {
-    await harness.setFollowUpMode(resolvedSettings.followUpMode);
+  if (gatewayEnv.followUpMode) {
+    await harness.setFollowUpMode(gatewayEnv.followUpMode);
+  }
+
+  return { harness, session, sessionPath };
+}
+
+/**
+ * Assemble env / session / models / harness.
+ *
+ * Uses the public `JsonlSessionRepo` API (see research/api-deviations.md for why
+ * `JsonlSessionStorage` is not used) and `builtinModels()` so provider API keys
+ * are auto-read from the environment by pi-ai.
+ */
+export async function bootstrap(options: BootstrapOptions = {}): Promise<BootstrapResult> {
+  const gatewayEnv = await prepareGatewayEnv(options);
+
+  // Resume an existing session when requested; otherwise the gateway helper
+  // creates a fresh one (shared with the gateway path).
+  let session: Session<JsonlSessionMetadata>;
+  let sessionPath: string;
+  let harness: AgentHarness;
+
+  if (options.resumePath) {
+    const { env } = gatewayEnv;
+    const absResult = await env.absolutePath(options.resumePath);
+    if (!absResult.ok) {
+      throw new Error(`invalid resume path ${options.resumePath}: ${absResult.error.message}`);
+    }
+    const repo = new JsonlSessionRepo({ fs: env, sessionsRoot: getSessionsDir() });
+    session = await repo.open({ path: absResult.value } as JsonlSessionMetadata);
+    const metadata = await session.getMetadata();
+    sessionPath = metadata.path;
+
+    harness = new AgentHarness({
+      env: gatewayEnv.env,
+      session,
+      models: gatewayEnv.models,
+      model: gatewayEnv.model,
+      systemPrompt: gatewayEnv.systemPrompt,
+      thinkingLevel: gatewayEnv.thinkingLevel,
+    });
+
+    const tools: AgentTool[] = createBuiltinTools(env, metadata.id);
+    await harness.setTools(tools, tools.map((t) => t.name));
+    await harness.setResources({
+      skills: gatewayEnv.resources.skills,
+      promptTemplates: gatewayEnv.resources.promptTemplates,
+    });
+    registerHooks(harness, gatewayEnv.hookConfig, { env, cwd: gatewayEnv.cwd, sessionId: metadata.id });
+    const so = gatewayEnv.streamOptions;
+    if (Object.keys(so).length > 0) {
+      await harness.setStreamOptions(so);
+    }
+    if (gatewayEnv.steeringMode) {
+      await harness.setSteeringMode(gatewayEnv.steeringMode);
+    }
+    if (gatewayEnv.followUpMode) {
+      await harness.setFollowUpMode(gatewayEnv.followUpMode);
+    }
+  } else {
+    const created = await createHarnessForSession(gatewayEnv, "tui");
+    harness = created.harness;
+    session = created.session;
+    sessionPath = created.sessionPath;
   }
 
   return {
     harness,
-    env,
-    models,
-    model,
+    env: gatewayEnv.env,
+    models: gatewayEnv.models,
+    model: gatewayEnv.model,
     session,
     sessionPath,
-    cwd,
-    resolvedSettings,
-    systemPrompt,
+    cwd: gatewayEnv.cwd,
+    resolvedSettings: gatewayEnv.resolvedSettings,
+    systemPrompt: gatewayEnv.systemPrompt,
     cliOverrides: {
       provider: options.provider,
       model: options.model,
       thinkingLevel: options.thinkingLevel,
     },
-    trusted,
-    scopedModels: resolvedSettings.scopedModels ?? [],
+    trusted: gatewayEnv.trusted,
+    scopedModels: gatewayEnv.resolvedSettings.scopedModels ?? [],
   };
 }

@@ -47,6 +47,26 @@ src/
 │   │   ├── ssrf.ts          # isPrivateUrl() — private/loopback URL guard
 │   │   └── __tests__/
 │   └── __tests__/          # Tool tests + helpers.ts (setupEnv / getTool / writeFixture)
+├── headless/              # Headless run modes (print / json JSONL stream)
+│   ├── run.ts              # runPrint / runJson entry points
+│   ├── events.ts           # extractText + projectEvent — single raw-event → plain-object decoder
+│   └── stdin.ts            # readStdinIfPiped + mergePrompt
+├── gateway/               # IM multi-channel gateway (`novi --gateway`)
+│   ├── run.ts              # runGateway(options) — cli.ts --gateway dispatch
+│   ├── config.ts           # gateway.json schema + ${ENV} expand + two-layer load (trust-gated)
+│   ├── core/
+│   │   ├── types.ts          # ChannelAdapter / ChannelCapabilities / ChannelMessage / ChannelEvent / AgentProtocolAdapter
+│   │   ├── abstract-channel.ts  # AbstractChannel base (emitMessage + abstract start/stop/send)
+│   │   ├── gateway-app.ts    # GatewayApp orchestration: channels ↔ agent, allowlist, slash bypass
+│   │   ├── session-lane.ts   # per-sessionKey queue + steer/followup/interrupt dispatch
+│   │   ├── session-manager.ts# lazy harness creation + idle timeout + maxConcurrent eviction
+│   │   └── commands.ts      # CommandRegistry: /new /stop /help /status
+│   ├── agent/
+│   │   ├── event-bridge.ts   # createEventBridge — single raw-event → callbacks projector (N2 boundary)
+│   │   └── novi-agent-adapter.ts  # NoviAgentAdapter wraps AgentHarness behind AgentProtocolAdapter
+│   └── channels/
+│       ├── index.ts          # createChannel factory (type switch, MVP telegram)
+│       └── telegram.ts       # TelegramChannel (telegraf long-polling + edit-stream)
 └── tui/                    # Frontend layer (see frontend/directory-structure.md)
 ```
 
@@ -74,6 +94,16 @@ src/
 - **Co-located tests.** `foo.ts` → `foo.test.ts`; `tools/` tests live under
   `tools/__tests__/`. Tests are excluded from `dist` (tsconfig includes only
   `src` and `tsc` does not compile `.test.ts` — vitest covers them).
+- **Gateway sub-system.** `gateway/` is a self-contained sub-system added by
+  the multi-channel gateway task. It depends ONLY on `AgentHarness` public
+  API + channel SDKs (`telegraf`); it MUST NOT import from `tui/` (N1
+  dependency direction — enforced by the check agent). The
+  `AgentProtocolAdapter` interface (`core/types.ts`) is the protocol-neutral
+  boundary: MVP's `NoviAgentAdapter` is the in-process implementation; a
+  future `novi --serve` RPC mode swaps in a `RemoteAgentAdapter` with zero
+  change to `GatewayApp`. `event-bridge.ts` is the gateway-side single
+  harness-event projection point (the IM analogue of TUI's `useHarnessState`
+  and headless's `events.ts` — N2 single event boundary).
 
 ### Reusable tool patterns
 
@@ -109,5 +139,7 @@ that future tools returning large/batched content may reuse:
 ## Examples
 
 - Tool aggregator: `src/tools/index.ts`
-- Bootstrap wiring in full: `src/bootstrap.ts`
+- Bootstrap wiring in full: `src/bootstrap.ts` (now split into `prepareGatewayEnv` + `createHarnessForSession` — see `pi-agent-core-api.md`)
+- Gateway orchestration: `src/gateway/core/gateway-app.ts`
+- Channel adapter pattern: `src/gateway/core/abstract-channel.ts` + `src/gateway/channels/telegram.ts`
 - Pure path/config functions: `src/config.ts`

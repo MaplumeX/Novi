@@ -94,6 +94,10 @@ new AgentHarness({ env, session, models, model, systemPrompt, /* optional: */ to
 
 流式文本：`message_update` 中 `event.assistantMessageEvent.type === "text_delta"` → `.delta: string`。
 
+### 多 turn run 中 `message_end`(assistant) 会多次触发
+
+一次 `prompt` 触发的 run 可能包含多轮工具调用，因此会有多个 assistant `message_end` 事件（工具调用叙述 + 最终回复）。**不能直接把每个 `message_end`(assistant) 当作「run 结束」的信号**——否则下游会收到多条「最终文本」。正确做法是**缓冲最新 assistant 文本，在 `agent_end` 事件触发一次 `onTurnEnd`**，因为 `agent_end` 每次运行精确触发一次。网关 `event-bridge.ts` 正是这个模式：`message_end`(assistant) 只更新缓冲文本，`agent_end` 才调 `callbacks.onTurnEnd(bufferedText)`。
+
 ## 结构性操作需 idle
 
 `prompt` / `skill` / `promptFromTemplate` / `compact` / `navigateTree` 需 `phase==="idle"`，否则抛 `AgentHarnessError("busy")`。`steer` / `followUp` / `nextTurn` / `abort` / runtime setters 可在 turn 中用。
@@ -120,6 +124,30 @@ await harness.setTools(tools, tools.map(t => t.name));
 ```
 
 （源码确认：`setTools` 中 `const nextActiveToolNames = activeToolNames ? [...activeToolNames] : this.activeToolNames;`）
+
+## bootstrap 拆分契约（prepareGatewayEnv + createHarnessForSession）
+
+`bootstrap()` 原本一次性完成「env/credentials/settings/models/tools/resources 准备 + session/harness 创建」。多渠道网关任务将其拆成两层，支持 per-sessionKey 懒创建多个 harness，同时保持 TUI/print/json 路径的 `BootstrapResult` 契约不变。
+
+- **`prepareGatewayEnv(options: BootstrapOptions): Promise<GatewayEnv>`**（一次）：步骤 1-4,6-8,11（env / credentials / settings / models+custom providers / systemPrompt provider / resources / hooks config / 派生的 streamOptions+steeringMode+followUpMode+thinkingLevel）。**不含** session/harness 创建。返回可复用的 `GatewayEnv`。
+- **`createHarnessForSession(gatewayEnv, sessionKey): Promise<CreatedSession>`**（多次）：步骤 5,9-10,12-14（`repo.create({ cwd, id: uuidv7() })` → `new AgentHarness({ env, session, models, model, systemPrompt, thinkingLevel })` → `setTools(tools, tools.map(t => t.name))` → `setResources` → `registerHooks` → `setStreamOptions` → `setSteeringMode/setFollowUpMode`）。返回 `{ harness, session, sessionPath }`。
+- **`bootstrap()`** 仍是 TUI/print/json 的唯一入口，内部委托 `prepareGatewayEnv` + `createHarnessForSession(env, "tui")`，返回值与历史完全一致。
+
+### 关键约束
+
+- `setTools` **必须显式传 `activeToolNames`**（见上「setTools 与 activeToolNames 的非显然行为」）。`createHarnessForSession` 每次都传 `tools.map(t => t.name)`。
+- resume 路径（`options.resumePath`）仍由 `bootstrap()` 自己处理（`repo.open` + harness 装配），不走 `createHarnessForSession`。
+- `GatewayEnv` 是「一次性准备结果」的载体，不含可变运行时状态；网关的 `NoviAgentAdapter` 持有它并在每个 sessionKey 上调用 `createHarnessForSession`。
+
+### 网关侧 harness 多实例使用模式
+
+网关一个进程内按 `channelId:chatId` 维护多个独立 `AgentHarness` 实例（`NoviAgentAdapter.sessions: Map<string, { harness, session }>`）。关键 API 映射：
+
+- idle 时收到消息 → `harness.prompt(text)`（需 `phase==="idle"`，由 `session-lane` 的 per-sessionKey 串行保证）。
+- 运行中收到消息，按 `queueMode`：`steer` → `harness.steer(text)`；`followup` → `harness.followUp(text)`；`interrupt` → `harness.abort()` 后重新 `prompt`。三者都可在 turn 中调用。
+- 关闭 session → `harness.waitForIdle()` → 移除缓存。
+
+> **网关层 vs harness 层队列模式是正交的**：harness 的 `steeringMode`/`followUpMode`（`"one-at-a-time"|"all"`）是 harness 内部队列交付模式；网关的 steer/followup/interrupt 是网关对「运行中收到新消息」的整体策略。两者分层独立。
 
 ## Harness 重建模式（HarnessHandle + replayHarnessState）
 

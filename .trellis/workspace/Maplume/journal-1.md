@@ -713,3 +713,36 @@ Cleaned up three TUI rendering details: (1) thinking blocks now always render fu
 ### Next Steps
 
 - None - task complete
+
+
+## Session 22: project-trust-gate implemented
+
+**Date**: 2026-07-04
+**Task**: project-trust-gate implemented
+**Branch**: `main`
+
+### Summary
+
+Added startup trust gate mirroring pi: trust.json + --approve/--no-approve + TrustPrompt overlay + bootstrap includeProject threading + /trust command + HarnessHandle.trusted reuse.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7b11f19` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

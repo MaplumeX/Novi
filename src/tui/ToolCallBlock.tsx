@@ -1,8 +1,7 @@
-import { Fragment } from "react";
 import { Box, Text } from "ink";
 import type { AgentToolCall } from "@earendil-works/pi-agent-core/node";
 import type { ToolResultMessage } from "@earendil-works/pi-ai";
-import { DIVIDER_WIDTH, icons, theme } from "./theme.js";
+import { icons, theme } from "./theme.js";
 
 const MAX_RESULT_LINES = 20;
 
@@ -36,13 +35,6 @@ function summarizeArgs(name: string, args: Record<string, unknown>): string {
     default:
       return "";
   }
-}
-
-/** Truncate an array of lines to MAX_RESULT_LINES, appending a "more" hint. */
-function truncateLines(lines: string[]): string[] {
-  if (lines.length <= MAX_RESULT_LINES) return lines;
-  const more = lines.length - MAX_RESULT_LINES;
-  return [...lines.slice(0, MAX_RESULT_LINES), `… (${more} more lines)`];
 }
 
 /** Simple LCS-based line diff producing {type, line} entries. */
@@ -90,148 +82,182 @@ function simpleDiff(oldText: string, newText: string): DiffLine[] {
   return result;
 }
 
-function renderDiff(diffLines: DiffLine[]): React.ReactElement {
-  const truncated = truncateLines(
-    diffLines.map((d) => `${d.kind === "del" ? "-" : d.kind === "add" ? "+" : " "} ${d.text}`),
-  );
-  return (
-    <Box flexDirection="column">
-      {truncated.map((line, idx) => {
-        if (line.startsWith("- ")) {
-          return (
-            <Text key={idx} color={theme.diff.del}>
-              {line}
-            </Text>
-          );
-        }
-        if (line.startsWith("+ ")) {
-          return (
-            <Text key={idx} color={theme.diff.add}>
-              {line}
-            </Text>
-          );
-        }
-        return (
-          <Text key={idx} color={theme.dim}>
-            {line}
-          </Text>
-        );
-      })}
-    </Box>
-  );
+/** `+{adds} -{dels}` stat for an edit_file diff. */
+function diffStat(diffLines: DiffLine[]): string {
+  let adds = 0;
+  let dels = 0;
+  for (const d of diffLines) {
+    if (d.kind === "add") adds++;
+    else if (d.kind === "del") dels++;
+  }
+  return `+${adds} -${dels}`;
 }
 
-/** Dotted separator line used between expanded content sections. */
-function dottedSeparator(key: string): React.ReactElement {
-  return (
-    <Text key={key} color={theme.dim}>
-      {icons.separatorDotted.repeat(DIVIDER_WIDTH)}
-    </Text>
-  );
+/** Collect the text content parts of a tool result into a single string. */
+function resultText(result?: ToolResultMessage): string {
+  return result
+    ? result.content
+        .filter((c): c is { type: "text"; text: string } => c.type === "text")
+        .map((c) => c.text)
+        .join("\n")
+    : "";
 }
 
-/** Render the expanded content sections for a specific tool type. */
-function renderExpanded(call: AgentToolCall, result?: ToolResultMessage): React.ReactElement[] {
+/** Render the expanded content lines for a specific tool type. */
+function expandedContentLines(call: AgentToolCall, result?: ToolResultMessage): DiffLine[] | string[] {
   const args = call.arguments ?? {};
   switch (call.name) {
     case "edit_file": {
       const oldText = typeof args.oldText === "string" ? args.oldText : "";
       const newText = typeof args.newText === "string" ? args.newText : "";
-      return [
-        <Text color={theme.dim}>path: {typeof args.path === "string" ? args.path : ""}</Text>,
-        renderDiff(simpleDiff(oldText, newText)),
-      ];
+      return simpleDiff(oldText, newText);
     }
     case "write_file": {
       const content = typeof args.content === "string" ? args.content : "";
-      const lines = truncateLines(content.split("\n"));
-      return [
-        <Text color={theme.dim}>path: {typeof args.path === "string" ? args.path : ""}</Text>,
-        <Box flexDirection="column">
-          {lines.map((line, idx) => (
-            <Text key={idx}>{line}</Text>
-          ))}
-        </Box>,
-      ];
+      return content.split("\n");
     }
     case "bash": {
-      const cmd = typeof args.command === "string" ? args.command : "";
-      const output = result
-        ? result.content
-            .filter((c): c is { type: "text"; text: string } => c.type === "text")
-            .map((c) => c.text)
-            .join("\n")
-        : "";
-      const lines = truncateLines(output.split("\n"));
-      return [
-        <Box flexDirection="column">
-          <Text color={theme.dim}>$ {cmd}</Text>
-          {result?.isError ? <Text color={theme.status.error}>exit: error</Text> : null}
-        </Box>,
-        <Box flexDirection="column">
-          {lines.map((line, idx) => (
-            <Text key={idx}>{line}</Text>
-          ))}
-        </Box>,
-      ];
+      const output = resultText(result);
+      return output.split("\n");
     }
     default: {
-      // Generic fallback: args JSON + result text
       const argsJson = JSON.stringify(args, null, 2);
-      const resultText = result
-        ? result.content
-            .filter((c): c is { type: "text"; text: string } => c.type === "text")
-            .map((c) => c.text)
-            .join("\n")
-        : "";
-      const lines = truncateLines(resultText.split("\n"));
-      const sections: React.ReactElement[] = [<Text color={theme.dim}>{argsJson}</Text>];
-      if (lines.length > 0) {
-        sections.push(
-          <Box flexDirection="column">
-            {lines.map((line, idx) => (
-              <Text key={idx}>{line}</Text>
-            ))}
-          </Box>,
-        );
-      }
-      return sections;
+      const text = resultText(result);
+      return text.length > 0 ? [...argsJson.split("\n"), ...text.split("\n")] : argsJson.split("\n");
     }
   }
 }
 
+/** Render the collapsed summary line for a specific tool type. */
+function collapsedSummaryLine(call: AgentToolCall, result?: ToolResultMessage): string {
+  const args = call.arguments ?? {};
+  switch (call.name) {
+    case "edit_file": {
+      const oldText = typeof args.oldText === "string" ? args.oldText : "";
+      const newText = typeof args.newText === "string" ? args.newText : "";
+      return `Updated — ${diffStat(simpleDiff(oldText, newText))}`;
+    }
+    case "write_file": {
+      const content = typeof args.content === "string" ? args.content : "";
+      return `Wrote ${content.split("\n").length} lines`;
+    }
+    case "bash": {
+      if (result?.isError) return "exit: error";
+      const output = resultText(result);
+      const first = output.split("\n")[0] ?? "";
+      return first;
+    }
+    default: {
+      const text = resultText(result);
+      return text.split("\n")[0] ?? "";
+    }
+  }
+}
+
+/** Count of content lines beyond the collapsed preview (1 line). */
+function collapsedExtraLines(call: AgentToolCall, result?: ToolResultMessage): number {
+  const lines = expandedContentLines(call, result);
+  return Math.max(0, lines.length - 1);
+}
+
 export function ToolCallBlock({ call, result, expanded }: ToolCallBlockProps): React.ReactElement {
   const summary = summarizeArgs(call.name, call.arguments ?? {});
-  const badgeColor = result?.isError ? theme.status.error : result ? theme.status.idle : theme.status.active;
-  if (!expanded) {
+  const badgeColor = result?.isError
+    ? theme.status.error
+    : result
+      ? theme.status.idle
+      : theme.status.active;
+  const isError = result?.isError === true;
+  const running = !result;
+
+  const header = (
+    <Text>
+      <Text color={badgeColor}>{icons.statusDot}</Text>{" "}
+      <Text color={theme.dim}>{call.name}</Text>
+      {summary ? <Text color={theme.dim}>({summary})</Text> : null}
+      {isError ? <Text color={theme.status.error}> (error)</Text> : null}
+    </Text>
+  );
+
+  if (expanded) {
+    const isDiff = call.name === "edit_file";
+    const isBash = call.name === "bash";
+    const cmd = isBash && typeof call.arguments?.command === "string" ? call.arguments.command : "";
+
+    // Build the full tree line list (strings + per-line color), then prefix
+    // `⎿` on the first line and 2-space-indent the rest to align under it.
+    interface TreeLine {
+      text: string;
+      color?: string;
+    }
+    const treeLines: TreeLine[] = [];
+    if (isBash) {
+      treeLines.push({ text: `$ ${cmd}`, color: theme.dim });
+    }
+    if (isDiff) {
+      const diffLines = expandedContentLines(call, result) as DiffLine[];
+      for (const d of diffLines) {
+        const prefix = d.kind === "del" ? "- " : d.kind === "add" ? "+ " : "  ";
+        const color = d.kind === "del" ? theme.diff.del : d.kind === "add" ? theme.diff.add : theme.dim;
+        treeLines.push({ text: `${prefix}${d.text}`, color });
+      }
+    } else if (isBash) {
+      const output = resultText(result);
+      for (const line of output.split("\n")) {
+        treeLines.push({ text: line });
+      }
+      if (isError) {
+        treeLines.push({ text: "exit: error", color: theme.status.error });
+      }
+    } else {
+      for (const line of expandedContentLines(call, result) as string[]) {
+        treeLines.push({ text: line });
+      }
+    }
+    // Drop a trailing empty line just before an `exit: error` for bash.
+    if (isBash && isError && treeLines[treeLines.length - 2]?.text === "") {
+      treeLines.splice(treeLines.length - 2, 1);
+    }
+    // Truncate the tree: preserve per-line colors, append a dim "more" hint.
+    let rendered: TreeLine[];
+    if (treeLines.length <= MAX_RESULT_LINES) {
+      rendered = treeLines;
+    } else {
+      const more = treeLines.length - MAX_RESULT_LINES;
+      rendered = [...treeLines.slice(0, MAX_RESULT_LINES), { text: `… (${more} more lines)`, color: theme.dim }];
+    }
+
     return (
-      <Text>
-        <Text color={badgeColor}>{icons.statusDot}</Text>{" "}
-        <Text color={theme.dim}>{call.name}</Text>
-        {summary ? <Text color={theme.dim}> — {summary}</Text> : null}
-        {result?.isError ? <Text color={theme.status.error}> (error)</Text> : null}
-      </Text>
+      <Box flexDirection="column">
+        {header}
+        <Box flexDirection="column">
+          {rendered.map((l, idx) => {
+            const prefix = idx === 0 ? `${icons.bracket} ` : "  ";
+            return (
+              <Text key={idx} color={l.color}>
+                {prefix}
+                {l.text}
+              </Text>
+            );
+          })}
+        </Box>
+      </Box>
     );
   }
-  const sections = renderExpanded(call, result);
+
+  // Collapsed: header + ⎿ summary + optional expand hint
+  const summaryLine = running ? "…" : collapsedSummaryLine(call, result);
+  const extra = collapsedExtraLines(call, result);
   return (
     <Box flexDirection="column">
-      <Text>
-        <Text color={badgeColor}>{icons.statusDot}</Text>{" "}
-        <Text color={theme.dim}>{call.name}</Text>
-        {summary ? <Text color={theme.dim}> — {summary}</Text> : null}
-        {result?.isError ? <Text color={theme.status.error}> (error)</Text> : null}
-      </Text>
-      <Box flexDirection="row" paddingLeft={1}>
-        <Text color={theme.dim}>{icons.guide} </Text>
-        <Box flexDirection="column">
-          {sections.map((section, i) => (
-            <Fragment key={i}>
-              {i > 0 ? dottedSeparator(`sep-${i}`) : null}
-              {section}
-            </Fragment>
-          ))}
-        </Box>
+      {header}
+      <Box flexDirection="column">
+        <Text color={theme.dim}>
+          {icons.bracket} {summaryLine}
+        </Text>
+        {extra > 0 ? (
+          <Text color={theme.dim}>  +{extra} lines (ctrl+o to expand)</Text>
+        ) : null}
       </Box>
     </Box>
   );

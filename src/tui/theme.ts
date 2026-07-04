@@ -31,11 +31,11 @@ export const theme = {
 export const icons = {
   /** Dingbat spinner frames (U+2736, U+273B, U+2733, U+2722). */
   spinner: ["✶", "✻", "✳", "✢"],
-  /** Tool status dot (color-coded by caller). */
-  statusDot: "●",
+  /** Tool block marker / status dot (color-coded by caller). */
+  statusDot: "⏺",
   /** Left guide line for assistant content / tool args. */
   guide: "│",
-  /** (Reserved; not used in MVP — guide line suffices.) */
+  /** Result-tree indent prefix for tool-call expanded/collapsed output. */
   bracket: "⎿",
   /** Content-block separator within expanded tool/thinking views. */
   separatorDotted: "╌",

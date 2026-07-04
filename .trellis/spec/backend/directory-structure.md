@@ -39,6 +39,13 @@ src/
 │   ├── glob.ts
 │   ├── grep.ts
 │   ├── todo.ts             # In-memory per-session todo store (Map<string, Todo[]>)
+│   ├── web-search.ts        # web_search tool (createWebSearchTool)
+│   ├── fetch-content.ts     # fetch_content tool (createFetchContentTool)
+│   ├── web-search/          # Search provider abstraction + SSRF guard
+│   │   ├── provider.ts      # SearchProvider interface + resolveProvider()
+│   │   ├── duckduckgo.ts    # DuckDuckGo provider (zero-config)
+│   │   ├── ssrf.ts          # isPrivateUrl() — private/loopback URL guard
+│   │   └── __tests__/
 │   └── __tests__/          # Tool tests + helpers.ts (setupEnv / getTool / writeFixture)
 └── tui/                    # Frontend layer (see frontend/directory-structure.md)
 ```
@@ -59,10 +66,30 @@ src/
   schema is defined with typebox in the same file. Tools are registered
   centrally via `BuiltinToolRegistry.add()` in `tools/index.ts` (see
   `tools/registry.ts`); to add a new built-in tool, add one `.add()` call
-  there — there is no array literal to edit.
+  there — there is no array literal to edit. The `web-search/` sub-directory
+  hosts the search-provider abstraction (`SearchProvider` interface +
+  `resolveProvider()` resolver) and the SSRF guard (`isPrivateUrl()`); adding
+  a new search provider requires one new file exporting a `SearchProvider`
+  instance and one line in the `PROVIDERS` array.
 - **Co-located tests.** `foo.ts` → `foo.test.ts`; `tools/` tests live under
   `tools/__tests__/`. Tests are excluded from `dist` (tsconfig includes only
   `src` and `tsc` does not compile `.test.ts` — vitest covers them).
+
+### Reusable tool patterns
+
+Two patterns established by the web tools (`web-search/`, `fetch-content.ts`)
+that future tools returning large/batched content may reuse:
+
+- **Truncate + store + footer** (`fetch-content.ts:truncateWithFooter`):
+  when content exceeds a char budget, send head 75% + tail 25% (line-aligned)
+  to the model, store the full text under `~/.novi/cache/<scope>/`, and append
+  a footer pointing to `read_file path="..." offset=N limit=200` for the
+  omitted middle. Pairs with the existing `read_file` 1-based pagination.
+- **Provider array + resolver** (`web-search/provider.ts`): a `SearchProvider`
+  interface + a `PROVIDERS` array + a `resolveProvider(configured?)` function.
+  Adding a provider = one file exporting an instance + one line in the array.
+  `isAvailable()` must stay cheap (env-only, no network) so tool registration
+  never blocks.
 
 ---
 

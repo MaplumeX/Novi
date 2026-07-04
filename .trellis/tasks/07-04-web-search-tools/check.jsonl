@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "检查 typebox schema、ESM .js import、JSDoc、测试覆盖错误路径、无 any、四件套全绿"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "检查工具 execute 用 throw 表达失败、无 textResult('error:...') 滥用、SSRF/HTTP 错误正确抛出"}
+{"file": ".trellis/spec/backend/pi-agent-core-api.md", "reason": "检查 AgentTool 契约、AgentToolResult 结构、textResult/details 用法、AbortSignal 透传"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "检查文件组织：一文件一工具、createXxxTool 命名、__tests__/ 并置、registry.add 注册位置"}
+{"file": ".trellis/tasks/07-04-web-search-tools/prd.md", "reason": "对照验收标准逐条确认：web_search/fetch_content 行为、SSRF、截断+footer、settings 字段、四件套绿"}
+{"file": ".trellis/tasks/07-04-web-search-tools/design.md", "reason": "对照设计契约：SearchProvider 接口、resolveProvider 逻辑、truncateWithFooter、isPrivateUrl 范围"}

@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "工具文件组织规范：一文件一工具、createXxxTool 工厂、__tests__/ 子目录、registry.add 注册"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "throw-on-failure 模型、unwrap helper、工具 execute 内 throw 而非 textResult('error:...')、Result 处理"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "typebox 参数 schema、ESM .js import、JSDoc、测试用 setupEnv/getTool/writeFixture、无 any、错误路径测试"}
+{"file": ".trellis/spec/backend/pi-agent-core-api.md", "reason": "AgentTool 契约（name/label/description/parameters/execute/AgentToolResult）、NodeExecutionEnv、textResult 模式"}
+{"file": ".trellis/tasks/07-04-web-search-tools/design.md", "reason": "本任务设计：SearchProvider 接口、SSRF 检查、截断+存储+footer 模式、DuckDuckGo 端点细节"}
+{"file": ".trellis/tasks/07-04-web-search-tools/implement.md", "reason": "本任务执行计划：分阶段 checklist、辅助函数清单、验证命令、风险点"}

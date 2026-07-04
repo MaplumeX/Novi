@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/pi-agent-core-api.md", "reason": "core AgentHarness 的 on()/emitHook/事件类型/重建模式的权威契约——registry 和 replay 集成的基础"}
+{"file": ".trellis/spec/backend/index.md", "reason": "backend 开发入口——Pre-Development Checklist + Quality Check"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "hook 脚本失败/超时的错误降级策略需对齐项目 error handling 约定"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "新模块代码需符合 quality 标准（forbidden patterns 等）"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "hook diagnostics/警告走 stderr，需对齐 logging 约定"}

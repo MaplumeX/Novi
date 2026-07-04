@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 28
+- **Total Sessions**: 29
 - **Last Active**: 2026-07-04
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~949 | Active |
+| `journal-1.md` | ~984 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 29 | 2026-07-04 | Novi multi-channel gateway (Telegram MVP) | `35f4a0e`, `26d4627`, `0116dd6` | `main` |
 | 28 | 2026-07-04 | Redesign tool call TUI styling (Claude Code style) | `3f5b615` | `main` |
 | 27 | 2026-07-04 | Web search and fetch tools | `1494002`, `28dbd39` | `main` |
 | 26 | 2026-07-04 | Novi agent hook mechanism | `127833e`, `1778810` | `main` |

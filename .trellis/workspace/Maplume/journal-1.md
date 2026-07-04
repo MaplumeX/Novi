@@ -947,3 +947,38 @@ Redesigned ToolCallBlock to Claude Code visual style: ⏺ ToolName(arg) header +
 ### Next Steps
 
 - None - task complete
+
+
+## Session 29: Novi multi-channel gateway (Telegram MVP)
+
+**Date**: 2026-07-04
+**Task**: Novi multi-channel gateway (Telegram MVP)
+**Branch**: `main`
+
+### Summary
+
+Researched 5 open-source multi-channel agent gateways (pi-gateway/tia-gateway/imtoagent/OpenClaw/Hermes), designed and implemented Novi's gateway subsystem. Added --gateway run mode with Telegram channel (telegraf long-polling + edit-stream), ChannelAdapter + ChannelCapabilities abstraction, per-sessionKey lazy harness creation, steer/followup/interrupt queue modes, slash-command bypass, allowlist auth. Split bootstrap into prepareGatewayEnv + createHarnessForSession (TUI regression preserved). 39 gateway tests added. Specs updated for gateway/ layout and bootstrap split contract.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `35f4a0e` | (see git log) |
+| `26d4627` | (see git log) |
+| `0116dd6` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

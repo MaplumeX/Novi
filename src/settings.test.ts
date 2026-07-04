@@ -31,6 +31,13 @@ describe("mergeSettings", () => {
     expect(out.compaction).toEqual({ enabled: true, reserveTokens: 500, keepRecentTokens: 2000 });
   });
 
+  it("merges webSearch one level deep", () => {
+    const g: NoviSettings = { webSearch: { provider: "duckduckgo" } };
+    const p: NoviSettings = { webSearch: { provider: "brave" } };
+    const out = mergeSettings(g, p);
+    expect(out.webSearch).toEqual({ provider: "brave" });
+  });
+
   it("merges retry one level deep (project.provider replaces global.provider)", () => {
     // mergeSettings is one level deep: `retry` is merged, but `provider` (a
     // nested object beyond one level) is replaced wholesale by project.

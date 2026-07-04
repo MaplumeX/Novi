@@ -12,10 +12,12 @@ const EXPECTED = [
   "glob",
   "grep",
   "todo",
+  "web_search",
+  "fetch_content",
 ];
 
 describe("createBuiltinTools aggregation", () => {
-  it("returns all 8 tools with required metadata", async () => {
+  it("returns all 10 tools with required metadata", async () => {
     const { env, cleanup } = await setupEnv();
     try {
       const tools = createBuiltinTools(env, "test-session");

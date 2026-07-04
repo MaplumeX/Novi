@@ -35,6 +35,11 @@ export interface NoviSettings {
   followUpMode?: "one-at-a-time" | "all";
   /** Glob patterns for scoped model cycling (Ctrl+P). Format: `provider/id`. */
   scopedModels?: string[];
+  /** Web search configuration. Absent means auto-detect (DuckDuckGo by default). */
+  webSearch?: {
+    /** Explicit provider id; must match a registered SearchProvider name. */
+    provider?: string;
+  };
 }
 
 /** Which layer sourced a given setting leaf. */

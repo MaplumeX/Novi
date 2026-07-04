@@ -120,9 +120,11 @@ export function nextThinkingLevel(current: ThinkingLevel): ThinkingLevel {
 }
 
 /**
- * Best-effort scan of a session jsonl file for the most recent `session_info`
- * entry carrying a name. Cheaper than a full `Session` open (no tree build),
- * and lets the `/resume` picker display user-set names.
+ * Best-effort scan of a session jsonl file for a display name, in priority order:
+ *   1. the most recent `session_info` entry carrying a user-set name (`/name`)
+ *   2. the text of the first user message
+ * Cheaper than a full `Session` open (no tree build), and lets the `/resume`
+ * picker show something meaningful instead of the raw file basename.
  */
 async function loadSessionDisplayName(
   env: ExecutionEnv,
@@ -131,6 +133,7 @@ async function loadSessionDisplayName(
   const res = await env.readTextLines(filePath);
   if (!res.ok) return undefined;
   let name: string | undefined;
+  let firstUserText: string | undefined;
   for (const line of res.value) {
     const trimmed = line.trim();
     if (!trimmed) continue;
@@ -140,16 +143,33 @@ async function loadSessionDisplayName(
     } catch {
       continue;
     }
-    if (
-      entry !== null &&
-      typeof entry === "object" &&
-      (entry as { type?: string }).type === "session_info" &&
-      typeof (entry as { name?: unknown }).name === "string"
-    ) {
-      name = (entry as { name: string }).name;
+    if (entry === null || typeof entry !== "object") continue;
+    const e = entry as { type?: string; name?: unknown; message?: unknown };
+    if (e.type === "session_info" && typeof e.name === "string") {
+      name = e.name;
+      continue;
+    }
+    if (firstUserText === undefined && e.type === "message") {
+      const msg = e.message as { role?: unknown; content?: unknown } | undefined;
+      if (msg?.role === "user" && Array.isArray(msg.content)) {
+        for (const part of msg.content) {
+          if (
+            part !== null &&
+            typeof part === "object" &&
+            (part as { type?: string }).type === "text" &&
+            typeof (part as { text?: unknown }).text === "string"
+          ) {
+            firstUserText = (part as { text: string }).text
+              .replace(/[\r\n]+/g, " ")
+              .trim()
+              .slice(0, 80);
+            break;
+          }
+        }
+      }
     }
   }
-  return name;
+  return name ?? firstUserText;
 }
 
 /** Command registry. */

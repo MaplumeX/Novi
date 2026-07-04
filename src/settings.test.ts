@@ -277,11 +277,19 @@ describe("writeSettings + loadSettings (round-trip)", () => {
   });
 
   async function setup(): Promise<{ env: NodeExecutionEnv; cwd: string }> {
+    // Isolate the global settings directory from the real user home so tests
+    // that assert "no settings file exists" are not polluted by ~/.novi.
+    const noviHome = await mkdtemp(path.join(tmpdir(), "novi-home-"));
+    const previousNoviHome = process.env.NOVI_HOME;
+    process.env.NOVI_HOME = noviHome;
     const cwd = await mkdtemp(path.join(tmpdir(), "novi-settings-"));
     const env = new NodeExecutionEnv({ cwd, shellEnv: process.env });
     cleanups.push(async () => {
       await env.cleanup();
       await rm(cwd, { recursive: true, force: true });
+      await rm(noviHome, { recursive: true, force: true });
+      if (previousNoviHome === undefined) delete process.env.NOVI_HOME;
+      else process.env.NOVI_HOME = previousNoviHome;
     });
     return { env, cwd };
   }

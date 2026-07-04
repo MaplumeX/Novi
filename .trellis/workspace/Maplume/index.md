@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 24
+- **Total Sessions**: 25
 - **Last Active**: 2026-07-04
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~815 | Active |
+| `journal-1.md` | ~848 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 25 | 2026-07-04 | harness completeness fixes (R1-R4) | `d314ea7` | `main` |
 | 24 | 2026-07-04 | harness completeness: model auth + project trust | `7b11f19`, `5e89e9c` | `main` |
 | 23 | 2026-07-04 | model-auth-enhancements implemented | `5e89e9c` | `main` |
 | 22 | 2026-07-04 | project-trust-gate implemented | `7b11f19` | `main` |

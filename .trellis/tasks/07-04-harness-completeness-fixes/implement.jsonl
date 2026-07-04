@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/backend/pi-agent-core-api.md", "reason": "R1 CompactionSettings/shouldCompact 签名、R2 session.id 取法、R4 models.getModel 重解析——所有 replayHarnessState 与 AutoCompactor 改动须遵守已验证的 harness 公共 API 契约"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "R2 todo store 从模块级单例改为按 sessionId 分桶，需更新该 spec 的 TODO Store 段落；R3 resource diagnostics 不静默吞错与持久化降级原则一致"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "R3 diagnostics 传递、R4 model 重解析失败的降级 warning 路径须遵循 throw-on-failure/catch-at-boundary 与 Result unwrap 约定"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "R3/R4 的 warning 输出（stderr/ctx.print）需匹配现有 diagnostic 输出约定"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "R1 compactor settings 经 useMemo→useHarnessState effect 注入、R4 setSettings 触发 re-subscription，须遵守 HarnessHandle as React state 与单向数据流约束"}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "R1 useHarnessState 新增 compactionSettings 参数与 effect 依赖数组变更须遵守 hook 约定"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "R3+R4 涉及 settings→replayHarnessState→harness→useHarnessState 多层数据流，每层边界需明确格式与责任"}
+{"file": ".trellis/tasks/07-04-harness-completeness-fixes/design.md", "reason": "四个修复点的技术设计、取舍与风险"}

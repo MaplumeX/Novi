@@ -813,3 +813,36 @@ Implemented two child tasks under auth-and-trust-completeness: (1) project trust
 ### Next Steps
 
 - None - task complete
+
+
+## Session 25: harness completeness fixes (R1-R4)
+
+**Date**: 2026-07-04
+**Task**: harness completeness fixes (R1-R4)
+**Branch**: `main`
+
+### Summary
+
+Fixed 4 harness-layer defects: R1 compaction settings now consumed via resolveCompactionSettings + AutoCompactor.setSettings (enabled gate + thresholds); R2 todo store bucketed by sessionId via createBuiltinTools(env, sessionId); R3 replayHarnessState/replace return {diagnostics} so /reload//new//resume surface resource load warnings; R4 /reload re-resolves model/thinking/streamOptions/steeringMode/followUpMode from disk settings (with old-model fallback on unknown id). 4 commits, 311 tests pass (2 pre-existing settings.test.ts env failures), typecheck+lint clean.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d314ea7` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

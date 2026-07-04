@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "检查改动是否符合 backend 代码质量约束（无硬编码、单一真相源、失败降级）"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "检查 useHarnessState/App.tsx 改动是否符合 frontend 质量约束（theme 单一真相源、事件边界单一化）"}
+{"file": ".trellis/spec/backend/pi-agent-core-api.md", "reason": "核对 replayHarnessState/AutoCompactor/createBuiltinTools 改动未越界 harness 公共 API"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "核对 todo session 隔离与 resource diagnostics 降级是否与持久化 spec 一致"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "核对 compactionSettings 注入路径与 HarnessHandle state 模式一致"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "核对 settings→replay→harness→useHarnessState 数据流边界无重复解析/丢失"}
+{"file": ".trellis/tasks/07-04-harness-completeness-fixes/prd.md", "reason": "验收四项 acceptance criteria 是否全部满足"}

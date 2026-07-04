@@ -914,3 +914,36 @@ Added web_search (DuckDuckGo zero-config provider via html.duckduckgo.com/html/,
 ### Next Steps
 
 - None - task complete
+
+
+## Session 28: Redesign tool call TUI styling (Claude Code style)
+
+**Date**: 2026-07-04
+**Task**: Redesign tool call TUI styling (Claude Code style)
+**Branch**: `main`
+
+### Summary
+
+Redesigned ToolCallBlock to Claude Code visual style: ⏺ ToolName(arg) header + ⎿ indented result tree, replacing the ● + │ + ╌ combo. theme.ts statusDot ●→⏺, bracket enabled as result-tree prefix. Collapsed shows 2-line shape (header + ⎿ summary + +N lines hint); expanded shows ⎿ tree with per-tool diff/content/bash output, no dotted separators. Ctrl-O global lockstep preserved (Option A); App.tsx/useHarnessState untouched. MessageList streaming line auto-follows icons.statusDot. Check sub-agent fixed 5 details (⎿ tree alignment, dead ternary, truncation color mismatch, orphaned helper, trailing newline). lint/typecheck/build green; 2 pre-existing settings.test.ts failures unrelated.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3f5b615` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

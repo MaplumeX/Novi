@@ -228,7 +228,8 @@ export const COMMANDS: readonly Command[] = [
         const id = uuidv7();
         const session = await repo.create({ cwd: ctx.cwd, id });
         const meta = await session.getMetadata();
-        await ctx.handle.replace({ session, sessionPath: meta.path, reloadResources: true });
+        const { diagnostics } = await ctx.handle.replace({ session, sessionPath: meta.path, reloadResources: true });
+        for (const d of diagnostics) ctx.print(`warning: ${d}`);
         ctx.print(`New session: ${meta.path}`);
       } catch (e) {
         ctx.print(`New session failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -482,16 +483,19 @@ export const COMMANDS: readonly Command[] = [
         return;
       }
       try {
-        await ctx.handle.replace({ reloadResources: true });
-        // Re-read settings.json so the /settings form reflects the on-disk
-        // state. (Model/thinking/streamOptions are replayed from the old
-        // harness by design; settings file changes to those fields take
-        // effect on next full restart, not mid-session.)
+        // Re-read settings.json FIRST so the reload applies the fresh on-disk
+        // model/thinking/streamOptions/queue-modes to the new harness (R4).
         const loaded = await loadSettings(ctx.env, ctx.cwd);
         for (const diagnostic of loaded.diagnostics) {
           ctx.print(`warning: ${diagnostic}`);
         }
-        ctx.setSettings(resolveSettings(loaded.merged, loaded.layers, ctx.cliOverrides));
+        const newResolved = resolveSettings(loaded.merged, loaded.layers, ctx.cliOverrides);
+        ctx.setSettings(newResolved);
+        const { diagnostics } = await ctx.handle.replace({
+          reloadResources: true,
+          resolvedSettings: newResolved,
+        });
+        for (const d of diagnostics) ctx.print(`warning: ${d}`);
         ctx.print("Reloaded settings, skills, prompts, and context files.");
       } catch (e) {
         ctx.print(`Reload failed: ${e instanceof Error ? e.message : String(e)}`);

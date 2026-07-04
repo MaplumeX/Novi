@@ -7,6 +7,8 @@ import type {
 import type { Models } from "@earendil-works/pi-ai";
 import { createBuiltinTools } from "../tools/index.js";
 import { loadResources } from "../resources.js";
+import type { ResolvedSettings } from "../settings.js";
+import { DEFAULT_PROVIDER, DEFAULT_MODEL_ID, DEFAULT_THINKING_LEVEL } from "../bootstrap.js";
 
 /**
  * A replaceable harness holder. `<App>` holds one of these as React state;
@@ -29,16 +31,24 @@ export interface HarnessHandle {
    * - `session`/`sessionPath` provided → switch to a new session (`/new`/
    *   `/resume`, child 4).
    * - `reloadResources=true` → re-scan skills/prompt-templates from disk.
-   * - `model`/`thinkingLevel` optional overrides for the new harness
-   *   (otherwise replayed from the old harness).
+   * - `resolvedSettings` provided → re-resolve model/thinking/stream/queue
+   *   modes from disk settings (`/reload`); otherwise replay from old harness
+   *   (`/new`/`/resume`).
+   * Returns resource-load diagnostics (warnings from skill/template files).
    */
-  replace: (next: ReplaceOptions) => Promise<void>;
+  replace: (next: ReplaceOptions) => Promise<{ diagnostics: string[] }>;
 }
 
 export interface ReplaceOptions {
   session?: Session<JsonlSessionMetadata>;
   sessionPath?: string;
   reloadResources?: boolean;
+  /**
+   * When provided, model/thinking/streamOptions/steeringMode/followUpMode are
+   * re-resolved from these settings instead of replayed from the old harness.
+   * Used by `/reload`; omitted by `/new`/`/resume`.
+   */
+  resolvedSettings?: ResolvedSettings;
 }
 
 export interface CreateHarnessHandleDeps {
@@ -55,8 +65,17 @@ export interface CreateHarnessHandleDeps {
  * Replay runtime state from an old harness onto a freshly-constructed one,
  * using only public getters (no private-field access).
  *
- * Replays: tools (+ active names), model, thinking level, stream options, and
- * resources (optionally reloaded from disk).
+ * Replays: tools (+ active names), model, thinking level, stream options,
+ * queue delivery modes, and resources (optionally reloaded from disk).
+ *
+ * When `opts.resolvedSettings` is provided (the `/reload` path), model,
+ * thinking level, stream options, and queue modes are re-resolved from disk
+ * settings instead of replayed from the old harness. When not provided (the
+ * `/new`/`/resume` path), they are replayed from the old harness so a session
+ * switch preserves the current runtime configuration.
+ *
+ * Returns `{ diagnostics }` — warnings from resource loading (invalid
+ * skill/template files) that the caller should surface to the user.
  */
 export async function replayHarnessState(
   newHarness: AgentHarness,
@@ -64,26 +83,64 @@ export async function replayHarnessState(
   env: ExecutionEnv,
   cwd: string,
   sessionId: string,
-  opts: { reloadResources?: boolean; trusted?: boolean } = {},
-): Promise<void> {
+  models: Models,
+  opts: { reloadResources?: boolean; trusted?: boolean; resolvedSettings?: ResolvedSettings } = {},
+): Promise<{ diagnostics: string[] }> {
+  const diagnostics: string[] = [];
+
   // Tools: re-create the built-in set and restore the active-tool selection.
   const tools = createBuiltinTools(env, sessionId);
   const activeToolNames = oldHarness.getActiveTools().map((t) => t.name);
   await newHarness.setTools(tools, activeToolNames);
 
-  // Model + thinking level.
-  await newHarness.setModel(oldHarness.getModel());
-  await newHarness.setThinkingLevel(oldHarness.getThinkingLevel());
+  if (opts.resolvedSettings) {
+    // /reload path: re-resolve model/thinking/stream/queue from disk settings.
+    const rs = opts.resolvedSettings;
+    const provider = rs.defaultProvider ?? DEFAULT_PROVIDER;
+    const modelId = rs.defaultModel ?? (provider === DEFAULT_PROVIDER ? DEFAULT_MODEL_ID : undefined);
+    const model = modelId ? models.getModel(provider, modelId) : undefined;
+    if (model) {
+      await newHarness.setModel(model);
+    } else {
+      // Degrade: keep the old harness model and warn.
+      await newHarness.setModel(oldHarness.getModel());
+      diagnostics.push(
+        `model "${modelId ?? ""}" not found for provider "${provider}"; keeping current model`,
+      );
+    }
+    await newHarness.setThinkingLevel(
+      rs.defaultThinkingLevel ?? DEFAULT_THINKING_LEVEL,
+    );
 
-  // Stream options (timeout/retry/etc + transport).
-  await newHarness.setStreamOptions(oldHarness.getStreamOptions());
+    // Stream options: rebuild from settings retry/transport (only set fields).
+    const retry = rs.retry?.provider;
+    const transport = rs.transport;
+    const streamOpts: Record<string, unknown> = {};
+    if (transport !== undefined) streamOpts.transport = transport;
+    if (retry?.timeoutMs !== undefined) streamOpts.timeoutMs = retry.timeoutMs;
+    if (retry?.maxRetries !== undefined) streamOpts.maxRetries = retry.maxRetries;
+    if (retry?.maxRetryDelayMs !== undefined) streamOpts.maxRetryDelayMs = retry.maxRetryDelayMs;
+    if (Object.keys(streamOpts).length > 0) {
+      await newHarness.setStreamOptions(streamOpts);
+    } else {
+      await newHarness.setStreamOptions(oldHarness.getStreamOptions());
+    }
 
-  // Queue delivery modes (steering/followUp): replayed so a harness rebuild
-  // (e.g. /reload) preserves the settings-applied queue mode.
-  const steeringMode = oldHarness.getSteeringMode();
-  await newHarness.setSteeringMode(steeringMode);
-  const followUpMode = oldHarness.getFollowUpMode();
-  await newHarness.setFollowUpMode(followUpMode);
+    // Queue delivery modes from settings (fall back to old harness if unset).
+    await newHarness.setSteeringMode(
+      rs.steeringMode ?? oldHarness.getSteeringMode(),
+    );
+    await newHarness.setFollowUpMode(
+      rs.followUpMode ?? oldHarness.getFollowUpMode(),
+    );
+  } else {
+    // /new /resume path: replay from old harness (preserve runtime config).
+    await newHarness.setModel(oldHarness.getModel());
+    await newHarness.setThinkingLevel(oldHarness.getThinkingLevel());
+    await newHarness.setStreamOptions(oldHarness.getStreamOptions());
+    await newHarness.setSteeringMode(oldHarness.getSteeringMode());
+    await newHarness.setFollowUpMode(oldHarness.getFollowUpMode());
+  }
 
   // Resources: reload from disk or carry over the previous snapshot.
   // When reloading, honor the trust gate: untrusted → skip project layer.
@@ -95,9 +152,12 @@ export async function replayHarnessState(
       skills: loaded.skills,
       promptTemplates: loaded.promptTemplates,
     });
+    diagnostics.push(...loaded.diagnostics);
   } else {
     await newHarness.setResources(oldHarness.getResources());
   }
+
+  return { diagnostics };
 }
 
 /**
@@ -121,7 +181,7 @@ export function createHarnessHandle(
 
   // `makeReplace` returns a `replace` closure bound to a specific (old) handle.
   function makeReplace(old: HarnessHandle): HarnessHandle["replace"] {
-    return async (next: ReplaceOptions): Promise<void> => {
+    return async (next: ReplaceOptions): Promise<{ diagnostics: string[] }> => {
       // 1. Ensure we're not mid-turn before tearing down.
       await old.harness.waitForIdle();
       // 2. unsubscribe() is handled by useHarnessState's effect cleanup when
@@ -141,10 +201,14 @@ export function createHarnessHandle(
       // 5. Replay state from old → new. Trust decision is reused from the old
       //    handle (trust is cwd-scoped, not session-scoped; re-resolving would
       //    require a fresh trust prompt mid-session, which we don't support).
-      await replayHarnessState(newHarness, old.harness, env, cwd, sessionMeta.id, {
-        reloadResources: next.reloadResources,
-        trusted: old.trusted,
-      });
+      const { diagnostics } = await replayHarnessState(
+        newHarness, old.harness, env, cwd, sessionMeta.id, models,
+        {
+          reloadResources: next.reloadResources,
+          trusted: old.trusted,
+          resolvedSettings: next.resolvedSettings,
+        },
+      );
       // 6. Build the new handle with its own replace closure, then publish.
       const newHandle: HarnessHandle = {
         harness: newHarness,
@@ -153,10 +217,12 @@ export function createHarnessHandle(
         trusted: old.trusted,
         replace: async () => {
           // Placeholder overwritten immediately below (TDZ-safe fixup).
+          return { diagnostics: [] };
         },
       };
       newHandle.replace = makeReplace(newHandle);
       setHandle(newHandle);
+      return { diagnostics };
     };
   }
 
@@ -167,6 +233,7 @@ export function createHarnessHandle(
     trusted: initial.trusted,
     replace: async () => {
       // Placeholder overwritten immediately below.
+      return { diagnostics: [] };
     },
   };
   handle.replace = makeReplace(handle);

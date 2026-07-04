@@ -335,7 +335,15 @@ function App({
           cliOverrides={cliOverrides}
           onSaved={(updated) => setSettings(updated)}
           onExit={() => setOverlay(null)}
-          onReload={() => void handle.replace({ reloadResources: true })}
+          onReload={() => {
+            void (async () => {
+              const { diagnostics } = await handle.replace({
+                reloadResources: true,
+                resolvedSettings: settings,
+              });
+              for (const d of diagnostics) print(`warning: ${d}`);
+            })();
+          }}
         />
       ) : overlay.kind === "filePicker" ? (
         <FilePicker
@@ -356,8 +364,9 @@ function App({
               try {
                 const repo = new JsonlSessionRepo({ fs: env, sessionsRoot: sessionsDir });
                 const session = await repo.open({ path: info.path } as JsonlSessionMetadata);
-                await handle.replace({ session, sessionPath: info.path, reloadResources: true });
+                const { diagnostics } = await handle.replace({ session, sessionPath: info.path, reloadResources: true });
                 setOverlay(null);
+                for (const d of diagnostics) print(`warning: ${d}`);
                 print(`Resumed session: ${info.path}`);
               } catch (e) {
                 setOverlay(null);

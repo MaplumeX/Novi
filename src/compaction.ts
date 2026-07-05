@@ -19,6 +19,25 @@ export const CONTEXT_WINDOW_FALLBACK = 200_000;
 export const COMPACT_DEBOUNCE_TURNS = 3;
 
 /**
+ * Custom instructions appended to the compaction summarization prompt so the
+ * LLM preserves user message originals in a dedicated `## User Messages` section.
+ *
+ * `maybeCompact` cannot know whether this is the first or an incremental
+ * compaction (that decision happens inside `harness.compact()` based on the
+ * presence of a previous compaction entry). The combined instruction therefore
+ * covers both cases: it instructs the LLM to list all user messages verbatim,
+ * and, when a previous summary is present (incremental update), to preserve
+ * the existing `## User Messages` section and append new ones. The core appends
+ * this text after either `SUMMARIZATION_PROMPT` or `UPDATE_SUMMARIZATION_PROMPT`,
+ * both of which expose the relevant context.
+ */
+export const USER_MESSAGES_COMPACTION_INSTRUCTION = [
+  "Include a section titled '## User Messages' that lists ALL user messages from the conversation verbatim (messages that are not tool results).",
+  "These are critical for preserving the user's exact intent and feedback. Do not paraphrase, summarize, or omit any user message.",
+  "If a previous summary containing a '## User Messages' section is provided, PRESERVE all entries from that section and APPEND any new user messages from the current conversation.",
+].join(" ");
+
+/**
  * Resolve effective compaction settings from Novi settings, falling back to
  * the pi-agent-core defaults for any field the user did not configure.
  *
@@ -98,7 +117,7 @@ export class AutoCompactor {
     if (!decideShouldCompact(messages, contextWindow, this.settings)) return false;
     this.turnsSinceCompact = 0;
     onStart?.();
-    await harness.compact();
+    await harness.compact(USER_MESSAGES_COMPACTION_INSTRUCTION);
     return true;
   }
 

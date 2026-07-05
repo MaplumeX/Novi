@@ -4,6 +4,7 @@ import {
   AutoCompactor,
   COMPACT_DEBOUNCE_TURNS,
   CONTEXT_WINDOW_FALLBACK,
+  USER_MESSAGES_COMPACTION_INSTRUCTION,
   decideShouldCompact,
   resolveCompactionSettings,
 } from "./compaction.js";
@@ -220,5 +221,17 @@ describe("AutoCompactor", () => {
       await c.maybeCompact(harness, msgs, TINY_WINDOW);
     }
     expect(compact).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes USER_MESSAGES_COMPACTION_INSTRUCTION as customInstructions to harness.compact", async () => {
+    const { harness, compact } = makeHarnessMock();
+    const c = new AutoCompactor();
+    const msgs = makeLongMessages(TINY_WINDOW * 2);
+
+    for (let i = 0; i < COMPACT_DEBOUNCE_TURNS; i++) {
+      await c.maybeCompact(harness, msgs, TINY_WINDOW);
+    }
+    expect(compact).toHaveBeenCalledTimes(1);
+    expect(compact).toHaveBeenCalledWith(USER_MESSAGES_COMPACTION_INSTRUCTION);
   });
 });

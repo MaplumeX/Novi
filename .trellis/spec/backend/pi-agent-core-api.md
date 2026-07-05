@@ -104,6 +104,16 @@ new AgentHarness({ env, session, models, model, systemPrompt, /* optional: */ to
 
 即使 turn 出错，harness 经 `emitRunFailure` 仍发 `agent_end`，phase 必回 idle。
 
+## `compact(customInstructions)` 与摘要 prompt 追加机制
+
+`harness.compact(customInstructions?: string)` 是压缩入口，`customInstructions` 会透传给 core 的 `compact()` → `generateSummary()`，在 prompt 末尾以 `Additional focus: ${customInstructions}` 追加到 `SUMMARIZATION_PROMPT`（首次）或 `UPDATE_SUMMARIZATION_PROMPT`（增量）后面。这是**不改 pi-agent-core 源码**就能注入自定义摘要指令的唯一公开 API。
+
+关键约束：
+- `maybeCompact` 调用方**无法知道**是首次还是增量（`prepareCompaction` 在 core 内部判断是否有 `previousSummary`）。若要区分首次/增量指令，只能传组合指令让 LLM 根据 `<previous-summary>` 标签存在性自行判断。
+- `generateTurnPrefixSummary`（split-turn 场景）**不接收 customInstructions**——只有主历史摘要 `generateSummary` 收到。turn prefix 本身是单个 turn 的前缀，用户消息在该 turn 起点已包含。
+- 手动 `/compact`（`src/tui/commands.ts`）直接调 `harness.compact(args || undefined)`，**不经过 `AutoCompactor`**，用户 args 优先，不会自动叠加自动压缩的指令。两条路径独立。
+- `session_before_compact` hook 返回 `{ compaction: CompactionResult }` 可完全跳过 `generateSummary`（core 的 `compact()` 里 `provided = hookResult?.compaction` 优先）。这是路径 ②/③（程序性 verbatim 保留）的扩展点。
+
 ## skill 开头/broadcast 为 compaction 事件
 
 区分两类事件渠道，否则 TUI 看不到 compaction 就就出问题):

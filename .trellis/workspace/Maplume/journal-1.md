@@ -982,3 +982,38 @@ Researched 5 open-source multi-channel agent gateways (pi-gateway/tia-gateway/im
 ### Next Steps
 
 - None - task complete
+
+
+## Session 30: 改进 Novi agent 上下文压缩的摘要生成
+
+**Date**: 2026-07-05
+**Task**: 改进 Novi agent 上下文压缩的摘要生成
+**Branch**: `main`
+
+### Summary
+
+改进 Novi agent 上下文压缩的摘要生成环节，通过 harness.compact(customInstructions) 传入追加指令，让 LLM 在摘要里生成 ## User Messages 段落列出所有用户消息原文。调研 Claude Code/Cline/Roo Code/Aider 四个主流 coding agent 的压缩实现作为参照。改动仅限 src/compaction.ts 一个文件 + 测试 + spec 更新。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ee56679` | (see git log) |
+| `34e967d` | (see git log) |
+| `fe194e0` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

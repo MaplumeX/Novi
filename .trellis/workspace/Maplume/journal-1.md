@@ -1051,3 +1051,37 @@ Built-in tool permission gate: default bash=ask with TUI once/session/deny, head
 ### Next Steps
 
 - None - task complete
+
+
+## Session 32: Skills as first-class citizens
+
+**Date**: 2026-07-09
+**Task**: Skills as first-class citizens
+**Branch**: `main`
+
+### Summary
+
+Made skills first-class in Novi TUI: /skill:name [args] via harness.skill, slash autocomplete for skill entries, shared discovery via ~/.agents and project .agents with git-root ancestor chain and trust gating. Specs and ARCHITECTURE updated; 516 tests green.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f2d04e8` | (see git log) |
+| `2bc839e` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

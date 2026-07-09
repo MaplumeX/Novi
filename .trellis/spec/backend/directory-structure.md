@@ -54,6 +54,9 @@ src/
 │   ├── summary.ts          # summarizeToolInput for confirmation UI
 │   ├── tui-approver.ts     # Queued TUI Approver (once/session/deny)
 │   └── index.ts            # Public barrel exports
+├── images/                # Multimodal image encode + clipboard adapters (TUI pending attachments)
+│   ├── encode.ts          # bytes/file → PendingImage (mime/size limits, appendPending)
+│   └── clipboard.ts       # platform clipboard image reader (darwin/linux)
 ├── headless/              # Headless run modes (print / json JSONL stream)
 │   ├── run.ts              # runPrint / runJson entry points
 │   ├── events.ts           # extractText + projectEvent — single raw-event → plain-object decoder

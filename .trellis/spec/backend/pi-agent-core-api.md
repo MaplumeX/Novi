@@ -98,6 +98,24 @@ new AgentHarness({ env, session, models, model, systemPrompt, /* optional: */ to
 
 一次 `prompt` 触发的 run 可能包含多轮工具调用，因此会有多个 assistant `message_end` 事件（工具调用叙述 + 最终回复）。**不能直接把每个 `message_end`(assistant) 当作「run 结束」的信号**——否则下游会收到多条「最终文本」。正确做法是**缓冲最新 assistant 文本，在 `agent_end` 事件触发一次 `onTurnEnd`**，因为 `agent_end` 每次运行精确触发一次。网关 `event-bridge.ts` 正是这个模式：`message_end`(assistant) 只更新缓冲文本，`agent_end` 才调 `callbacks.onTurnEnd(bufferedText)`。
 
+## prompt / steer / followUp 的 images 选项
+
+`harness.prompt(text, options?)`、`steer`、`followUp`、`nextTurn` 均接受可选 `{ images?: ImageContent[] }`：
+
+```ts
+import type { ImageContent } from "@earendil-works/pi-ai";
+// ImageContent = { type: "image"; data: string /* base64 */; mimeType: string }
+
+await harness.prompt(text, { images });
+await harness.steer(text, { images });
+await harness.followUp(text, { images });
+```
+
+- 允许空文本 + 仅 images（`createUserMessage` 仍会写 text part，可为 `""`）。
+- 非 vision 模型：pi-ai `transform-messages` 将 image 替换为 `(image omitted: model does not support images)`，不抛错。
+- 模型是否 vision：检查 `model.input` 是否包含 `"image"`。
+- Novi TUI 通过 pending 附件层在提交时注入 `options.images`；headless/gateway 当前仍纯文本。
+
 ## 结构性操作需 idle
 
 `prompt` / `skill` / `promptFromTemplate` / `compact` / `navigateTree` 需 `phase==="idle"`，否则抛 `AgentHarnessError("busy")`。`steer` / `followUp` / `nextTurn` / `abort` / runtime setters 可在 turn 中用。

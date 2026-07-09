@@ -44,6 +44,9 @@ function makeCtx(opts: {
     setSettings: vi.fn(),
     settings: { _sources: {} },
     queue: { steer: [], followUp: [], nextTurn: [] },
+    pendingImages: [],
+    addPendingImages: vi.fn(),
+    clearPendingImages: vi.fn(),
   } as unknown as CommandContext;
   return { ctx, promptSpy, skillSpy };
 }
@@ -73,6 +76,9 @@ function makeTrustCtx(opts: {
     setSettings: vi.fn(),
     settings: opts.settings ?? { _sources: { defaultProjectTrust: "default" } },
     queue: { steer: [], followUp: [], nextTurn: [] },
+    pendingImages: [],
+    addPendingImages: vi.fn(),
+    clearPendingImages: vi.fn(),
   } as unknown as CommandContext;
   return { ctx };
 }
@@ -598,5 +604,97 @@ describe("/scoped-models", () => {
     expect(ctx.print).toHaveBeenCalledWith(
       expect.stringContaining("Usage: /scoped-models"),
     );
+  });
+});
+
+describe("/image and /paste-image", () => {
+  const cleanups: Array<() => Promise<void>> = [];
+
+  afterEach(async () => {
+    while (cleanups.length) await cleanups.pop()!();
+  });
+
+  it("/image with path attaches via loadImageFile", async () => {
+    const { mkdtemp, rm, writeFile } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const nodePath = await import("node:path");
+    const { NodeExecutionEnv } = await import("@earendil-works/pi-agent-core/node");
+
+    const cwd = await mkdtemp(nodePath.join(tmpdir(), "novi-img-cmd-"));
+    const env = new NodeExecutionEnv({ cwd, shellEnv: process.env });
+    cleanups.push(async () => {
+      await env.cleanup();
+      await rm(cwd, { recursive: true, force: true });
+    });
+    await writeFile(
+      nodePath.join(cwd, "shot.png"),
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]),
+    );
+
+    const pending: unknown[] = [];
+    const addPendingImages = vi.fn((items: unknown[]) => {
+      pending.push(...items);
+    });
+    const { ctx } = makeCtx({});
+    ((ctx as unknown) as { env: unknown }).env = env;
+    ((ctx as unknown) as { cwd: string }).cwd = cwd;
+    ((ctx as unknown) as { pendingImages: unknown[] }).pendingImages = pending;
+    ((ctx as unknown) as { addPendingImages: typeof addPendingImages }).addPendingImages = addPendingImages;
+
+    await runCommand("/image shot.png", ctx);
+    expect(addPendingImages).toHaveBeenCalledTimes(1);
+    const items = addPendingImages.mock.calls[0]![0] as Array<{ label: string }>;
+    expect(items[0]!.label).toBe("shot.png");
+  });
+
+  it("/image with no args opens imagePicker overlay", async () => {
+    const { ctx } = makeCtx({});
+    await runCommand("/image", ctx);
+    expect(ctx.setOverlay).toHaveBeenCalledWith({ kind: "imagePicker" });
+  });
+
+  it("/image clear clears pending", async () => {
+    const clearPendingImages = vi.fn();
+    const { ctx } = makeCtx({});
+    ((ctx as unknown) as { pendingImages: unknown[] }).pendingImages = [{ id: "1" }];
+    ((ctx as unknown) as { clearPendingImages: typeof clearPendingImages }).clearPendingImages =
+      clearPendingImages;
+    await runCommand("/image clear", ctx);
+    expect(clearPendingImages).toHaveBeenCalled();
+    expect(ctx.print).toHaveBeenCalledWith("Cleared pending images.");
+  });
+
+  it("/image clear with empty pending prints notice", async () => {
+    const { ctx } = makeCtx({});
+    await runCommand("/image clear", ctx);
+    expect(ctx.print).toHaveBeenCalledWith("No pending images.");
+  });
+
+  it("/paste-image uses clipboard reader and adds pending", async () => {
+    const { ctx } = makeCtx({});
+    const addPendingImages = vi.fn();
+    ((ctx as unknown) as { addPendingImages: typeof addPendingImages }).addPendingImages = addPendingImages;
+    (ctx as { clipboardReader: { readImage: () => Promise<unknown> } }).clipboardReader = {
+      readImage: async () => ({
+        ok: true,
+        value: {
+          bytes: new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]),
+          mimeType: "image/png",
+        },
+      }),
+    };
+    await runCommand("/paste-image", ctx);
+    expect(addPendingImages).toHaveBeenCalledTimes(1);
+    const items = addPendingImages.mock.calls[0]![0] as Array<{ label: string }>;
+    expect(items[0]!.label).toBe("clipboard-1.png");
+  });
+
+  it("/paste-image prints error when clipboard has no image", async () => {
+    const { ctx } = makeCtx({});
+    (ctx as { clipboardReader: { readImage: () => Promise<unknown> } }).clipboardReader = {
+      readImage: async () => ({ ok: false, error: "no image on clipboard" }),
+    };
+    await runCommand("/paste-image", ctx);
+    expect(ctx.print).toHaveBeenCalledWith("no image on clipboard");
   });
 });

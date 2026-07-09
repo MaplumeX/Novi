@@ -25,6 +25,15 @@ function collectText(parts: ReadonlyArray<{ type: string; text?: string }>): str
     .join("");
 }
 
+/** Count image content parts on a user message (string content → 0). */
+export function countImages(
+  content: string | ReadonlyArray<{ type: string }>,
+): number {
+  if (typeof content === "string") return 0;
+  if (!Array.isArray(content)) return 0;
+  return content.filter((c) => c.type === "image").length;
+}
+
 /** Find a ToolResultMessage in the messages array matching the given toolCallId. */
 function findToolResult(messages: AgentMessage[], toolCallId: string): ToolResultMessage | undefined {
   return messages.find(
@@ -104,11 +113,15 @@ function renderMessage(
         typeof message.content === "string"
           ? message.content
           : collectText(message.content);
+      const imageCount = countImages(message.content);
       return (
         <Box key={index} flexDirection="column" marginTop={1}>
           <Text>
             <Text color={theme.dim}>{icons.prompt} user</Text> {text}
           </Text>
+          {imageCount > 0 ? (
+            <Text color={theme.dim}>[image ×{imageCount}]</Text>
+          ) : null}
         </Box>
       );
     }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { filePickerKeyAction } from "./file-picker.js";
+import { filePickerKeyAction, matchesAcceptExtensions } from "./file-picker.js";
 
 /** Minimal Ink-style key payload for the cases under test. */
 function key(
@@ -67,5 +67,19 @@ describe("filePickerKeyAction", () => {
     expect(filePickerKeyAction("\t", key({ tab: true }))).toBe(
       filePickerKeyAction("\r", key({ return: true })),
     );
+  });
+});
+
+describe("matchesAcceptExtensions", () => {
+  it("allows all paths when no filter is set", () => {
+    expect(matchesAcceptExtensions("foo.txt")).toBe(true);
+    expect(matchesAcceptExtensions("foo.txt", [])).toBe(true);
+  });
+
+  it("matches listed image extensions case-insensitively", () => {
+    const exts = [".png", ".jpg", ".jpeg", ".gif", ".webp"];
+    expect(matchesAcceptExtensions("shot.PNG", exts)).toBe(true);
+    expect(matchesAcceptExtensions("a/b/c.jpeg", exts)).toBe(true);
+    expect(matchesAcceptExtensions("notes.md", exts)).toBe(false);
   });
 });

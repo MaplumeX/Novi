@@ -9,12 +9,14 @@ import { theme } from "./theme.js";
  * then fuzzy-match against `query`.
  *
  * Returns at most `limit` results sorted by relevance.
+ * When `acceptExtensions` is set (e.g. `.png`), only matching files remain.
  */
 export async function loadFileCandidates(
   cwd: string,
   query: string,
   env: ExecutionEnv,
   limit = 10,
+  acceptExtensions?: readonly string[],
 ): Promise<string[]> {
   const baseRes = await env.absolutePath(".");
   if (!baseRes.ok) return [];
@@ -26,10 +28,24 @@ export async function loadFileCandidates(
     .map((f) => {
       const rel = f.startsWith(base) ? f.slice(base.length).replace(/^\//, "") : f;
       return rel || f;
-    });
+    })
+    .filter((rel) => matchesAcceptExtensions(rel, acceptExtensions));
   const matched = fuzzyMatch(filtered, query);
 
   return matched.slice(0, limit);
+}
+
+/** True when no extension filter is set, or the path ends with an accepted ext. */
+export function matchesAcceptExtensions(
+  filePath: string,
+  acceptExtensions?: readonly string[],
+): boolean {
+  if (!acceptExtensions || acceptExtensions.length === 0) return true;
+  const lower = filePath.toLowerCase();
+  return acceptExtensions.some((ext) => {
+    const normalized = ext.startsWith(".") ? ext.toLowerCase() : `.${ext.toLowerCase()}`;
+    return lower.endsWith(normalized);
+  });
 }
 
 /** Walk the directory tree via `env.listDir`, skipping noise dirs. */
@@ -101,6 +117,12 @@ export interface FilePickerProps {
   initialQuery: string;
   onInsert: (path: string) => void;
   onCancel: () => void;
+  /** When set, only list files whose extension is in this list (e.g. image picker). */
+  acceptExtensions?: readonly string[];
+  /** Overlay title; defaults to `@file`. */
+  title?: string;
+  /** Footer hint; defaults to insert wording. */
+  footer?: string;
 }
 
 /** Decoded intent from a FilePicker keypress (pure — unit-testable in isolation). */
@@ -147,15 +169,26 @@ export function filePickerKeyAction(
  * The user types to filter (`query`), `↑`/`↓` move the selection,
  * `Enter` inserts `@<path>` into the input and closes,
  * `Esc` cancels (keeps the `@` in the input).
+ *
+ * With `acceptExtensions`, used as the image picker (`/image` with no path).
  */
-export function FilePicker({ cwd, env, initialQuery, onInsert, onCancel }: FilePickerProps): React.ReactElement {
+export function FilePicker({
+  cwd,
+  env,
+  initialQuery,
+  onInsert,
+  onCancel,
+  acceptExtensions,
+  title = "@file",
+  footer = "type to filter · ↑↓ select · Enter/Tab insert · Esc cancel",
+}: FilePickerProps): React.ReactElement {
   const [query, setQuery] = useState(initialQuery);
   const [candidates, setCandidates] = useState<string[]>([]);
   const [cursor, setCursor] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
-    void loadFileCandidates(cwd, query, env).then((result) => {
+    void loadFileCandidates(cwd, query, env, 10, acceptExtensions).then((result) => {
       if (cancelled) return;
       setCandidates(result);
       setCursor(0);
@@ -163,7 +196,7 @@ export function FilePicker({ cwd, env, initialQuery, onInsert, onCancel }: FileP
     return () => {
       cancelled = true;
     };
-  }, [query, cwd, env]);
+  }, [query, cwd, env, acceptExtensions]);
 
   const select = useCallback((): void => {
     const chosen = candidates[cursor];
@@ -204,7 +237,7 @@ export function FilePicker({ cwd, env, initialQuery, onInsert, onCancel }: FileP
   return (
     <Box flexDirection="column" marginTop={1}>
       <Text bold>
-        @file — filter: <Text color={theme.accent}>{query || "(all)"}</Text>
+        {title} — filter: <Text color={theme.accent}>{query || "(all)"}</Text>
       </Text>
       {candidates.length === 0 ? (
         <Text color={theme.dim}>No files match &quot;{query}&quot;</Text>
@@ -216,7 +249,7 @@ export function FilePicker({ cwd, env, initialQuery, onInsert, onCancel }: FileP
           </Text>
         ))
       )}
-      <Text color={theme.dim}>type to filter · ↑↓ select · Enter/Tab insert · Esc cancel</Text>
+      <Text color={theme.dim}>{footer}</Text>
     </Box>
   );
 }

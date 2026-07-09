@@ -23,17 +23,18 @@ src/tui/
 ├── harness-handle.ts      # HarnessHandle wrapper: replace() rebuilds harness + session
 ├── MessageList.tsx        # Renders conversation history + streaming text/tool calls
 ├── StatusBar.tsx          # Single status line from HarnessState (no raw events)
-├── InputBox.tsx           # Editor input: cursor model, Emacs keys, @file/!/Tab/Ctrl+G
+├── InputBox.tsx           # Editor input: cursor model, Emacs keys, @file/!/Tab/Ctrl+G/Ctrl+I paste-image, pending attachments
 ├── editor-state.ts        # Pure editor model: { text, cursor } + insert/move/delete fns
 ├── editor-state.test.ts   # Unit tests for editor-state pure functions
 ├── bang.ts                # `!`/`!!` shell-bang parsing + execution (parseBang / runBang)
 ├── bang.test.ts           # Unit tests for bang parsing + mocked execution
 ├── external-editor.ts     # Ctrl+G: tmp-file → spawn $VISUAL/$EDITOR → read back
-├── file-picker.tsx        # @file overlay: fuzzy file list + loadFileCandidates
+├── file-picker.tsx        # @file overlay: fuzzy file list + loadFileCandidates; image mode via acceptExtensions
 ├── SettingsForm.tsx       # /settings overlay component
 ├── PermissionPrompt.tsx   # Tool permission confirmation overlay (once/session/deny)
 ├── Markdown.tsx           # Renders a finalized assistant message via marked → Ink
-├── commands.ts            # `/name args` registry + parseCommand + /skill: routing (pure)
+├── commands.ts            # `/name args` registry + parseCommand + /skill: routing + /image /paste-image
+├── image-submit.ts        # toPromptImages + nonVisionWarning helpers
 ├── commands.test.ts       # Co-located tests for parseCommand / skill invoke
 └── markdown/
     └── render-token.tsx   # Pure marked-token → Ink element mapping

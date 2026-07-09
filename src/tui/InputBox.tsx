@@ -24,6 +24,7 @@ import { openExternalEditor } from "./external-editor.js";
 import { loadFileCandidates } from "./file-picker.js";
 import { theme, divider, icons } from "./theme.js";
 import { Spinner } from "./components/Spinner.js";
+import { MAX_PENDING_IMAGES } from "../images/encode.js";
 
 /** A slash-completable item (static command or dynamic skill). */
 export type SlashItem = { name: string; description: string };
@@ -59,6 +60,10 @@ interface InputBoxProps {
   terminalWidth: number;
   /** Loaded skills shown as `skill:<name>` in the slash list. */
   skills?: readonly { name: string; description: string }[];
+  /** Ctrl+I: attach clipboard image to pending. */
+  onPasteImage?: () => void;
+  /** Pending image attachments shown above the editor. */
+  pendingImages?: readonly { label: string }[];
 }
 
 /**
@@ -116,6 +121,8 @@ export function InputBox({
   onCycleThinking,
   terminalWidth,
   skills,
+  onPasteImage,
+  pendingImages = [],
 }: InputBoxProps): React.ReactElement {
   // --- Slash command list state ---
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
@@ -144,28 +151,35 @@ export function InputBox({
   }, [slashQuery]);
 
   function submit(mode: "prompt" | "steer" | "followUp"): void {
-    const text = state.text.trim();
-    if (!text) {
+    const raw = state.text;
+    const text = raw.trim();
+    const hasImages = pendingImages.length > 0;
+
+    // Empty text with no images: clear and no-op (existing behavior).
+    if (!text && !hasImages) {
       setState({ text: "", cursor: 0 });
       return;
     }
 
-    // Bang (! / !!) and slash-commands work in any phase.
-    const bang = parseBang(state.text.trimStart());
-    if (bang.kind !== "none") {
-      setState({ text: "", cursor: 0 });
-      void runBang(bang, { env, cwd, onPrompt, print: onNotice });
-      return;
-    }
+    // Bang (! / !!) and slash-commands only apply when there is text.
+    if (text) {
+      const bang = parseBang(raw.trimStart());
+      if (bang.kind !== "none") {
+        setState({ text: "", cursor: 0 });
+        void runBang(bang, { env, cwd, onPrompt, print: onNotice });
+        return;
+      }
 
-    if (text.startsWith("/")) {
-      setState({ text: "", cursor: 0 });
-      onCommand(text);
-      return;
+      if (text.startsWith("/")) {
+        setState({ text: "", cursor: 0 });
+        onCommand(text);
+        return;
+      }
     }
 
     // Plain prompt: gated by phase. compaction is a no-op (do not clear the
     // editor). idle→prompt, turn→steer/followUp (per the submit mode).
+    // Empty text + images is allowed (text may be "").
     if (phase === "compaction") return;
 
     setState({ text: "", cursor: 0 });
@@ -245,6 +259,12 @@ export function InputBox({
         .catch((e) => {
           onNotice(e instanceof Error ? e.message : String(e));
         });
+      return;
+    }
+
+    // --- Ctrl+I: paste image from clipboard ---
+    if (key.ctrl && !key.meta && value === "i") {
+      onPasteImage?.();
       return;
     }
 
@@ -381,6 +401,12 @@ export function InputBox({
   return (
     <Box flexDirection="column">
       <Text color={theme.dim}>{divider(terminalWidth)}</Text>
+      {pendingImages.length > 0 ? (
+        <Text color={theme.dim}>
+          attachments ({pendingImages.length}/{MAX_PENDING_IMAGES}):{" "}
+          {pendingImages.map((p) => p.label).join(" · ")}
+        </Text>
+      ) : null}
       <Text>
         <Text color={theme.accent} bold>{icons.prompt} </Text>
         {before}

@@ -13,7 +13,14 @@ import { FilePicker } from "./file-picker.js";
 import { SessionPicker } from "./SessionPicker.js";
 import { ModelPicker } from "./ModelPicker.js";
 import { PermissionPrompt } from "./PermissionPrompt.js";
-import { runCommand, nextThinkingLevel, type CommandContext, type Overlay } from "./commands.js";
+import {
+  runCommand,
+  nextThinkingLevel,
+  makeAddPendingImages,
+  pasteImageFromClipboard,
+  type CommandContext,
+  type Overlay,
+} from "./commands.js";
 import {
   createHarnessHandle,
   type HarnessHandle,
@@ -24,6 +31,12 @@ import { matchScopedModels, nextScopedIndex } from "./scoped-models.js";
 import type { BootstrapResult } from "../bootstrap.js";
 import type { TuiApprover, PermissionPromptState } from "../permissions/index.js";
 import { theme, divider } from "./theme.js";
+import {
+  IMAGE_EXTENSIONS,
+  loadImageFile,
+  type PendingImage,
+} from "../images/encode.js";
+import { nonVisionWarning, toPromptImages } from "./image-submit.js";
 
 /** Overlay union: null = normal input; settings = form; filePicker = @file; sessionPicker = /resume. */
 // Type re-exported from commands.ts to keep the variants in one place.
@@ -108,6 +121,9 @@ function App({
     savedText: string;
   } | null>(null);
   const [permissionPrompt, setPermissionPrompt] = useState<PermissionPromptState | null>(null);
+  const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
+  const pendingImagesRef = useRef<PendingImage[]>([]);
+  pendingImagesRef.current = pendingImages;
 
   // Subscribe to TUI Approver prompts (lifecycle = process; store survives replace).
   useEffect(() => {
@@ -118,6 +134,12 @@ function App({
   const print = (text: string): void => {
     setNotice(text.split("\n"));
   };
+
+  const addPendingImages = makeAddPendingImages(
+    () => pendingImagesRef.current,
+    setPendingImages,
+    print,
+  );
 
   const commandCtx: CommandContext = {
     harness: handle.harness,
@@ -139,6 +161,9 @@ function App({
     setSettings,
     settings,
     queue: state.queue,
+    pendingImages,
+    addPendingImages,
+    clearPendingImages: () => setPendingImages([]),
   };
 
   function recordHistory(text: string): void {
@@ -146,25 +171,46 @@ function App({
     setHistoryBrowse(null);
   }
 
-  function handlePrompt(text: string): void {
+  function submitWithImages(
+    text: string,
+    mode: "prompt" | "steer" | "followUp",
+  ): void {
+    const pending = pendingImagesRef.current;
+    const warn = nonVisionWarning(handle.harness.getModel(), pending.length);
+    if (warn) print(warn);
+    const opts = toPromptImages(pending);
     recordHistory(text);
-    handle.harness.prompt(text).catch((e) => {
-      print(`Prompt failed: ${e instanceof Error ? e.message : String(e)}`);
-    });
+    setPendingImages([]);
+    const fail = (label: string, e: unknown) => {
+      print(`${label} failed: ${e instanceof Error ? e.message : String(e)}`);
+    };
+    switch (mode) {
+      case "prompt":
+        handle.harness.prompt(text, opts).catch((e) => fail("Prompt", e));
+        break;
+      case "steer":
+        handle.harness.steer(text, opts).catch((e) => fail("Steer", e));
+        break;
+      case "followUp":
+        handle.harness.followUp(text, opts).catch((e) => fail("FollowUp", e));
+        break;
+    }
+  }
+
+  function handlePrompt(text: string): void {
+    submitWithImages(text, "prompt");
   }
 
   function handleSteer(text: string): void {
-    recordHistory(text);
-    handle.harness.steer(text).catch((e) => {
-      print(`Steer failed: ${e instanceof Error ? e.message : String(e)}`);
-    });
+    submitWithImages(text, "steer");
   }
 
   function handleFollowUp(text: string): void {
-    recordHistory(text);
-    handle.harness.followUp(text).catch((e) => {
-      print(`FollowUp failed: ${e instanceof Error ? e.message : String(e)}`);
-    });
+    submitWithImages(text, "followUp");
+  }
+
+  function handlePasteImage(): void {
+    void pasteImageFromClipboard(commandCtx);
   }
 
   /** Single-line non-slash mode ↑: load the previous history entry. */
@@ -364,6 +410,8 @@ function App({
           onAltUp={handleAltUp}
           onHistoryUp={handleHistoryUp}
           onHistoryDown={handleHistoryDown}
+          onPasteImage={handlePasteImage}
+          pendingImages={pendingImages}
           terminalWidth={terminalWidth}
           skills={handle.harness.getResources().skills}
         />
@@ -399,6 +447,27 @@ function App({
           onInsert={(filePath) => {
             setEditorState((prev) => insert(prev, filePath));
             setOverlay(null);
+          }}
+          onCancel={() => setOverlay(null)}
+        />
+      ) : overlay.kind === "imagePicker" ? (
+        <FilePicker
+          cwd={cwd}
+          env={env}
+          initialQuery=""
+          acceptExtensions={IMAGE_EXTENSIONS}
+          title="image"
+          footer="type to filter · ↑↓ select · Enter/Tab attach · Esc cancel"
+          onInsert={(filePath) => {
+            void (async () => {
+              const result = await loadImageFile(env, filePath);
+              if (!result.ok) {
+                print(result.error);
+              } else {
+                addPendingImages([result.value]);
+              }
+              setOverlay(null);
+            })();
           }}
           onCancel={() => setOverlay(null)}
         />

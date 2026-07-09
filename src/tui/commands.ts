@@ -22,6 +22,17 @@ import { summarizeUsage, formatTokens, formatCost } from "./usage.js";
 import { loadTrust, resolveProjectTrust, saveTrust, hasGatedResources } from "../trust.js";
 import { matchScopedModels } from "./scoped-models.js";
 import { getNoviDir } from "../config.js";
+import {
+  appendPending,
+  loadImageFile,
+  MAX_PENDING_IMAGES,
+  encodeImageBytes,
+  type PendingImage,
+} from "../images/encode.js";
+import {
+  createClipboardImageReader,
+  type ClipboardImageReader,
+} from "../images/clipboard.js";
 
 export interface ParsedCommand {
   name: string;
@@ -102,6 +113,14 @@ export interface CommandContext {
   settings: ResolvedSettings;
   /** Queued steer/followUp/nextTurn messages (projected from queue_update). */
   queue: QueueState;
+  /** Pending image attachments for the next prompt/steer/followUp. */
+  pendingImages: PendingImage[];
+  /** Append images to pending (enforces max 8). Prints on failure. */
+  addPendingImages: (items: PendingImage[]) => void;
+  /** Clear all pending images. */
+  clearPendingImages: () => void;
+  /** Optional injectable clipboard reader (tests / platform override). */
+  clipboardReader?: ClipboardImageReader;
 }
 
 /** A selectable entry in the model picker list. */
@@ -115,6 +134,7 @@ export type Overlay =
   | null
   | { kind: "settings" }
   | { kind: "filePicker" }
+  | { kind: "imagePicker" }
   | { kind: "sessionPicker"; sessions: import("./SessionPicker.js").SessionInfo[] }
   | { kind: "modelPicker"; models: ModelEntry[]; currentIndex: number };
 
@@ -552,10 +572,83 @@ export const COMMANDS: readonly Command[] = [
       }
     },
   },
+  {
+    name: "image",
+    description: "Attach a local image (/image [path] | /image clear)",
+    run: async (ctx, args) => {
+      const trimmed = args.trim();
+      if (!trimmed) {
+        ctx.setOverlay({ kind: "imagePicker" });
+        return;
+      }
+      if (trimmed.toLowerCase() === "clear") {
+        if (ctx.pendingImages.length === 0) {
+          ctx.print("No pending images.");
+          return;
+        }
+        ctx.clearPendingImages();
+        ctx.print("Cleared pending images.");
+        return;
+      }
+      const result = await loadImageFile(ctx.env, trimmed);
+      if (!result.ok) {
+        ctx.print(result.error);
+        return;
+      }
+      ctx.addPendingImages([result.value]);
+    },
+  },
+  {
+    name: "paste-image",
+    description: "Attach an image from the system clipboard (Ctrl+I)",
+    run: async (ctx) => {
+      await pasteImageFromClipboard(ctx);
+    },
+  },
 ];
 
 const COMMAND_HINT =
-  "Try /quit /model /session /new /resume /name /compact /settings /trust /scoped-models /reload /skill:<name>.";
+  "Try /quit /model /session /new /resume /name /compact /settings /trust /scoped-models /reload /image /paste-image /skill:<name>.";
+
+/**
+ * Read the system clipboard image and append it to pending.
+ * Shared by `/paste-image` and Ctrl+I.
+ */
+export async function pasteImageFromClipboard(ctx: CommandContext): Promise<void> {
+  const reader = ctx.clipboardReader ?? createClipboardImageReader();
+  const clip = await reader.readImage();
+  if (!clip.ok) {
+    ctx.print(clip.error);
+    return;
+  }
+  const label = `clipboard-${ctx.pendingImages.length + 1}.png`;
+  const encoded = encodeImageBytes(clip.value.bytes, clip.value.mimeType, label);
+  if (!encoded.ok) {
+    ctx.print(encoded.error);
+    return;
+  }
+  ctx.addPendingImages([encoded.value]);
+}
+
+/**
+ * Build the addPendingImages callback used by App (enforce capacity + print).
+ */
+export function makeAddPendingImages(
+  getPending: () => PendingImage[],
+  setPending: (next: PendingImage[]) => void,
+  print: (text: string) => void,
+): (items: PendingImage[]) => void {
+  return (items) => {
+    const result = appendPending(getPending(), items);
+    if (!result.ok) {
+      print(result.error);
+      return;
+    }
+    setPending(result.value);
+    const added = items.map((i) => i.label).join(", ");
+    print(`Attached ${added} (${result.value.length}/${MAX_PENDING_IMAGES})`);
+  };
+}
 
 /** Execute a `/name args` input line against the registry. */
 export async function runCommand(

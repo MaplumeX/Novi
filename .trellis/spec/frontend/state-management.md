@@ -11,13 +11,14 @@ State is plain React: `useState` + `useRef` + a single custom hook
 (`useHarnessState`). The harness itself is the source of truth for
 agent/session state; the TUI mirrors it via event subscription.
 
-There are four categories of state:
+There are five categories of state:
 
 | Category | Mechanism | Owner |
 |----------|-----------|-------|
 | Agent/session state (messages, phase, model, queue, tools) | `HarnessState` via `useHarnessState` | `App.tsx` passes down as props |
 | HarnessHandle state (replaceable harness + session) | `useState<HarnessHandle>` in `App` | `App.tsx` — `handle.replace()` triggers re-subscription |
 | Local UI state (notice, input buffer, overlay) | `useState` in the component | `App.tsx` / `InputBox.tsx` |
+| Pending image attachments (multimodal) | `useState<PendingImage[]>` in `App` | `App.tsx` — shared by commands + submit handlers; InputBox only displays |
 | Synchronous mirror (latest messages for async callbacks) | `useRef` | `useHarnessState.ts` |
 
 ---

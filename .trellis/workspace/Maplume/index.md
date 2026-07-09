@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 32
+- **Total Sessions**: 33
 - **Last Active**: 2026-07-09
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1087 | Active |
+| `journal-1.md` | ~1121 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 33 | 2026-07-09 | Multimodal image input for Novi harness | `f11abcf`, `9f925df` | `main` |
 | 32 | 2026-07-09 | Skills as first-class citizens | `f2d04e8`, `2bc839e` | `main` |
 | 31 | 2026-07-09 | Tool permission model for Novi agent harness | `17c2333`, `88ff434` | `main` |
 | 30 | 2026-07-05 | 改进 Novi agent 上下文压缩的摘要生成 | `ee56679`, `34e967d`, `fe194e0` | `main` |

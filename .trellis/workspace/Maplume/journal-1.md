@@ -1085,3 +1085,37 @@ Made skills first-class in Novi TUI: /skill:name [args] via harness.skill, slash
 ### Next Steps
 
 - None - task complete
+
+
+## Session 33: Multimodal image input for Novi harness
+
+**Date**: 2026-07-09
+**Task**: Multimodal image input for Novi harness
+**Branch**: `main`
+
+### Summary
+
+Planned and implemented TUI multimodal image attachments: pending queue, /image + clipboard paste, prompt/steer/followUp images, MessageList badges. Specs and ARCHITECTURE updated; tests/typecheck/lint green.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f11abcf` | (see git log) |
+| `9f925df` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

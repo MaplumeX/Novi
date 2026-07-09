@@ -60,6 +60,25 @@ describe("mergeSettings", () => {
     const out = mergeSettings({ defaultProvider: "anthropic" }, {});
     expect(out.defaultProvider).toBe("anthropic");
   });
+
+  it("merges permissions.tools map one extra level deep", () => {
+    const g: NoviSettings = { permissions: { tools: { bash: "ask", read_file: "allow" } } };
+    const p: NoviSettings = { permissions: { tools: { bash: "deny" } } };
+    const out = mergeSettings(g, p);
+    expect(out.permissions?.tools).toEqual({ bash: "deny", read_file: "allow" });
+  });
+
+  it("rejects project relaxing permissions.tools (tighten-only, AC9)", () => {
+    const g: NoviSettings = { permissions: { tools: { bash: "ask" } } };
+    const p: NoviSettings = { permissions: { tools: { bash: "allow" } } };
+    const out = mergeSettings(g, p);
+    expect(out.permissions?.tools?.bash).toBe("ask");
+  });
+
+  it("keeps default bash=ask when project only tries to allow (AC9)", () => {
+    const out = mergeSettings({}, { permissions: { tools: { bash: "allow" } } });
+    expect(out.permissions?.tools?.bash).toBe("ask");
+  });
 });
 
 describe("resolveSettings", () => {
@@ -97,6 +116,42 @@ describe("resolveSettings", () => {
     expect(out._sources["steeringMode"]).toBe("default");
     expect(out._sources["followUpMode"]).toBe("default");
     expect(out._sources["scopedModels"]).toBe("default");
+    expect(out._sources["permissions.tools.bash"]).toBe("default");
+  });
+
+  it("marks permissions.tools.bash by layer source", () => {
+    const g = resolveSettings(
+      { permissions: { tools: { bash: "allow" } } },
+      { global: { permissions: { tools: { bash: "allow" } } }, project: null },
+      {},
+    );
+    expect(g._sources["permissions.tools.bash"]).toBe("global");
+    expect(g.permissions?.tools?.bash).toBe("allow");
+
+    const p = resolveSettings(
+      { permissions: { tools: { bash: "deny" } } },
+      {
+        global: { permissions: { tools: { bash: "ask" } } },
+        project: { permissions: { tools: { bash: "deny" } } },
+      },
+      {},
+    );
+    expect(p._sources["permissions.tools.bash"]).toBe("project");
+    expect(p.permissions?.tools?.bash).toBe("deny");
+  });
+
+  it("does not attribute rejected project relax to project source (AC9)", () => {
+    const out = resolveSettings(
+      { permissions: { tools: { bash: "allow" } } }, // naive merge would have allow
+      {
+        global: null,
+        project: { permissions: { tools: { bash: "allow" } } },
+      },
+      {},
+    );
+    // Effective stays default ask; source is default (project value rejected).
+    expect(out.permissions?.tools?.bash).toBe("ask");
+    expect(out._sources["permissions.tools.bash"]).toBe("default");
   });
 
   it("marks nested compaction leaves by their source", () => {

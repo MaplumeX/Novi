@@ -30,6 +30,11 @@ function makeMockHarness(overrides: Partial<{
     setSteeringMode: async (m: unknown) => { calls.push(["setSteeringMode", m]); },
     setFollowUpMode: async (m: unknown) => { calls.push(["setFollowUpMode", m]); },
     setResources: async (r: unknown) => { calls.push(["setResources", r]); },
+    // registerHooks may call on() during replay; record and no-op unsubscribe.
+    on: (type: string, handler: unknown) => {
+      calls.push(["on", type, handler]);
+      return () => {};
+    },
     getActiveTools: () => overrides.activeTools ?? [{ name: "read_file" }, { name: "bash" }],
     getModel: () => overrides.model ?? { id: "test-model", provider: "test" },
     getThinkingLevel: () => overrides.thinkingLevel ?? "medium",
@@ -110,8 +115,10 @@ describe("replayHarnessState", () => {
     expect(setResCall).toBeDefined();
     expect(setResCall![1]).toEqual({ skills: [], promptTemplates: [] });
 
-    // Returns a diagnostics array (empty for clean dirs).
-    expect(result).toEqual({ diagnostics: [] });
+    // Returns diagnostics (empty for clean dirs). permissionGate is undefined
+    // when no store/resolvedSettings were passed for re-resolve.
+    expect(result.diagnostics).toEqual([]);
+    expect(result.permissionGate).toBeUndefined();
   });
 
   it("skips project resources on reload when trusted=false (gate)", async () => {

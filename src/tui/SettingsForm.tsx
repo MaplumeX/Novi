@@ -33,6 +33,7 @@ const TRUST_OPTIONS: readonly string[] = ["ask", "always", "never"];
 
 const TRANSPORT_OPTIONS: readonly string[] = ["sse", "websocket", "websocket-cached", "auto"];
 const QUEUE_MODE_OPTIONS: readonly string[] = ["one-at-a-time", "all"];
+const PERMISSION_LEVELS: readonly string[] = ["allow", "ask", "deny"];
 
 const FIELDS: readonly FieldDef[] = [
   { key: "defaultProvider", label: "defaultProvider", type: "text" },
@@ -43,6 +44,7 @@ const FIELDS: readonly FieldDef[] = [
   { key: "steeringMode", label: "steeringMode", type: "select", options: QUEUE_MODE_OPTIONS },
   { key: "followUpMode", label: "followUpMode", type: "select", options: QUEUE_MODE_OPTIONS },
   { key: "scopedModels", label: "scopedModels (comma-sep)", type: "text" },
+  { key: "permissions.tools.bash", label: "permissions.tools.bash", type: "select", options: PERMISSION_LEVELS },
   { key: "compaction.enabled", label: "compaction.enabled", type: "toggle" },
   { key: "compaction.reserveTokens", label: "compaction.reserveTokens", type: "number" },
   { key: "compaction.keepRecentTokens", label: "compaction.keepRecentTokens", type: "number" },
@@ -55,10 +57,17 @@ function getFieldValue(settings: ResolvedSettings, key: string): string {
   const parts = key.split(".");
   let cursor: unknown = settings;
   for (const part of parts) {
-    if (cursor === null || cursor === undefined || typeof cursor !== "object") return "";
+    if (cursor === null || cursor === undefined || typeof cursor !== "object") {
+      // Built-in default for bash permission when unset.
+      if (key === "permissions.tools.bash") return "ask";
+      return "";
+    }
     cursor = (cursor as Record<string, unknown>)[part];
   }
-  if (cursor === undefined || cursor === null) return "";
+  if (cursor === undefined || cursor === null) {
+    if (key === "permissions.tools.bash") return "ask";
+    return "";
+  }
   return String(cursor);
 }
 

@@ -289,8 +289,10 @@ export async function renderOnboardingWizard(
           // sees it without relying on a fresh process.env reload.
           injectCredentialsIntoEnv(result.credentials, process.env);
           try {
-            const bootstrapped = await bootstrap(options);
-            renderApp(bootstrapped, getSessionsDir());
+            const { TuiApprover } = await import("../permissions/index.js");
+            const tuiApprover = new TuiApprover();
+            const bootstrapped = await bootstrap({ ...options, approver: tuiApprover });
+            renderApp(bootstrapped, getSessionsDir(), tuiApprover);
             resolve();
           } catch (e) {
             process.stderr.write(

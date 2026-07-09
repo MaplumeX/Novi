@@ -8,8 +8,19 @@ import type { Models } from "@earendil-works/pi-ai";
 import { createBuiltinTools } from "../tools/index.js";
 import { loadResources } from "../resources.js";
 import { loadHooks, registerHooks } from "../hooks/index.js";
-import type { ResolvedSettings } from "../settings.js";
-import { DEFAULT_PROVIDER, DEFAULT_MODEL_ID, DEFAULT_THINKING_LEVEL } from "../bootstrap.js";
+import type { ResolvedSettings, SettingsLayers } from "../settings.js";
+import {
+  DEFAULT_PROVIDER,
+  DEFAULT_MODEL_ID,
+  DEFAULT_THINKING_LEVEL,
+  buildPermissionGate,
+} from "../bootstrap.js";
+import {
+  resolvePermissionsFromSettings,
+  type Approver,
+  type PermissionGate,
+  type SessionPermissionStore,
+} from "../permissions/index.js";
 
 /**
  * A replaceable harness holder. `<App>` holds one of these as React state;
@@ -25,6 +36,10 @@ export interface HarnessHandle {
   sessionPath: string;
   /** Whether project-level resources were loaded at bootstrap (trust gate). */
   trusted: boolean;
+  /** Runtime permission gate bound to the current harness. */
+  permissionGate: PermissionGate;
+  /** Process-lifetime session grants (survives replace). */
+  permissionStore: SessionPermissionStore;
   /**
    * Rebuild the harness and update the holder state.
    *
@@ -50,6 +65,11 @@ export interface ReplaceOptions {
    * Used by `/reload`; omitted by `/new`/`/resume`.
    */
   resolvedSettings?: ResolvedSettings;
+  /**
+   * Split settings layers for tighten-only permission re-resolve on `/reload`.
+   * When omitted, permissions are left as currently resolved on the gate.
+   */
+  settingsLayers?: SettingsLayers;
 }
 
 export interface CreateHarnessHandleDeps {
@@ -60,6 +80,16 @@ export interface CreateHarnessHandleDeps {
   systemPrompt: ConstructorParameters<typeof AgentHarness>[0]["systemPrompt"];
   /** Called with the new handle after a rebuild (React setState). */
   setHandle: (handle: HarnessHandle) => void;
+  /** CLI `--yes` for this process. */
+  yes: boolean;
+  /** Interactive Approver (TUI) or undefined (should not happen in TUI path). */
+  approver: Approver | undefined;
+  /** Process-lifetime session grants. */
+  permissionStore: SessionPermissionStore;
+  /** Initial permission gate (from bootstrap). */
+  permissionGate: PermissionGate;
+  /** Initial settings layers for permission re-resolve. */
+  settingsLayers: SettingsLayers;
 }
 
 /**
@@ -75,8 +105,12 @@ export interface CreateHarnessHandleDeps {
  * `/new`/`/resume` path), they are replayed from the old harness so a session
  * switch preserves the current runtime configuration.
  *
- * Returns `{ diagnostics }` — warnings from resource loading (invalid
- * skill/template files) that the caller should surface to the user.
+ * Permissions: on `/reload` with `resolvedSettings` + `settingsLayers`,
+ * re-resolve permissions and update the shared gate via `setPermissions`.
+ * The {@link SessionPermissionStore} is **never** cleared.
+ *
+ * Returns `{ diagnostics, permissionGate }` — warnings from resource loading
+ * plus the gate bound for this rebuild (same instance when store reused).
  */
 export async function replayHarnessState(
   newHarness: AgentHarness,
@@ -85,8 +119,17 @@ export async function replayHarnessState(
   cwd: string,
   sessionId: string,
   models: Models,
-  opts: { reloadResources?: boolean; trusted?: boolean; resolvedSettings?: ResolvedSettings } = {},
-): Promise<{ diagnostics: string[] }> {
+  opts: {
+    reloadResources?: boolean;
+    trusted?: boolean;
+    resolvedSettings?: ResolvedSettings;
+    settingsLayers?: SettingsLayers;
+    yes?: boolean;
+    permissionGate?: PermissionGate;
+    permissionStore?: SessionPermissionStore;
+    approver?: Approver;
+  } = {},
+): Promise<{ diagnostics: string[]; permissionGate: PermissionGate | undefined }> {
   const diagnostics: string[] = [];
 
   // Tools: re-create the built-in set and restore the active-tool selection.
@@ -158,6 +201,24 @@ export async function replayHarnessState(
     await newHarness.setResources(oldHarness.getResources());
   }
 
+  // Permissions: re-resolve on /reload; keep the same store (session grants).
+  let permissionGate = opts.permissionGate;
+  if (opts.resolvedSettings && opts.permissionStore) {
+    const nextPerms = resolvePermissionsFromSettings(opts.resolvedSettings, {
+      yes: opts.yes === true,
+      layers: opts.settingsLayers,
+    });
+    if (permissionGate) {
+      permissionGate.setPermissions(nextPerms);
+    } else {
+      permissionGate = buildPermissionGate({
+        permissions: nextPerms,
+        permissionStore: opts.permissionStore,
+        approver: opts.approver,
+      });
+    }
+  }
+
   // Hooks: re-load manifests and re-register dispatchers. Handler closures
   // bind to a specific harness instance, so they must be re-created on every
   // rebuild. Trust gate is reused from the old handle (cwd-scoped).
@@ -165,7 +226,12 @@ export async function replayHarnessState(
     const hookConfig = await loadHooks(env, cwd, {
       includeProject: opts.trusted !== false,
     });
-    registerHooks(newHarness, hookConfig, { env, cwd, sessionId });
+    registerHooks(
+      newHarness,
+      hookConfig,
+      { env, cwd, sessionId },
+      { permissionGate },
+    );
     diagnostics.push(...hookConfig.diagnostics);
   } catch (e) {
     // Hook registration must never block harness rebuild.
@@ -174,7 +240,7 @@ export async function replayHarnessState(
     );
   }
 
-  return { diagnostics };
+  return { diagnostics, permissionGate };
 }
 
 /**
@@ -191,10 +257,14 @@ export function createHarnessHandle(
     session: Session<JsonlSessionMetadata>;
     sessionPath: string;
     trusted: boolean;
+    permissionGate: PermissionGate;
+    permissionStore: SessionPermissionStore;
   },
   deps: CreateHarnessHandleDeps,
 ): HarnessHandle {
-  const { env, models, cwd, systemPrompt, setHandle } = deps;
+  const { env, models, cwd, systemPrompt, setHandle, yes, approver } = deps;
+  // settingsLayers can update on /reload via replace opts; keep latest in a ref-like box.
+  let settingsLayers = deps.settingsLayers;
 
   // `makeReplace` returns a `replace` closure bound to a specific (old) handle.
   function makeReplace(old: HarnessHandle): HarnessHandle["replace"] {
@@ -207,6 +277,9 @@ export function createHarnessHandle(
       const session = next.session ?? old.session;
       const sessionPath = next.sessionPath ?? old.sessionPath;
       const sessionMeta = await session.getMetadata();
+      if (next.settingsLayers) {
+        settingsLayers = next.settingsLayers;
+      }
       // 4. Build the new harness, reusing the old model.
       const newHarness = new AgentHarness({
         env,
@@ -218,12 +291,18 @@ export function createHarnessHandle(
       // 5. Replay state from old → new. Trust decision is reused from the old
       //    handle (trust is cwd-scoped, not session-scoped; re-resolving would
       //    require a fresh trust prompt mid-session, which we don't support).
-      const { diagnostics } = await replayHarnessState(
+      //    Session permission store is the same instance (AC13).
+      const { diagnostics, permissionGate } = await replayHarnessState(
         newHarness, old.harness, env, cwd, sessionMeta.id, models,
         {
           reloadResources: next.reloadResources,
           trusted: old.trusted,
           resolvedSettings: next.resolvedSettings,
+          settingsLayers,
+          yes,
+          permissionGate: old.permissionGate,
+          permissionStore: old.permissionStore,
+          approver,
         },
       );
       // 6. Build the new handle with its own replace closure, then publish.
@@ -232,6 +311,8 @@ export function createHarnessHandle(
         session,
         sessionPath,
         trusted: old.trusted,
+        permissionGate: permissionGate ?? old.permissionGate,
+        permissionStore: old.permissionStore,
         replace: async () => {
           // Placeholder overwritten immediately below (TDZ-safe fixup).
           return { diagnostics: [] };
@@ -248,6 +329,8 @@ export function createHarnessHandle(
     session: initial.session,
     sessionPath: initial.sessionPath,
     trusted: initial.trusted,
+    permissionGate: initial.permissionGate,
+    permissionStore: initial.permissionStore,
     replace: async () => {
       // Placeholder overwritten immediately below.
       return { diagnostics: [] };

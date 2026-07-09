@@ -505,7 +505,10 @@ export const COMMANDS: readonly Command[] = [
       try {
         // Re-read settings.json FIRST so the reload applies the fresh on-disk
         // model/thinking/streamOptions/queue-modes to the new harness (R4).
-        const loaded = await loadSettings(ctx.env, ctx.cwd);
+        // Honor trust gate for project layer; pass layers for permission re-resolve.
+        const loaded = await loadSettings(ctx.env, ctx.cwd, {
+          includeProject: ctx.handle.trusted,
+        });
         for (const diagnostic of loaded.diagnostics) {
           ctx.print(`warning: ${diagnostic}`);
         }
@@ -514,6 +517,7 @@ export const COMMANDS: readonly Command[] = [
         const { diagnostics } = await ctx.handle.replace({
           reloadResources: true,
           resolvedSettings: newResolved,
+          settingsLayers: loaded.layers,
         });
         for (const d of diagnostics) ctx.print(`warning: ${d}`);
         ctx.print("Reloaded settings, skills, prompts, and context files.");

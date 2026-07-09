@@ -392,7 +392,8 @@ Novi 在 core `on()` 之上构建了用户可配置的脚本 hook 层：
 
 - **配置**：`~/.novi/hooks/hooks.json`（用户层）+ `<cwd>/.novi/hooks/hooks.json`（项目层，受 trust gate）。schema 仿 Claude Code：`{ hooks: { <event>: [{ matcher?: string, hooks: [{ command, args?, timeoutMs? }] }] } }`。
 - **加载**：`loadHooks(env, cwd, {includeProject: trusted})` 读两层 manifest，合并 matcher 组（user 在前，project 追加），未知事件名/非法 JSON/schema 不符 → diagnostic 警告（不阻塞）。
-- **注册**：`registerHooks(harness, config, {env, cwd, sessionId})` 对每个事件调 `harness.on(type, dispatcher)`。dispatcher 闭包做 matcher 过滤 → spawn 脚本 → 解析 stdout → 转 core result。
+- **注册**：`registerHooks(harness, config, {env, cwd, sessionId}, options?)` 对每个事件调 `harness.on(type, dispatcher)`。dispatcher 闭包做 matcher 过滤 → spawn 脚本 → 解析 stdout → 转 core result。
+- **`tool_call` 与 PermissionGate 显式 compose**：`options.permissionGate` 存在时，`tool_call` dispatcher 先 `await gate.onToolCall(event)`；若 `{block:true}` 则直接返回（跳过用户 hook）；否则跑用户 hook。Deny sticky：用户 hook 不能放行 permission deny；permission allow 后用户 hook 仍可 block。**不要**靠 `emitHook` last-wins 注册顺序实现权限。
 - **IPC**：stdin = 事件 JSON（snake_case 字段 + `session_id`/`cwd`/`hook_event_name`）；stdout = `{ result: { ... } }`（snake_case，Novi 转 camelCase）；空 stdout + exit 0 = no-op；exit 2 = 阻断错误（`tool_call` 自动 `{block:true, reason:<stderr>}`）；默认 10s 超时（SIGTERM→500ms→SIGKILL）。
 - **字段映射**：`field-mapping.ts` 用显式映射表（非通用转换），避免泄漏 `signal`/`resources`/`preparation.settings` 等内部字段给脚本。
 - **MVP 暴露 4 事件**：`before_agent_start`/`tool_call`/`tool_result`/`session_before_compact`。`SUPPORTED_EVENTS` Set 控制白名单，扩展只需加成员。

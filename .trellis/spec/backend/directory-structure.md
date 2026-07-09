@@ -47,6 +47,13 @@ src/
 │   │   ├── ssrf.ts          # isPrivateUrl() — private/loopback URL guard
 │   │   └── __tests__/
 │   └── __tests__/          # Tool tests + helpers.ts (setupEnv / getTool / writeFixture)
+├── permissions/           # Built-in tool permission model (static policy + Approver)
+│   ├── types.ts            # PermissionLevel / Approver / ApprovalChoice
+│   ├── policy.ts           # defaults + global override + project tighten-only + --yes
+│   ├── gate.ts             # PermissionGate + SessionPermissionStore + NonInteractive
+│   ├── summary.ts          # summarizeToolInput for confirmation UI
+│   ├── tui-approver.ts     # Queued TUI Approver (once/session/deny)
+│   └── index.ts            # Public barrel exports
 ├── headless/              # Headless run modes (print / json JSONL stream)
 │   ├── run.ts              # runPrint / runJson entry points
 │   ├── events.ts           # extractText + projectEvent — single raw-event → plain-object decoder
@@ -76,8 +83,8 @@ src/
 
 - **One file = one module.** Each file exports its factory function / types /
   constants directly. Do not add a barrel `index.ts` unless a sub-directory
-  needs a single public entry (the only existing one is `tools/index.ts` with
-  `createBuiltinTools`).
+  needs a single public entry (existing: `tools/index.ts` with
+  `createBuiltinTools`, `hooks/index.ts`, `permissions/index.ts`).
 - **Single entry point.** `cli.ts` is the process entry (`#!/usr/bin/env node`
   + `package.json` `bin`). Other modules must not call `process.exit` or write
   `process.stderr` directly, except for top-level startup error paths.

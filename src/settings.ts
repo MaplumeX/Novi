@@ -2,6 +2,11 @@ import os from "node:os";
 import path from "node:path";
 import type { ExecutionEnv, ThinkingLevel } from "@earendil-works/pi-agent-core/node";
 import { getNoviDir } from "./config.js";
+import {
+  DEFAULT_TOOL_PERMISSIONS,
+  mergePermissionsTightenOnly,
+  sanitizeToolPermissions,
+} from "./permissions/policy.js";
 
 /**
  * User-configurable Novi settings.
@@ -39,6 +44,14 @@ export interface NoviSettings {
   webSearch?: {
     /** Explicit provider id; must match a registered SearchProvider name. */
     provider?: string;
+  };
+  /**
+   * Tool permission policy. Unlisted tools default to `allow`.
+   * Built-in default (not written to disk): `{ bash: "ask" }`.
+   * Project layer can only tighten (see permissions policy merge).
+   */
+  permissions?: {
+    tools?: Record<string, "allow" | "ask" | "deny">;
   };
 }
 
@@ -139,6 +152,10 @@ async function readSettingsLayer(
 /**
  * Shallow-merge two settings layers: nested objects are merged one level deep,
  * project overrides global. Unknown keys are preserved (forward-compat).
+ *
+ * Exception: `permissions.tools` is merge-deep one extra level (tool name →
+ * level) with **tighten-only** project semantics (defaults ← global ← project),
+ * matching the runtime gate in `permissions/policy`.
  */
 export function mergeSettings(global: NoviSettings, project: NoviSettings): NoviSettings {
   const keys = new Set<string>([...Object.keys(global), ...Object.keys(project)]);
@@ -146,6 +163,13 @@ export function mergeSettings(global: NoviSettings, project: NoviSettings): Novi
   for (const key of keys) {
     const g = (global as Record<string, unknown>)[key];
     const p = (project as Record<string, unknown>)[key];
+    if (key === "permissions") {
+      out[key] = mergePermissionsSettings(
+        (g ?? {}) as NoviSettings["permissions"],
+        (p ?? {}) as NoviSettings["permissions"],
+      );
+      continue;
+    }
     if (
       g !== undefined &&
       p !== undefined &&
@@ -162,6 +186,45 @@ export function mergeSettings(global: NoviSettings, project: NoviSettings): Novi
     }
   }
   return out as NoviSettings;
+}
+
+/**
+ * Merge `permissions` so `tools` maps combine with **tighten-only** project
+ * semantics (AC9/AC10). Starts from built-in defaults so project cannot relax
+ * implicit `bash=ask` via the settings merge path either.
+ *
+ * Runtime gate also re-resolves from layers; keeping merge consistent means
+ * `/settings` and `resolvedSettings.permissions` match effective policy.
+ */
+function mergePermissionsSettings(
+  global: NoviSettings["permissions"] | Record<string, never> | undefined,
+  project: NoviSettings["permissions"] | Record<string, never> | undefined,
+): NoviSettings["permissions"] | undefined {
+  const g = global ?? {};
+  const p = project ?? {};
+  const gTools = sanitizeToolPermissions(
+    (g as { tools?: Record<string, unknown> }).tools,
+  );
+  const pTools = sanitizeToolPermissions(
+    (p as { tools?: Record<string, unknown> }).tools,
+  );
+  const hasG = Object.keys(gTools).length > 0;
+  const hasP = Object.keys(pTools).length > 0;
+  if (!hasG && !hasP) {
+    const keys = new Set([...Object.keys(g), ...Object.keys(p)]);
+    if (keys.size === 0) return undefined;
+    return { ...g, ...p } as NoviSettings["permissions"];
+  }
+  // defaults ← global (full override) ← project (tighten-only)
+  const tools = mergePermissionsTightenOnly(
+    { ...DEFAULT_TOOL_PERMISSIONS, ...gTools },
+    pTools,
+  );
+  return {
+    ...g,
+    ...p,
+    tools,
+  };
 }
 
 /**
@@ -278,6 +341,50 @@ export function resolveSettings(
       _sources[fullKey] = projectVal !== undefined ? "project" : globalVal !== undefined ? "global" : "default";
     } else {
       _sources[fullKey] = "default";
+    }
+  }
+
+  // permissions.tools.* — re-apply tighten-only onto settings so the resolved
+  // view matches the gate even when callers pass a pre-merged map that skipped
+  // mergePermissionsSettings. Provenance: project only if its value was accepted.
+  {
+    const gTools = sanitizeToolPermissions(layers.global?.permissions?.tools);
+    const pTools = sanitizeToolPermissions(layers.project?.permissions?.tools);
+    const effective = mergePermissionsTightenOnly(
+      { ...DEFAULT_TOOL_PERMISSIONS, ...gTools },
+      pTools,
+    );
+    // Also fold any tools present only on the merged view (defensive).
+    const mergedTools = sanitizeToolPermissions(merged?.permissions?.tools);
+    for (const [tool, level] of Object.entries(mergedTools)) {
+      if (!(tool in effective)) effective[tool] = level;
+    }
+    settings.permissions = {
+      ...(settings.permissions ?? {}),
+      tools: effective,
+    };
+
+    const toolNames = new Set<string>([
+      "bash",
+      ...Object.keys(effective),
+      ...Object.keys(gTools),
+      ...Object.keys(pTools),
+    ]);
+    for (const tool of toolNames) {
+      const fullKey = `permissions.tools.${tool}`;
+      const projectVal = pTools[tool];
+      const globalVal = gTools[tool];
+      const effectiveLevel = effective[tool] ?? "allow";
+      // Project source only when project contributed the *accepted* value.
+      if (projectVal !== undefined && projectVal === effectiveLevel) {
+        _sources[fullKey] = "project";
+      } else if (globalVal !== undefined) {
+        _sources[fullKey] = "global";
+      } else if (tool in DEFAULT_TOOL_PERMISSIONS) {
+        _sources[fullKey] = "default";
+      } else {
+        _sources[fullKey] = "default";
+      }
     }
   }
 

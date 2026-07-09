@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Text, useApp, useInput, render, useStdout } from "ink";
 import type { Models } from "@earendil-works/pi-ai";
 import { JsonlSessionRepo } from "@earendil-works/pi-agent-core/node";
@@ -12,6 +12,7 @@ import { SettingsForm } from "./SettingsForm.js";
 import { FilePicker } from "./file-picker.js";
 import { SessionPicker } from "./SessionPicker.js";
 import { ModelPicker } from "./ModelPicker.js";
+import { PermissionPrompt } from "./PermissionPrompt.js";
 import { runCommand, nextThinkingLevel, type CommandContext, type Overlay } from "./commands.js";
 import {
   createHarnessHandle,
@@ -21,6 +22,7 @@ import { insert, type EditorState } from "./editor-state.js";
 import { messageText, restoreText } from "./queue-helpers.js";
 import { matchScopedModels, nextScopedIndex } from "./scoped-models.js";
 import type { BootstrapResult } from "../bootstrap.js";
+import type { TuiApprover, PermissionPromptState } from "../permissions/index.js";
 import { theme, divider } from "./theme.js";
 
 /** Overlay union: null = normal input; settings = form; filePicker = @file; sessionPicker = /resume. */
@@ -37,6 +39,11 @@ interface AppProps {
   resolvedSettings: BootstrapResult["resolvedSettings"];
   cliOverrides: BootstrapResult["cliOverrides"];
   scopedModels: string[];
+  /** Process-lifetime flags for permission re-resolve on /reload. */
+  yes: boolean;
+  settingsLayers: BootstrapResult["settingsLayers"];
+  /** Interactive Approver (shared with bootstrap gate). */
+  tuiApprover: TuiApprover | undefined;
 }
 
 function App({
@@ -49,6 +56,9 @@ function App({
   resolvedSettings,
   cliOverrides,
   scopedModels,
+  yes,
+  settingsLayers,
+  tuiApprover,
 }: AppProps): React.ReactElement {
   // ref so the handle created in the useState initializer can reach it.
   // setHandle is assigned immediately after useState returns, well before any
@@ -62,6 +72,8 @@ function App({
         session: initialHandle.session,
         sessionPath: initialHandle.sessionPath,
         trusted: initialHandle.trusted,
+        permissionGate: initialHandle.permissionGate,
+        permissionStore: initialHandle.permissionStore,
       },
       {
         env,
@@ -69,6 +81,11 @@ function App({
         cwd,
         systemPrompt,
         setHandle: (h) => setHandleRef.current?.(h),
+        yes,
+        approver: tuiApprover,
+        permissionStore: initialHandle.permissionStore,
+        permissionGate: initialHandle.permissionGate,
+        settingsLayers,
       },
     ),
   );
@@ -90,6 +107,13 @@ function App({
     index: number;
     savedText: string;
   } | null>(null);
+  const [permissionPrompt, setPermissionPrompt] = useState<PermissionPromptState | null>(null);
+
+  // Subscribe to TUI Approver prompts (lifecycle = process; store survives replace).
+  useEffect(() => {
+    if (!tuiApprover) return;
+    return tuiApprover.subscribe(setPermissionPrompt);
+  }, [tuiApprover]);
 
   const print = (text: string): void => {
     setNotice(text.split("\n"));
@@ -176,6 +200,8 @@ function App({
   /** Escape: abort + restore during a turn; clear the editor when idle; no-op in compaction. */
   async function handleEscapeAbort(): Promise<void> {
     if (state.phase === "compaction") return;
+    // Pending permission prompts resolve as deny on abort (fail-closed).
+    tuiApprover?.denyAll();
     if (state.phase !== "turn") {
       setEditorState({ text: "", cursor: 0 });
       return;
@@ -283,10 +309,15 @@ function App({
       return;
     }
     if (key.ctrl && value === "c") {
+      if (permissionPrompt !== null) {
+        tuiApprover?.denyAll();
+        return;
+      }
       if (overlay !== null) {
         setOverlay(null);
         return;
       }
+      tuiApprover?.denyAll();
       void handle.harness.abort().finally(() => {
         exit();
         process.exit(0);
@@ -310,7 +341,12 @@ function App({
             </Text>
           ))
         : null}
-      {overlay === null ? (
+      {permissionPrompt !== null && tuiApprover ? (
+        <PermissionPrompt
+          prompt={permissionPrompt}
+          onChoose={(choice) => tuiApprover.respond(choice)}
+        />
+      ) : overlay === null ? (
         <InputBox
           phase={state.phase}
           cwd={cwd}
@@ -340,9 +376,15 @@ function App({
           onExit={() => setOverlay(null)}
           onReload={() => {
             void (async () => {
+              // Match /reload: re-read layers so permissions re-resolve correctly.
+              const { loadSettings, resolveSettings } = await import("../settings.js");
+              const loaded = await loadSettings(env, cwd, { includeProject: handle.trusted });
+              const newResolved = resolveSettings(loaded.merged, loaded.layers, cliOverrides);
+              setSettings(newResolved);
               const { diagnostics } = await handle.replace({
                 reloadResources: true,
-                resolvedSettings: settings,
+                resolvedSettings: newResolved,
+                settingsLayers: loaded.layers,
               });
               for (const d of diagnostics) print(`warning: ${d}`);
             })();
@@ -414,7 +456,11 @@ function App({
   );
 }
 
-export function renderApp(bootstrapResult: BootstrapResult, sessionsDir: string): void {
+export function renderApp(
+  bootstrapResult: BootstrapResult,
+  sessionsDir: string,
+  tuiApprover?: TuiApprover,
+): void {
   const {
     env,
     models,
@@ -431,7 +477,14 @@ export function renderApp(bootstrapResult: BootstrapResult, sessionsDir: string)
   // useState initializer to call the component's setState, so this initial
   // handle is only used to seed the first render.
   const initialHandle = createHarnessHandle(
-    { harness, session, sessionPath, trusted: bootstrapResult.trusted },
+    {
+      harness,
+      session,
+      sessionPath,
+      trusted: bootstrapResult.trusted,
+      permissionGate: bootstrapResult.permissionGate,
+      permissionStore: bootstrapResult.permissionStore,
+    },
     {
       env,
       models,
@@ -440,6 +493,11 @@ export function renderApp(bootstrapResult: BootstrapResult, sessionsDir: string)
       setHandle: () => {
         // Rebound inside App; no-op here.
       },
+      yes: bootstrapResult.yes,
+      approver: tuiApprover,
+      permissionStore: bootstrapResult.permissionStore,
+      permissionGate: bootstrapResult.permissionGate,
+      settingsLayers: bootstrapResult.settingsLayers,
     },
   );
 
@@ -454,6 +512,9 @@ export function renderApp(bootstrapResult: BootstrapResult, sessionsDir: string)
       resolvedSettings={resolvedSettings}
       cliOverrides={cliOverrides}
       scopedModels={bootstrapResult.scopedModels}
+      yes={bootstrapResult.yes}
+      settingsLayers={bootstrapResult.settingsLayers}
+      tuiApprover={tuiApprover}
     />,
   );
 }

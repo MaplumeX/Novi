@@ -30,7 +30,17 @@ import {
   resolveSettings,
   getAgentsMdCandidates,
   type ResolvedSettings,
+  type SettingsLayers,
 } from "./settings.js";
+import {
+  SessionPermissionStore,
+  createNonInteractivePermissionGate,
+  createPermissionGate,
+  resolvePermissionsFromSettings,
+  type Approver,
+  type PermissionGate,
+  type ResolvedPermissions,
+} from "./permissions/index.js";
 
 /** Default provider used when `--provider` is not given. */
 export const DEFAULT_PROVIDER = "anthropic";
@@ -56,6 +66,21 @@ export interface BootstrapOptions {
    * (backward compat). When `false`, only global resources are loaded.
    */
   trusted?: boolean;
+  /**
+   * Auto-approve tools that would ask (`ask→allow`). CLI `--yes`.
+   * Independent of project trust (`--approve`). Defaults to `false`.
+   */
+  yes?: boolean;
+  /**
+   * Interactive Approver for TUI. When omitted, a non-interactive
+   * (fail-closed) gate is used — headless/gateway path.
+   */
+  approver?: Approver;
+  /**
+   * Optional shared session permission store (survives harness rebuilds).
+   * When omitted, a fresh store is created.
+   */
+  permissionStore?: SessionPermissionStore;
 }
 
 export interface BootstrapResult {
@@ -81,6 +106,14 @@ export interface BootstrapResult {
   trusted: boolean;
   /** Scoped-model patterns from settings (for Ctrl+P cycling). */
   scopedModels: string[];
+  /** CLI `--yes`: ask→allow for this run. */
+  yes: boolean;
+  /** Runtime permission gate (bound to the current harness). */
+  permissionGate: PermissionGate;
+  /** Process-lifetime session grants (shared across harness rebuilds). */
+  permissionStore: SessionPermissionStore;
+  /** Settings layers used for tighten-only permission re-resolve on reload. */
+  settingsLayers: SettingsLayers;
 }
 
 /**
@@ -114,6 +147,19 @@ export interface GatewayEnv {
   followUpMode: QueueMode | undefined;
   /** Thinking level from settings/CLI. */
   thinkingLevel: ThinkingLevel;
+  /** CLI `--yes`: ask→allow. */
+  yes: boolean;
+  /** Resolved tool permissions (after defaults/global/project/yes). */
+  permissions: ResolvedPermissions;
+  /** Split settings layers (for permission re-resolve on /reload). */
+  settingsLayers: SettingsLayers;
+  /** Process-lifetime session grants. */
+  permissionStore: SessionPermissionStore;
+  /**
+   * Interactive Approver when TUI; undefined → non-interactive gate.
+   * Stored so createHarnessForSession / resume can build the gate.
+   */
+  approver: Approver | undefined;
 }
 
 /**
@@ -272,6 +318,14 @@ export async function prepareGatewayEnv(options: BootstrapOptions = {}): Promise
     },
   );
 
+  const yes = options.yes === true;
+  const permissions = resolvePermissionsFromSettings(resolvedSettings, {
+    yes,
+    layers: loadResult.layers,
+  });
+  const permissionStore = options.permissionStore ?? new SessionPermissionStore();
+  const approver = options.approver;
+
   const models = builtinModels();
   const custom = await loadCustomModels(env, cwd, { includeProject: trusted });
   for (const diagnostic of custom.diagnostics) {
@@ -319,6 +373,11 @@ export async function prepareGatewayEnv(options: BootstrapOptions = {}): Promise
     steeringMode: resolvedSettings.steeringMode,
     followUpMode: resolvedSettings.followUpMode,
     thinkingLevel: resolvedSettings.defaultThinkingLevel ?? DEFAULT_THINKING_LEVEL,
+    yes,
+    permissions,
+    settingsLayers: loadResult.layers,
+    permissionStore,
+    approver,
   };
 }
 
@@ -327,6 +386,7 @@ export interface CreatedSession {
   harness: AgentHarness;
   session: Session<JsonlSessionMetadata>;
   sessionPath: string;
+  permissionGate: PermissionGate;
 }
 
 /**
@@ -368,7 +428,13 @@ export async function createHarnessForSession(
     promptTemplates: resources.promptTemplates,
   });
 
-  registerHooks(harness, hookConfig, { env, cwd, sessionId: metadata.id });
+  const permissionGate = buildPermissionGate(gatewayEnv);
+  registerHooks(
+    harness,
+    hookConfig,
+    { env, cwd, sessionId: metadata.id },
+    { permissionGate },
+  );
 
   // Apply stream options when any are set (avoids a no-op setStreamOptions).
   const so = gatewayEnv.streamOptions;
@@ -383,7 +449,26 @@ export async function createHarnessForSession(
     await harness.setFollowUpMode(gatewayEnv.followUpMode);
   }
 
-  return { harness, session, sessionPath };
+  return { harness, session, sessionPath, permissionGate };
+}
+
+/** Build a PermissionGate from GatewayEnv (interactive or fail-closed). */
+export function buildPermissionGate(gatewayEnv: {
+  permissions: ResolvedPermissions;
+  permissionStore: SessionPermissionStore;
+  approver: Approver | undefined;
+}): PermissionGate {
+  if (gatewayEnv.approver) {
+    return createPermissionGate({
+      permissions: gatewayEnv.permissions,
+      approver: gatewayEnv.approver,
+      store: gatewayEnv.permissionStore,
+    });
+  }
+  return createNonInteractivePermissionGate({
+    permissions: gatewayEnv.permissions,
+    store: gatewayEnv.permissionStore,
+  });
 }
 
 /**
@@ -401,6 +486,7 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
   let session: Session<JsonlSessionMetadata>;
   let sessionPath: string;
   let harness: AgentHarness;
+  let permissionGate: PermissionGate;
 
   if (options.resumePath) {
     const { env } = gatewayEnv;
@@ -428,7 +514,13 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
       skills: gatewayEnv.resources.skills,
       promptTemplates: gatewayEnv.resources.promptTemplates,
     });
-    registerHooks(harness, gatewayEnv.hookConfig, { env, cwd: gatewayEnv.cwd, sessionId: metadata.id });
+    permissionGate = buildPermissionGate(gatewayEnv);
+    registerHooks(
+      harness,
+      gatewayEnv.hookConfig,
+      { env, cwd: gatewayEnv.cwd, sessionId: metadata.id },
+      { permissionGate },
+    );
     const so = gatewayEnv.streamOptions;
     if (Object.keys(so).length > 0) {
       await harness.setStreamOptions(so);
@@ -444,6 +536,7 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
     harness = created.harness;
     session = created.session;
     sessionPath = created.sessionPath;
+    permissionGate = created.permissionGate;
   }
 
   return {
@@ -463,5 +556,9 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
     },
     trusted: gatewayEnv.trusted,
     scopedModels: gatewayEnv.resolvedSettings.scopedModels ?? [],
+    yes: gatewayEnv.yes,
+    permissionGate,
+    permissionStore: gatewayEnv.permissionStore,
+    settingsLayers: gatewayEnv.settingsLayers,
   };
 }

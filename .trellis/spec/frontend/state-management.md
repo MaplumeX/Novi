@@ -79,12 +79,25 @@ const state = useHarnessState(handle.harness, handle.session, compactionSettings
 
 ### Overlay state
 
-`App.tsx` owns an `Overlay` union (`null | { kind: "settings" }`). When
+`App.tsx` owns an `Overlay` union (`null | { kind: "settings" } | …`). When
 non-null, the overlay component replaces `InputBox` in the render tree (see
 `component-guidelines.md` § "Overlay Pattern").
 
 ```tsx
 const [overlay, setOverlay] = useState<Overlay>(null);
+```
+
+### Permission prompt state
+
+Tool permission confirmation is **not** an Overlay variant: it comes from
+`TuiApprover.subscribe()` into `permissionPrompt` state. When non-null it
+takes render priority over InputBox/overlays so the in-flight turn can wait
+without flipping phase to idle. Esc/Ctrl-C while a prompt is active resolves
+as Deny via `tuiApprover.denyAll()`.
+
+```tsx
+const [permissionPrompt, setPermissionPrompt] = useState<PermissionPromptState | null>(null);
+useEffect(() => tuiApprover?.subscribe(setPermissionPrompt), [tuiApprover]);
 ```
 
 ### Pass slices, not the whole store

@@ -31,6 +31,7 @@ src/tui/
 ├── external-editor.ts     # Ctrl+G: tmp-file → spawn $VISUAL/$EDITOR → read back
 ├── file-picker.tsx        # @file overlay: fuzzy file list + loadFileCandidates
 ├── SettingsForm.tsx       # /settings overlay component
+├── PermissionPrompt.tsx   # Tool permission confirmation overlay (once/session/deny)
 ├── Markdown.tsx           # Renders a finalized assistant message via marked → Ink
 ├── commands.ts            # `/name args` command registry + parseCommand (pure)
 ├── commands.test.ts       # Co-located test for parseCommand

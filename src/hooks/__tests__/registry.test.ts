@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AgentHarness } from "@earendil-works/pi-agent-core/node";
-import { registerHooks, matcherMatches } from "../registry.js";
+import { registerHooks, matcherMatches, makeComposedToolCallDispatcher } from "../registry.js";
 import type { HookConfig, RegisterHooksDeps } from "../types.js";
+import {
+  PermissionGate,
+  SessionPermissionStore,
+  type Approver,
+} from "../../permissions/index.js";
 
 const deps: RegisterHooksDeps = { env: undefined, cwd: "/test", sessionId: "s1" };
 
@@ -105,5 +110,99 @@ describe("registerHooks", () => {
     const config: HookConfig = { events: new Map(), diagnostics: [] };
     registerHooks(harness, config, deps);
     expect(dispatchers.size).toBe(0);
+  });
+
+  it("registers tool_call when only permissionGate is provided (no user hooks)", () => {
+    const { harness, dispatchers } = makeMockHarness();
+    const gate = new PermissionGate({
+      permissions: { tools: { bash: "deny" } },
+      approver: { request: async () => "deny" },
+      store: new SessionPermissionStore(),
+    });
+    const config: HookConfig = { events: new Map(), diagnostics: [] };
+    registerHooks(harness, config, deps, { permissionGate: gate });
+    expect(dispatchers.has("tool_call")).toBe(true);
+  });
+
+  it("permission deny skips user hooks and sticks (AC12)", async () => {
+    const { harness, dispatchers } = makeMockHarness();
+    const userScript = vi.fn();
+    // Gate denies bash.
+    const gate = new PermissionGate({
+      permissions: { tools: { bash: "deny" } },
+      approver: { request: async () => "once" } as Approver,
+      store: new SessionPermissionStore(),
+    });
+    // User hooks present but must not run when gate denies.
+    const config: HookConfig = {
+      events: new Map([
+        ["tool_call", [{ matcher: "bash", hooks: [{ command: "should-not-run" }] }]],
+      ]),
+      diagnostics: [],
+    };
+    // Spy runHookScript via composed dispatcher unit test instead — invoke gate path:
+    registerHooks(harness, config, deps, { permissionGate: gate });
+    const dispatcher = dispatchers.get("tool_call")!;
+    const result = await dispatcher({
+      toolName: "bash",
+      toolCallId: "1",
+      input: { command: "ls" },
+    });
+    expect(result).toEqual({
+      block: true,
+      reason: "permission denied: bash (deny)",
+    });
+    void userScript;
+  });
+
+  it("user hook can still block after permission allow (AC11)", async () => {
+    const gate = new PermissionGate({
+      permissions: { tools: { bash: "allow" } },
+      approver: { request: async () => "deny" },
+      store: new SessionPermissionStore(),
+    });
+    const userDispatcher = vi.fn().mockResolvedValue({
+      block: true,
+      reason: "blocked by user hook",
+    });
+    const composed = makeComposedToolCallDispatcher(gate, userDispatcher);
+    const result = await composed({
+      toolName: "bash",
+      toolCallId: "1",
+      input: {},
+    });
+    expect(userDispatcher).toHaveBeenCalled();
+    expect(result).toEqual({ block: true, reason: "blocked by user hook" });
+  });
+
+  it("both allow → undefined", async () => {
+    const gate = new PermissionGate({
+      permissions: { tools: { bash: "allow" } },
+      approver: { request: async () => "deny" },
+      store: new SessionPermissionStore(),
+    });
+    const userDispatcher = vi.fn().mockResolvedValue(undefined);
+    const composed = makeComposedToolCallDispatcher(gate, userDispatcher);
+    const result = await composed({
+      toolName: "bash",
+      toolCallId: "1",
+      input: {},
+    });
+    expect(result).toBeUndefined();
+  });
+});
+
+describe("makeComposedToolCallDispatcher", () => {
+  it("permission deny does not invoke user dispatcher", async () => {
+    const gate = new PermissionGate({
+      permissions: { tools: { bash: "deny" } },
+      approver: { request: async () => "once" },
+      store: new SessionPermissionStore(),
+    });
+    const userDispatcher = vi.fn().mockResolvedValue({ block: false });
+    const composed = makeComposedToolCallDispatcher(gate, userDispatcher);
+    const result = await composed({ toolName: "bash", toolCallId: "1", input: {} });
+    expect(result).toMatchObject({ block: true });
+    expect(userDispatcher).not.toHaveBeenCalled();
   });
 });

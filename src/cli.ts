@@ -34,6 +34,7 @@ const { values, positionals } = parseArgs({
     mode: { type: "string" },
     approve: { type: "boolean", short: "a", default: false },
     "no-approve": { type: "boolean", default: false },
+    yes: { type: "boolean", default: false },
     transport: { type: "string" },
     "steering-mode": { type: "string" },
     "follow-up-mode": { type: "string" },
@@ -73,6 +74,7 @@ if (values.help) {
       "  --mode <mode>     Headless mode: \"json\" streams all events as JSONL",
       "  -a, --approve     Trust project-local files for this run",
       "  --no-approve      Ignore project-local files for this run",
+      "  --yes             Auto-approve tools that would ask (ask→allow). Not project trust.",
       "  --transport <t>   Provider transport: sse|websocket|websocket-cached|auto",
       "  --steering-mode <m>   Steering queue mode: one-at-a-time|all",
       "  --follow-up-mode <m>  Follow-up queue mode: one-at-a-time|all",
@@ -123,6 +125,7 @@ const bootstrapOptions = {
   cwd: values.cwd,
   ...cliOverrides,
   resumePath: values.resume,
+  yes: values.yes === true,
 };
 
 // Pre-bootstrap credential probe. The check runs before bootstrap() so the
@@ -252,14 +255,26 @@ async function main(): Promise<void> {
       await runGateway({ ...bootstrapOptions, trusted, configPath: values.config });
       return;
     }
-    const result = await bootstrap({ ...bootstrapOptions, trusted });
+
+    // TUI path: interactive Approver. Headless (print/json) stays fail-closed.
+    let tuiApprover: import("./permissions/index.js").TuiApprover | undefined;
+    if (!values.print && values.mode !== "json") {
+      const { TuiApprover } = await import("./permissions/index.js");
+      tuiApprover = new TuiApprover();
+    }
+
+    const result = await bootstrap({
+      ...bootstrapOptions,
+      trusted,
+      approver: tuiApprover,
+    });
 
     if (values.print) {
       await runPrint({ result, prompt: promptText });
     } else if (values.mode === "json") {
       await runJson({ result, prompt: promptText });
     } else {
-      renderApp(result, getSessionsDir());
+      renderApp(result, getSessionsDir(), tuiApprover);
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

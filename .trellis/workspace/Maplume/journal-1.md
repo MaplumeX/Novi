@@ -1017,3 +1017,37 @@ Researched 5 open-source multi-channel agent gateways (pi-gateway/tia-gateway/im
 ### Next Steps
 
 - None - task complete
+
+
+## Session 31: Tool permission model for Novi agent harness
+
+**Date**: 2026-07-09
+**Task**: Tool permission model for Novi agent harness
+**Branch**: `main`
+
+### Summary
+
+Built-in tool permission gate: default bash=ask with TUI once/session/deny, headless fail-closed + --yes escape hatch, project tighten-only merge, deny-sticky compose with user hooks, session grants across /reload. Specs and ARCHITECTURE updated; 487 tests green.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `17c2333` | (see git log) |
+| `88ff434` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 30
-- **Last Active**: 2026-07-05
+- **Total Sessions**: 31
+- **Last Active**: 2026-07-09
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1019 | Active |
+| `journal-1.md` | ~1053 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 31 | 2026-07-09 | Tool permission model for Novi agent harness | `17c2333`, `88ff434` | `main` |
 | 30 | 2026-07-05 | 改进 Novi agent 上下文压缩的摘要生成 | `ee56679`, `34e967d`, `fe194e0` | `main` |
 | 29 | 2026-07-04 | Novi multi-channel gateway (Telegram MVP) | `35f4a0e`, `26d4627`, `0116dd6` | `main` |
 | 28 | 2026-07-04 | Redesign tool call TUI styling (Claude Code style) | `3f5b615` | `main` |

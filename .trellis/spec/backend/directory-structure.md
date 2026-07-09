@@ -24,7 +24,7 @@ src/
 ├── bootstrap.ts            # Wires env / session / models / harness / tools / resources
 ├── config.ts               # Path resolution (~/.novi, sessions, system-prompt candidates)
 ├── default-system-prompt.ts# Fallback system prompt constant
-├── resources.ts            # Loads skills + prompt templates (user → project layers)
+├── resources.ts            # Loads skills + prompt templates (agents/novi layers + git-root chain)
 ├── compaction.ts           # AutoCompactor: turn debounce + threshold check
 ├── *.test.ts               # Co-located tests alongside their source
 ├── tools/                  # Built-in tool set, one file per tool

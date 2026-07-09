@@ -63,15 +63,24 @@ export function __resetTodoStoreForTests(): void { store.clear(); }
 
 ## Resource Loading
 
-`resources.ts` loads skills + prompt templates from two layers:
+`resources.ts` loads skills + prompt templates.
 
-1. User-level: `~/.novi/skills`, `~/.novi/prompts`
-2. Project-level: `<cwd>/.novi/skills`, `<cwd>/.novi/prompts`
+**Skill sources** (later wins on name collision; see D4):
 
-Skills are deduplicated by name with **project overriding user** (project is
-scanned after user). Prompt templates are not deduplicated. Loaders skip
-invalid files and collect `diagnostics` instead of throwing — load failures are
-non-fatal warnings.
+1. User: `~/.agents/skills` (never trust-gated)
+2. User: `~/.novi/skills` (never trust-gated)
+3. Project: each `dir/.agents/skills` from git root → cwd (trust-gated;
+   non-git trees scan only `<cwd>/.agents/skills`)
+4. Project: `<cwd>/.novi/skills` (trust-gated)
+
+**Prompt templates** remain two-layer only:
+`~/.novi/prompts` + (when trusted) `<cwd>/.novi/prompts`.
+
+Skills are deduplicated by name with **later sources overriding earlier**.
+Prompt templates are not deduplicated. Loaders skip invalid files and collect
+`diagnostics` instead of throwing — load failures are non-fatal warnings.
+`hasGatedResources` treats project `.agents/skills` (git-root→cwd) as gated,
+alongside `<cwd>/.novi/{settings,models,skills,prompts}`.
 
 ---
 

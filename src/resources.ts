@@ -8,6 +8,7 @@ import type {
   PromptTemplate,
 } from "@earendil-works/pi-agent-core/node";
 import { getNoviDir } from "./config.js";
+import os from "node:os";
 import path from "node:path";
 
 /** Resources loaded for the harness: model-visible skills + prompt templates. */
@@ -18,34 +19,105 @@ export interface LoadedResources {
   diagnostics: string[];
 }
 
+export type SkillSource = { path: string; source: "user" | "project" };
+
 /**
- * Load skills and prompt templates from user-level (`~/.novi`) and project-level
- * (`<cwd>/.novi`) directories.
+ * Walk parents from `cwd` looking for a `.git` file or directory.
+ * Returns the directory containing `.git`, or `null` if none is found
+ * before the filesystem root. Pure env IO — no child_process.
+ */
+export async function findGitRoot(
+  env: ExecutionEnv,
+  cwd: string,
+): Promise<string | null> {
+  let dir = path.resolve(cwd);
+  for (;;) {
+    const info = await env.fileInfo(path.join(dir, ".git"));
+    if (info.ok) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+
+/**
+ * Collect absolute directories from `root` down to `cwd` (inclusive),
+ * walking upward from cwd and reversing so the result is root → cwd.
+ */
+function collectAncestorsRootToCwd(root: string, cwd: string): string[] {
+  const absRoot = path.resolve(root);
+  const absCwd = path.resolve(cwd);
+  const stack: string[] = [];
+  let dir = absCwd;
+  for (;;) {
+    stack.push(dir);
+    if (dir === absRoot) break;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return stack.reverse();
+}
+
+/**
+ * Resolve skill source directories in D4 load order (later wins on name
+ * collision):
  *
- * Skills are deduplicated by name with **project overriding user** (project is
- * scanned after user, so it wins in the dedupe map). Prompt templates are not
- * deduplicated — both layers are passed through. Missing directories are skipped
- * by the loaders, so no existence filtering is needed here.
+ * 1. `~/.agents/skills` (user, never trust-gated)
+ * 2. `~/.novi/skills` (user, never trust-gated)
+ * 3. each `dir/.agents/skills` from git root → cwd (project, gated)
+ * 4. `<cwd>/.novi/skills` (project, gated)
  *
- * `NodeExecutionEnv` does not expand `~`, so the user path is resolved with
- * `os.homedir()` via {@link getNoviDir}.
+ * Non-git trees degenerate to `[cwd]` for the project `.agents` scan.
+ * Project sources are omitted when `includeProject` is false.
+ */
+export async function resolveSkillSources(
+  env: ExecutionEnv,
+  cwd: string,
+  opts: { includeProject?: boolean } = {},
+): Promise<SkillSource[]> {
+  const home = os.homedir();
+  const sources: SkillSource[] = [
+    { path: path.join(home, ".agents", "skills"), source: "user" },
+    { path: path.join(getNoviDir(), "skills"), source: "user" },
+  ];
+
+  if (opts.includeProject === false) return sources;
+
+  const gitRoot = await findGitRoot(env, cwd);
+  const ancestors = gitRoot
+    ? collectAncestorsRootToCwd(gitRoot, cwd)
+    : [path.resolve(cwd)];
+
+  for (const dir of ancestors) {
+    sources.push({ path: path.join(dir, ".agents", "skills"), source: "project" });
+  }
+  sources.push({ path: path.join(cwd, ".novi", "skills"), source: "project" });
+  return sources;
+}
+
+/**
+ * Load skills and prompt templates from user-level and project-level
+ * directories (see {@link resolveSkillSources} for skill path precedence).
+ *
+ * Skills are deduplicated by name with **later sources overriding earlier**
+ * (project near cwd / `.novi` wins over user / distant ancestors). Prompt
+ * templates are not deduplicated — both layers are passed through. Missing
+ * directories are skipped by the loaders, so no existence filtering is needed.
+ *
+ * `NodeExecutionEnv` does not expand `~`, so user paths are resolved with
+ * `os.homedir()` / {@link getNoviDir}.
  */
 export async function loadResources(
   env: ExecutionEnv,
   cwd: string,
   opts: { includeProject?: boolean } = {},
 ): Promise<LoadedResources> {
-  const userSkillsDir = path.join(getNoviDir(), "skills");
   const userPromptsDir = path.join(getNoviDir(), "prompts");
 
-  // Project layer (skills/prompts) is loaded only when trusted (gate). When
-  // `includeProject` is false, scan only the user-level directories.
-  const skillSources: Array<{ path: string; source: "user" | "project" }> = [
-    { path: userSkillsDir, source: "user" },
-  ];
+  const skillSources = await resolveSkillSources(env, cwd, opts);
   const promptDirs: string[] = [userPromptsDir];
   if (opts.includeProject !== false) {
-    skillSources.push({ path: path.join(cwd, ".novi", "skills"), source: "project" });
     promptDirs.push(path.join(cwd, ".novi", "prompts"));
   }
 
@@ -54,7 +126,7 @@ export async function loadResources(
     skillSources,
   );
   // Dedupe by name: later entries overwrite earlier ones. The loader returns
-  // skills in input order (user → project), so project wins.
+  // skills in input order (sources order), so later sources win.
   const byName = new Map<string, Skill>();
   for (const { skill } of skills) byName.set(skill.name, skill);
 

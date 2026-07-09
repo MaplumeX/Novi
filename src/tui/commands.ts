@@ -46,6 +46,32 @@ export function parseCommand(line: string): ParsedCommand {
   };
 }
 
+/** Result of classifying a slash command as a skill invoke. */
+export type SkillCommandParse =
+  | { kind: "skill"; skillName: string; additionalInstructions?: string }
+  | { kind: "not-skill" }
+  | { kind: "invalid"; reason: string };
+
+/**
+ * Classify a parsed slash command as a `/skill:name [args]` invoke.
+ *
+ * Pure function for unit testing. Only the `skill:` prefix form is accepted
+ * (D1) — bare `/skill name` is not a skill command.
+ */
+export function parseSkillCommand(name: string, args: string): SkillCommandParse {
+  if (!name.startsWith("skill:")) return { kind: "not-skill" };
+  const skillName = name.slice("skill:".length);
+  if (!skillName) {
+    return { kind: "invalid", reason: "Usage: /skill:<name> [args]" };
+  }
+  const trimmed = args.trim();
+  return {
+    kind: "skill",
+    skillName,
+    ...(trimmed ? { additionalInstructions: trimmed } : {}),
+  };
+}
+
 export interface CommandContext {
   harness: AgentHarness;
   models: Models;
@@ -528,6 +554,9 @@ export const COMMANDS: readonly Command[] = [
   },
 ];
 
+const COMMAND_HINT =
+  "Try /quit /model /session /new /resume /name /compact /settings /trust /scoped-models /reload /skill:<name>.";
+
 /** Execute a `/name args` input line against the registry. */
 export async function runCommand(
   line: string,
@@ -535,9 +564,37 @@ export async function runCommand(
 ): Promise<void> {
   const { name, args } = parseCommand(line);
   if (!name) {
-    ctx.print("Empty command. Try /quit /model /session /new /resume /name /compact /settings /trust /scoped-models /reload.");
+    ctx.print(`Empty command. ${COMMAND_HINT}`);
     return;
   }
+
+  // Skill invoke takes priority over static COMMANDS and prompt-template fallback (R7).
+  const skillCmd = parseSkillCommand(name, args);
+  if (skillCmd.kind === "invalid") {
+    ctx.print(skillCmd.reason);
+    return;
+  }
+  if (skillCmd.kind === "skill") {
+    if (!ctx.isIdle) {
+      ctx.print(`Harness is busy; /skill:${skillCmd.skillName} requires idle.`);
+      return;
+    }
+    const skills = ctx.harness.getResources().skills ?? [];
+    if (!skills.some((s) => s.name === skillCmd.skillName)) {
+      ctx.print(`Unknown skill: ${skillCmd.skillName}`);
+      return;
+    }
+    ctx.print(`Invoking skill: ${skillCmd.skillName}`);
+    const invoke =
+      skillCmd.additionalInstructions !== undefined
+        ? ctx.harness.skill(skillCmd.skillName, skillCmd.additionalInstructions)
+        : ctx.harness.skill(skillCmd.skillName);
+    invoke.catch((e: unknown) => {
+      ctx.print(`Skill failed: ${e instanceof Error ? e.message : String(e)}`);
+    });
+    return;
+  }
+
   const command = COMMANDS.find((c) => c.name === name);
   if (command) {
     await command.run(ctx, args);
@@ -559,5 +616,5 @@ export async function runCommand(
     });
     return;
   }
-  ctx.print(`Unknown command: /${name}. Try /quit /model /session /new /resume /name /compact /settings /trust /scoped-models /reload.`);
+  ctx.print(`Unknown command: /${name}. ${COMMAND_HINT}`);
 }

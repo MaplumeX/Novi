@@ -25,6 +25,9 @@ import { loadFileCandidates } from "./file-picker.js";
 import { theme, divider, icons } from "./theme.js";
 import { Spinner } from "./components/Spinner.js";
 
+/** A slash-completable item (static command or dynamic skill). */
+export type SlashItem = { name: string; description: string };
+
 interface InputBoxProps {
   phase: Phase;
   cwd: string;
@@ -54,6 +57,35 @@ interface InputBoxProps {
   onCycleThinking: () => void;
   /** Terminal width for full-width dividers. */
   terminalWidth: number;
+  /** Loaded skills shown as `skill:<name>` in the slash list. */
+  skills?: readonly { name: string; description: string }[];
+}
+
+/**
+ * Build the full slash-completion list from static commands + loaded skills.
+ * Pure helper so filtering is unit-testable without Ink.
+ */
+export function buildSlashItems(
+  skills?: readonly { name: string; description: string }[],
+): SlashItem[] {
+  const skillItems = (skills ?? []).map((s) => ({
+    name: `skill:${s.name}`,
+    description: s.description,
+  }));
+  return [
+    ...COMMANDS.map((c) => ({ name: c.name, description: c.description })),
+    ...skillItems,
+  ];
+}
+
+/** Filter slash items by query (case-insensitive substring match on name). */
+export function filterSlashItems(
+  items: readonly SlashItem[],
+  query: string,
+): SlashItem[] {
+  if (!query) return [...items];
+  const q = query.toLowerCase();
+  return items.filter((item) => item.name.toLowerCase().includes(q));
 }
 
 /**
@@ -83,6 +115,7 @@ export function InputBox({
   onHistoryDown,
   onCycleThinking,
   terminalWidth,
+  skills,
 }: InputBoxProps): React.ReactElement {
   // --- Slash command list state ---
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
@@ -92,10 +125,9 @@ export function InputBox({
   const slashQuery = state.text.startsWith("/")
     ? (state.text.slice(1).split(/\s/)[0] ?? "")
     : "";
+  const allSlashItems = buildSlashItems(skills);
   const matchedCommands = state.text.startsWith("/")
-    ? slashQuery
-      ? COMMANDS.filter((c) => c.name.toLowerCase().includes(slashQuery.toLowerCase()))
-      : [...COMMANDS]
+    ? filterSlashItems(allSlashItems, slashQuery)
     : [];
   const slashListOpen = state.text.startsWith("/") && !slashDismissed;
   const slashActive = slashListOpen && matchedCommands.length > 0;

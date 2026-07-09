@@ -33,8 +33,8 @@ src/tui/
 ├── SettingsForm.tsx       # /settings overlay component
 ├── PermissionPrompt.tsx   # Tool permission confirmation overlay (once/session/deny)
 ├── Markdown.tsx           # Renders a finalized assistant message via marked → Ink
-├── commands.ts            # `/name args` command registry + parseCommand (pure)
-├── commands.test.ts       # Co-located test for parseCommand
+├── commands.ts            # `/name args` registry + parseCommand + /skill: routing (pure)
+├── commands.test.ts       # Co-located tests for parseCommand / skill invoke
 └── markdown/
     └── render-token.tsx   # Pure marked-token → Ink element mapping
 ```

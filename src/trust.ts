@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { ExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import { getNoviDir } from "./config.js";
+import { findGitRoot } from "./resources.js";
 
 /** A persisted trust decision. `"ask"` is never persisted (default-driven). */
 export type TrustDecision = "always" | "never" | "ask";
@@ -101,12 +102,13 @@ export function resolveProjectTrust(
 }
 
 /**
- * Check whether `<cwd>/.novi/` exists and contains any gated resource:
- * `settings.json`, `skills/` (dir), `prompts/` (dir), or `models.json`.
+ * Check whether the project has any gated resource that should trigger the
+ * trust prompt:
+ * - `<cwd>/.novi/{settings.json,models.json,skills,prompts}`
+ * - any `dir/.agents/skills` from git root → cwd (or just cwd when not a git tree)
  *
- * Returns `false` when `.novi/` is absent or holds none of these (no gate
- * necessary). `models.json` may not exist yet if child 1 is not implemented;
- * its absence is fine — the gate still triggers on the other resources.
+ * User-level `~/.agents/skills` is never gated. Returns `false` when nothing
+ * gated is present (no trust prompt needed).
  */
 export async function hasGatedResources(
   env: ExecutionEnv,
@@ -122,6 +124,19 @@ export async function hasGatedResources(
   for (const candidate of candidates) {
     const info = await env.fileInfo(candidate);
     if (info.ok) return true; // exists (file or dir)
+  }
+
+  // Project-side shared skills: scan git-root → cwd (or just cwd if not git).
+  const gitRoot = await findGitRoot(env, cwd);
+  let dir = path.resolve(cwd);
+  const stopAt = gitRoot ? path.resolve(gitRoot) : dir;
+  for (;;) {
+    const info = await env.fileInfo(path.join(dir, ".agents", "skills"));
+    if (info.ok) return true;
+    if (dir === stopAt) break;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
   }
   return false;
 }

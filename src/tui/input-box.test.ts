@@ -1,8 +1,47 @@
 import { describe, expect, it } from "vitest";
-import { completeSlashSelection } from "./InputBox.js";
+import {
+  completeSlashSelection,
+  buildSlashItems,
+  filterSlashItems,
+} from "./InputBox.js";
 import type { Command } from "./commands.js";
+import { COMMANDS } from "./commands.js";
 
 const cmd = (name: string): { name: string } => ({ name });
+
+describe("buildSlashItems / filterSlashItems", () => {
+  it("includes skill:<name> entries with descriptions", () => {
+    const items = buildSlashItems([
+      { name: "review", description: "Review code" },
+      { name: "deploy", description: "Deploy app" },
+    ]);
+    const skillItems = items.filter((i) => i.name.startsWith("skill:"));
+    expect(skillItems).toEqual([
+      { name: "skill:review", description: "Review code" },
+      { name: "skill:deploy", description: "Deploy app" },
+    ]);
+    // Static commands still present.
+    expect(items.some((i) => i.name === "quit")).toBe(true);
+    expect(items.length).toBe(COMMANDS.length + 2);
+  });
+
+  it("filters by query matching skill: prefix or skill name", () => {
+    const items = buildSlashItems([{ name: "review", description: "Review code" }]);
+    const bySkill = filterSlashItems(items, "skill");
+    expect(bySkill.some((i) => i.name === "skill:review")).toBe(true);
+
+    const byName = filterSlashItems(items, "review");
+    expect(byName.map((i) => i.name)).toEqual(["skill:review"]);
+
+    const empty = filterSlashItems(items, "zzz-no-match");
+    expect(empty).toEqual([]);
+  });
+
+  it("returns all items when query is empty", () => {
+    const items = buildSlashItems([{ name: "a", description: "A" }]);
+    expect(filterSlashItems(items, "")).toEqual(items);
+  });
+});
 
 describe("completeSlashSelection", () => {
   it("single match: completes to `/<name> ` with trailing space (no args)", () => {

@@ -365,6 +365,7 @@ function App({
           onHistoryUp={handleHistoryUp}
           onHistoryDown={handleHistoryDown}
           terminalWidth={terminalWidth}
+          skills={handle.harness.getResources().skills}
         />
       ) : overlay.kind === "settings" ? (
         <SettingsForm

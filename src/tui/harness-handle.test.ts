@@ -53,12 +53,20 @@ function makeModels(): Models {
 
 describe("replayHarnessState", () => {
   const cleanups: Array<() => Promise<void>> = [];
+  const realHome = process.env.HOME;
+  let home: string | undefined;
 
   afterEach(async () => {
     while (cleanups.length) await cleanups.pop()!();
+    if (home) await rm(home, { recursive: true, force: true });
+    home = undefined;
+    process.env.HOME = realHome;
   });
 
   async function setup(): Promise<{ env: NodeExecutionEnv; cwd: string; models: Models }> {
+    // Isolate ~/.agents/skills + ~/.novi so real user skills never leak into reload tests.
+    home = await mkdtemp(path.join(tmpdir(), "novi-replay-home-"));
+    process.env.HOME = home;
     const cwd = await mkdtemp(path.join(tmpdir(), "novi-replay-"));
     const env = new NodeExecutionEnv({ cwd, shellEnv: process.env });
     const models = makeModels();

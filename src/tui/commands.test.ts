@@ -1,20 +1,33 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { parseCommand, runCommand, nextThinkingLevel, THINKING_LEVELS } from "./commands.js";
+import {
+  parseCommand,
+  parseSkillCommand,
+  runCommand,
+  nextThinkingLevel,
+  THINKING_LEVELS,
+} from "./commands.js";
 import type { CommandContext } from "./commands.js";
 
-/** Build a mock CommandContext with a fake harness carrying promptTemplates + prompt spy. */
+/** Build a mock CommandContext with a fake harness carrying resources + spies. */
 function makeCtx(opts: {
   promptTemplates?: Array<{ name: string; description?: string; content: string }>;
+  skills?: Array<{ name: string; description?: string }>;
   isIdle?: boolean;
-}): { ctx: CommandContext; promptSpy: ReturnType<typeof vi.fn> } {
+}): {
+  ctx: CommandContext;
+  promptSpy: ReturnType<typeof vi.fn>;
+  skillSpy: ReturnType<typeof vi.fn>;
+} {
   const promptSpy = vi.fn().mockResolvedValue(undefined);
+  const skillSpy = vi.fn().mockResolvedValue(undefined);
   const ctx = {
     harness: {
       getResources: () => ({
-        skills: [],
+        skills: opts.skills ?? [],
         promptTemplates: opts.promptTemplates ?? [],
       }),
       prompt: promptSpy,
+      skill: skillSpy,
     },
     models: { getModel: () => ({ provider: "p", id: "m" }) },
     session: {},
@@ -32,7 +45,7 @@ function makeCtx(opts: {
     settings: { _sources: {} },
     queue: { steer: [], followUp: [], nextTurn: [] },
   } as unknown as CommandContext;
-  return { ctx, promptSpy };
+  return { ctx, promptSpy, skillSpy };
 }
 
 /** Build a ctx with a real temp env + cwd so /trust can hit the filesystem. */
@@ -223,7 +236,10 @@ describe("runCommand — prompt-template fallback", () => {
     await runCommand("/nonexistent", ctx);
     expect(promptSpy).not.toHaveBeenCalled();
     expect(ctx.print).toHaveBeenCalledWith(
-      "Unknown command: /nonexistent. Try /quit /model /session /new /resume /name /compact /settings /trust /scoped-models /reload.",
+      expect.stringContaining("Unknown command: /nonexistent."),
+    );
+    expect(ctx.print).toHaveBeenCalledWith(
+      expect.stringContaining("/skill:<name>"),
     );
   });
 
@@ -231,8 +247,109 @@ describe("runCommand — prompt-template fallback", () => {
     const { ctx } = makeCtx({});
     await runCommand("/", ctx);
     expect(ctx.print).toHaveBeenCalledWith(
-      "Empty command. Try /quit /model /session /new /resume /name /compact /settings /trust /scoped-models /reload.",
+      expect.stringContaining("Empty command."),
     );
+    expect(ctx.print).toHaveBeenCalledWith(
+      expect.stringContaining("/skill:<name>"),
+    );
+  });
+});
+
+describe("parseSkillCommand", () => {
+  it("returns not-skill for ordinary command names", () => {
+    expect(parseSkillCommand("model", "")).toEqual({ kind: "not-skill" });
+    expect(parseSkillCommand("skill", "foo")).toEqual({ kind: "not-skill" });
+  });
+
+  it("returns invalid for empty skill name", () => {
+    expect(parseSkillCommand("skill:", "")).toEqual({
+      kind: "invalid",
+      reason: "Usage: /skill:<name> [args]",
+    });
+  });
+
+  it("parses skill name without args", () => {
+    expect(parseSkillCommand("skill:review", "")).toEqual({
+      kind: "skill",
+      skillName: "review",
+    });
+  });
+
+  it("parses skill name with args as additionalInstructions", () => {
+    expect(parseSkillCommand("skill:review", "  focus security  ")).toEqual({
+      kind: "skill",
+      skillName: "review",
+      additionalInstructions: "focus security",
+    });
+  });
+});
+
+describe("runCommand — skill invoke", () => {
+  it("invokes harness.skill without second arg when no args", async () => {
+    const { ctx, skillSpy, promptSpy } = makeCtx({
+      skills: [{ name: "foo", description: "Foo skill" }],
+    });
+    await runCommand("/skill:foo", ctx);
+    expect(skillSpy).toHaveBeenCalledOnce();
+    expect(skillSpy.mock.calls[0]).toEqual(["foo"]);
+    expect(promptSpy).not.toHaveBeenCalled();
+    expect(ctx.print).toHaveBeenCalledWith("Invoking skill: foo");
+  });
+
+  it("passes args as additionalInstructions verbatim", async () => {
+    const { ctx, skillSpy } = makeCtx({
+      skills: [{ name: "foo", description: "Foo skill" }],
+    });
+    await runCommand("/skill:foo bar baz", ctx);
+    expect(skillSpy).toHaveBeenCalledWith("foo", "bar baz");
+  });
+
+  it("reports unknown skill without calling harness", async () => {
+    const { ctx, skillSpy } = makeCtx({ skills: [] });
+    await runCommand("/skill:missing", ctx);
+    expect(skillSpy).not.toHaveBeenCalled();
+    expect(ctx.print).toHaveBeenCalledWith("Unknown skill: missing");
+  });
+
+  it("rejects skill invoke when harness is busy", async () => {
+    const { ctx, skillSpy } = makeCtx({
+      skills: [{ name: "foo" }],
+      isIdle: false,
+    });
+    await runCommand("/skill:foo", ctx);
+    expect(skillSpy).not.toHaveBeenCalled();
+    expect(ctx.print).toHaveBeenCalledWith(
+      expect.stringMatching(/busy|idle/i),
+    );
+  });
+
+  it("does not fall through to prompt-template for skill: names", async () => {
+    const { ctx, skillSpy, promptSpy } = makeCtx({
+      skills: [{ name: "foo" }],
+      promptTemplates: [{ name: "skill:foo", content: "template should not run" }],
+    });
+    await runCommand("/skill:foo", ctx);
+    expect(skillSpy).toHaveBeenCalledOnce();
+    expect(promptSpy).not.toHaveBeenCalled();
+  });
+
+  it("prints usage for empty skill name and does not call harness", async () => {
+    const { ctx, skillSpy } = makeCtx({ skills: [{ name: "foo" }] });
+    await runCommand("/skill:", ctx);
+    expect(skillSpy).not.toHaveBeenCalled();
+    expect(ctx.print).toHaveBeenCalledWith("Usage: /skill:<name> [args]");
+  });
+
+  it("surfaces harness.skill rejection as a notice", async () => {
+    const { ctx, skillSpy } = makeCtx({
+      skills: [{ name: "foo" }],
+    });
+    skillSpy.mockRejectedValueOnce(new Error("boom"));
+    await runCommand("/skill:foo", ctx);
+    // Let the rejected promise settle.
+    await vi.waitFor(() => {
+      expect(ctx.print).toHaveBeenCalledWith("Skill failed: boom");
+    });
   });
 });
 

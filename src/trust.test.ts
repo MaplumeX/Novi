@@ -178,4 +178,34 @@ describe("hasGatedResources", () => {
     await writeFile(path.join(cwd, ".novi", "models.json"), "{}");
     expect(await hasGatedResources(env, cwd)).toBe(true);
   });
+
+  it("returns true when <cwd>/.agents/skills exists", async () => {
+    const { env, cwd } = await setupEnv();
+    await mkdir(path.join(cwd, ".agents", "skills"), { recursive: true });
+    expect(await hasGatedResources(env, cwd)).toBe(true);
+  });
+
+  it("returns true when an ancestor .agents/skills exists under git root", async () => {
+    const { env, cwd } = await setupEnv();
+    await mkdir(path.join(cwd, ".git"), { recursive: true });
+    await mkdir(path.join(cwd, ".agents", "skills"), { recursive: true });
+    const deep = path.join(cwd, "a", "b");
+    await mkdir(deep, { recursive: true });
+    expect(await hasGatedResources(env, deep)).toBe(true);
+  });
+
+  it("does not treat parent .agents/skills as gated when not a git tree", async () => {
+    const { env, cwd } = await setupEnv();
+    // Parent has .agents/skills but no .git → non-git scan is cwd-only.
+    await mkdir(path.join(cwd, ".agents", "skills"), { recursive: true });
+    const child = path.join(cwd, "child");
+    await mkdir(child, { recursive: true });
+    expect(await hasGatedResources(env, child)).toBe(false);
+  });
+
+  it("does not treat ~/.agents/skills as gated", async () => {
+    const { env, cwd } = await setupEnv();
+    await mkdir(path.join(home, ".agents", "skills"), { recursive: true });
+    expect(await hasGatedResources(env, cwd)).toBe(false);
+  });
 });

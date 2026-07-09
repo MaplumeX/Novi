@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "permissions module layout must follow backend directory conventions"}
+{"file": ".trellis/spec/backend/pi-agent-core-api.md", "reason": "tool_call hook contract and emitHook last-wins semantics for gate compose"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "degraded config loading and non-fatal diagnostics patterns"}
+{"file": ".trellis/tasks/07-09-tool-permission-model/design.md", "reason": "authoritative technical design for permission gate"}
+{"file": ".trellis/tasks/07-09-tool-permission-model/prd.md", "reason": "requirements D1-D6 and acceptance criteria"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "TUI phase/overlay state for permission prompt"}
+{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "where TUI permission UI files should live"}

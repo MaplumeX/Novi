@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/pi-agent-core-api.md", "reason": "verify tool_call compose does not break harness hook contract"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "verify new permissions/ files land in correct layout"}
+{"file": ".trellis/tasks/07-09-tool-permission-model/prd.md", "reason": "acceptance criteria AC1-AC14"}
+{"file": ".trellis/tasks/07-09-tool-permission-model/design.md", "reason": "design constraints: tighten-only, deny sticky, session store lifecycle"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "permission prompt must not break harness state boundary"}

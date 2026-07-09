@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/07-09-skills-first-class/prd.md", "reason": "Acceptance criteria AC1-AC9 for verification"}
+{"file": ".trellis/tasks/07-09-skills-first-class/design.md", "reason": "Contracts for skill discovery, trust gating, command routing, slash list"}
+{"file": ".trellis/spec/backend/pi-agent-core-api.md", "reason": "Verify harness.skill idle requirement and resources replay semantics"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Verify unknown/busy skill failures stay non-fatal notices"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "TUI quality bar for slash UX and command handling"}

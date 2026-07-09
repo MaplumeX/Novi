@@ -1,0 +1,8 @@
+{"file": ".trellis/tasks/07-09-skills-first-class/prd.md", "reason": "Requirements R1-R7, decisions D1-D5, acceptance criteria for skills first-class"}
+{"file": ".trellis/tasks/07-09-skills-first-class/design.md", "reason": "Technical design: discovery order, trust, /skill: routing, slash autocomplete"}
+{"file": ".trellis/tasks/07-09-skills-first-class/implement.md", "reason": "Ordered implementation checklist and validation gates"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "resources.ts ownership and backend layout conventions"}
+{"file": ".trellis/spec/backend/pi-agent-core-api.md", "reason": "harness.skill, setResources, formatSkillsForSystemPrompt, system prompt assembly"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "resources loader diagnostics and non-fatal command errors"}
+{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "TUI commands/InputBox placement"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "How App/InputBox should consume harness resources without new event owners"}

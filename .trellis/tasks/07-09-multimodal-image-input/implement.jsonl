@@ -1,0 +1,12 @@
+{"file": ".trellis/tasks/07-09-multimodal-image-input/prd.md", "reason": "Requirements R1-R6, decisions, acceptance AC1-AC12"}
+{"file": ".trellis/tasks/07-09-multimodal-image-input/design.md", "reason": "Encode/clipboard/pending/submit/MessageList architecture and contracts"}
+{"file": ".trellis/tasks/07-09-multimodal-image-input/implement.md", "reason": "Ordered implementation checklist and validation gates"}
+{"file": "src/tui/App.tsx", "reason": "prompt/steer/followUp call sites and overlay ownership"}
+{"file": "src/tui/commands.ts", "reason": "slash command registry and CommandContext extension points"}
+{"file": "src/tui/InputBox.tsx", "reason": "key handling (Ctrl+I) and editor submit paths"}
+{"file": "src/tui/MessageList.tsx", "reason": "user message rendering needs image count badge"}
+{"file": "src/tui/file-picker.tsx", "reason": "extend with image extension filter for /image picker"}
+{"file": "src/tui/queue-helpers.ts", "reason": "messageText already skips non-text; confirm restore stays text-only"}
+{"file": ".trellis/spec/backend/pi-agent-core-api.md", "reason": "document prompt/steer/followUp images options"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "new src/images/ module placement"}
+{"file": "ARCHITECTURE.md", "reason": "sync TUI attachment model and commands"}

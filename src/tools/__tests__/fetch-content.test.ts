@@ -1,5 +1,14 @@
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getTool, setupEnv } from "./helpers.js";
+
+let mockedNoviDir = "";
+vi.mock("../../config.js", async (importActual) => {
+  const actual = (await importActual()) as Record<string, unknown>;
+  return { ...actual, getNoviDir: () => mockedNoviDir };
+});
 
 /** A realistic HTML fixture with enough content for Readability to keep it. */
 const ARTICLE_HTML = `<!DOCTYPE html>
@@ -38,6 +47,7 @@ function mockResponse(body: string, contentType = "text/html; charset=utf-8", st
 
 describe("fetch_content tool", () => {
   afterEach(() => {
+    mockedNoviDir = "";
     vi.restoreAllMocks();
   });
 
@@ -157,6 +167,8 @@ describe("fetch_content tool", () => {
 
   it("truncates long content and stores full text with footer", async () => {
     const { env, cleanup } = await setupEnv();
+    const noviDir = await mkdtemp(path.join(tmpdir(), "novi-fetch-content-"));
+    mockedNoviDir = noviDir;
     try {
       // Build HTML with many paragraphs to exceed char_limit
       const paras = Array.from({ length: 50 }, (_, i) =>
@@ -172,10 +184,17 @@ describe("fetch_content tool", () => {
       const details = res.details as { truncated: boolean; storedPath: string | null };
       expect(details.truncated).toBe(true);
       expect(details.storedPath).toBeTruthy();
+      if (!details.storedPath) throw new Error("expected truncated content to be stored");
+      const storedPath = details.storedPath;
+      const storedContent = await readFile(storedPath, "utf8");
+      expect(storedContent).toContain("Paragraph 0");
+      expect(storedContent).toContain("Paragraph 49");
       expect(text).toContain("Full text saved to:");
-      expect(text).toContain("read_file path=");
+      expect(text).toContain(`Full text saved to: ${storedPath}`);
+      expect(text).toContain(`read_file path="${storedPath}"`);
       expect(text).toContain("offset=");
     } finally {
+      await rm(noviDir, { recursive: true, force: true });
       await cleanup();
     }
   });

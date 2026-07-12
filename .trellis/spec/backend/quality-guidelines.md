@@ -87,6 +87,9 @@ fallbacks). Example (`bootstrap.ts`):
   `setupEnv()` (mkdtemp + `NodeExecutionEnv` + cleanup), `getTool(env, name)`,
   `writeFixture(dir, rel, content)`.
 - Always clean up temp dirs / env in a `finally` block (see `bash.test.ts`).
+- When a module resolves a user-scoped path (for example `getNoviDir()`),
+  tests must mock that resolver to a per-test temporary directory. Never let
+  a test write to or depend on the developer's real home directory.
 - Test shared singleton state via `resetSharedState()` (e.g. todo store).
 - Mock the harness with `vi.fn()` + `as unknown as AgentHarness` for
   component-level tests (see `compaction.test.ts`).

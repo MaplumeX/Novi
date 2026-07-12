@@ -1,11 +1,11 @@
 {
-  "id": "improve-gateway",
-  "name": "improve-gateway",
-  "title": "完善 Novi agent 网关层",
-  "description": "",
+  "id": "fix-fetch-content-storage",
+  "name": "fix-fetch-content-storage",
+  "title": "修复 fetch_content 截断存储回归",
+  "description": "修复全量测试中 fetch_content 截断内容未保存的回归",
   "status": "in_progress",
   "dev_type": null,
-  "scope": "src/gateway/**, src/cli.ts, gateway tests and task artifacts",
+  "scope": null,
   "package": null,
   "priority": "P2",
   "creator": "Maplume",
@@ -18,10 +18,8 @@
   "commit": null,
   "pr_url": null,
   "subtasks": [],
-  "children": [
-    "07-12-fix-fetch-content-storage"
-  ],
-  "parent": null,
+  "children": [],
+  "parent": "07-12-improve-gateway",
   "relatedFiles": [],
   "notes": "",
   "meta": {}

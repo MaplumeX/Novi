@@ -1,0 +1,32 @@
+{
+  "id": "tool-system-hardening",
+  "name": "tool-system-hardening",
+  "title": "Tool system hardening: output truncation, grep correctness, multi-edit, bash streaming, todo persistence",
+  "description": "Parent task coordinating 5 independent tool-system improvements: (1) tool output truncation, (2) grep correctness fixes, (3) edit_file multi-edit support, (4) bash streaming + default timeout, (5) todo persistence.",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "maplume",
+  "assignee": "maplume",
+  "createdAt": "2026-07-12",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "07-12-tool-output-truncation",
+    "07-12-grep-correctness",
+    "07-12-edit-file-multi-edit",
+    "07-12-bash-streaming-timeout",
+    "07-12-todo-persistence"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

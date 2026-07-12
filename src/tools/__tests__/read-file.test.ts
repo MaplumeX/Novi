@@ -36,4 +36,42 @@ describe("read_file tool", () => {
       await cleanup();
     }
   });
+
+  it("truncates a file exceeding the line limit when no limit is given", async () => {
+    const { env, cwd, cleanup } = await setupEnv();
+    try {
+      const lines = Array.from({ length: 3000 }, (_, i) => `line${i}`);
+      const file = await writeFixture(cwd, "big.txt", lines.join("\n"));
+      const tool = getTool(env, "read_file");
+      const res = await tool.execute("t", { path: file });
+      const text = (res.content[0] as { text: string }).text;
+      const outputLines = text.split("\n");
+      // Truncated to 2000 lines + footer.
+      expect(outputLines.length).toBeLessThanOrEqual(2001);
+      expect(text).toContain("[Output truncated:");
+      // Head truncation: first line preserved.
+      expect(outputLines[0]).toBe("line0");
+      const truncation = (res.details as { truncation: { truncated: boolean; truncatedBy: string } }).truncation;
+      expect(truncation.truncated).toBe(true);
+      expect(truncation.truncatedBy).toBe("lines");
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("does not truncate when limit is under the line cap", async () => {
+    const { env, cwd, cleanup } = await setupEnv();
+    try {
+      const lines = Array.from({ length: 3000 }, (_, i) => `line${i}`);
+      const file = await writeFixture(cwd, "big2.txt", lines.join("\n"));
+      const tool = getTool(env, "read_file");
+      const res = await tool.execute("t", { path: file, limit: 10 });
+      const text = (res.content[0] as { text: string }).text;
+      expect(text).not.toContain("[Output truncated:");
+      const truncation = (res.details as { truncation: { truncated: boolean } }).truncation;
+      expect(truncation.truncated).toBe(false);
+    } finally {
+      await cleanup();
+    }
+  });
 });

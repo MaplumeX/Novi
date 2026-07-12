@@ -1,7 +1,7 @@
 import * as Type from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core/node";
 import type { ExecutionEnv } from "@earendil-works/pi-agent-core/node";
-import { unwrap } from "./shared.js";
+import { textResult, truncateWithFooter, unwrap } from "./shared.js";
 
 const Parameters = Type.Object({
   path: Type.Optional(Type.String()),
@@ -23,13 +23,15 @@ export function createLsTool(env: ExecutionEnv): AgentTool<typeof Parameters> {
       const rows = entries
         .map((e) => `${e.kind === "directory" ? "d" : e.kind === "symlink" ? "l" : "-"} ${e.name}`)
         .sort();
-      return {
-        content: [{ type: "text", text: rows.length ? rows.join("\n") : "(empty)" }],
-        details: {
-          path: dir,
-          entries: entries.map((e) => ({ name: e.name, kind: e.kind })),
-        },
-      };
+      const { text, truncation } = truncateWithFooter(
+        rows.length ? rows.join("\n") : "(empty)",
+        "head",
+      );
+      return textResult(text, {
+        path: dir,
+        entries: entries.map((e) => ({ name: e.name, kind: e.kind })),
+        truncation,
+      });
     },
   };
 }

@@ -1,47 +1,131 @@
 import * as Type from "typebox";
+import type { Static } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core/node";
 import type { ExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import { resolveAbsolutePath, textResult, unwrap } from "./shared.js";
 
 const Parameters = Type.Object({
   path: Type.String(),
-  oldText: Type.String(),
-  newText: Type.String(),
+  edits: Type.Array(
+    Type.Object({
+      oldText: Type.String(),
+      newText: Type.String(),
+    }),
+  ),
 });
 
+type EditSpec = { oldText: string; newText: string };
+type PreparedArgs = Static<typeof Parameters>;
+
 /**
- * `edit_file`: exact text replacement. `oldText` must match exactly once in the
- * file; 0 matches or >1 matches both throw so edits stay unambiguous.
+ * Legacy / model compat shim. Converts a single-edit call
+ * `{ path, oldText, newText }` into the canonical `{ path, edits: [...] }`
+ * form and parses `edits` when sent as a JSON string.
+ */
+function prepareEditArguments(input: unknown): PreparedArgs {
+  if (!input || typeof input !== "object") return input as PreparedArgs;
+  const args = input as Record<string, unknown>;
+
+  // Some models send edits as a JSON string.
+  if (typeof args.edits === "string") {
+    try {
+      const parsed = JSON.parse(args.edits);
+      if (Array.isArray(parsed)) args.edits = parsed;
+    } catch {
+      // leave as-is; validation will reject
+    }
+  }
+
+  // Legacy: top-level oldText + newText → convert to edits[]
+  if (typeof args.oldText === "string" && typeof args.newText === "string") {
+    const edits: EditSpec[] = Array.isArray(args.edits) ? [...(args.edits as EditSpec[])] : [];
+    edits.push({ oldText: args.oldText, newText: args.newText });
+    const rest: Record<string, unknown> = { ...args };
+    delete rest.oldText;
+    delete rest.newText;
+    return { ...(rest as PreparedArgs), edits };
+  }
+
+  return args as PreparedArgs;
+}
+
+/**
+ * Build an error whose message references `edits[i]` only when multiple edits
+ * are in play; for single-edit calls, keep the message simple.
+ */
+function singleOrMultiError(msg: string, path: string, editIndex: number, totalEdits: number): Error {
+  if (totalEdits === 1) {
+    return new Error(`edit_file: ${msg} in "${path}".`);
+  }
+  return new Error(`edit_file: edits[${editIndex}] ${msg} in "${path}".`);
+}
+
+/**
+ * `edit_file`: exact text replacement supporting multiple edits in one call.
+ * Each `oldText` must match exactly once in the file; 0 matches or >1 matches
+ * both throw so edits stay unambiguous. All edits match against the original
+ * content, overlapping edits are rejected, and the operation is atomic — any
+ * validation failure throws without writing the file.
  */
 export function createEditFileTool(env: ExecutionEnv): AgentTool<typeof Parameters> {
   return {
     name: "edit_file",
     label: "Edit File",
-    description: "Replace the single unique occurrence of `oldText` with `newText` in a file.",
+    description: "Replace text in a file. Pass `edits: [{oldText, newText}]` for one or more replacements.",
     parameters: Parameters,
+    prepareArguments: prepareEditArguments,
     execute: async (_toolCallId, params, signal) => {
       const abs = await resolveAbsolutePath(env, params.path);
       const readRes = await env.readTextFile(abs, signal);
       const text = unwrap(readRes, `edit_file failed to read "${params.path}"`);
 
-      const count = text.split(params.oldText).length - 1;
-      if (count === 0) {
-        throw new Error(
-          `edit_file: oldText not found in "${params.path}".`,
-        );
+      const edits: EditSpec[] = params.edits;
+      if (!Array.isArray(edits) || edits.length === 0) {
+        throw new Error(`edit_file: edits must contain at least one replacement in "${params.path}".`);
       }
-      if (count > 1) {
-        throw new Error(
-          `edit_file: oldText matches ${count} times in "${params.path}", must be unique.`,
-        );
+
+      // Match phase: each edit must occur exactly once in the original content.
+      const matches: { index: number; oldText: string; newText: string }[] = [];
+      for (let i = 0; i < edits.length; i++) {
+        const { oldText, newText } = edits[i];
+        if (!oldText) {
+          throw singleOrMultiError("oldText must not be empty", params.path, i, edits.length);
+        }
+        const count = text.split(oldText).length - 1;
+        if (count === 0) {
+          throw singleOrMultiError("oldText not found", params.path, i, edits.length);
+        }
+        if (count > 1) {
+          throw singleOrMultiError(
+            `oldText matches ${count} times, must be unique`,
+            params.path,
+            i,
+            edits.length,
+          );
+        }
+        matches.push({ index: text.indexOf(oldText), oldText, newText });
       }
-      const next = text.replace(params.oldText, params.newText);
-      const writeRes = await env.writeFile(abs, next, signal);
+
+      // Overlap detection: sort by position, reject intersecting ranges.
+      matches.sort((a, b) => a.index - b.index);
+      for (let i = 1; i < matches.length; i++) {
+        const prev = matches[i - 1];
+        const curr = matches[i];
+        if (prev.index + prev.oldText.length > curr.index) {
+          throw new Error(`edit_file: edits overlap in "${params.path}". Merge overlapping edits into one.`);
+        }
+      }
+
+      // Apply in reverse order (highest index first) so offsets stay stable.
+      let result = text;
+      for (let i = matches.length - 1; i >= 0; i--) {
+        const m = matches[i];
+        result = result.slice(0, m.index) + m.newText + result.slice(m.index + m.oldText.length);
+      }
+
+      const writeRes = await env.writeFile(abs, result, signal);
       unwrap(writeRes, `edit_file failed to write "${params.path}"`);
-      return textResult(`edited ${params.path}`, {
-        path: params.path,
-        replaced: 1,
-      });
+      return textResult(`edited ${params.path}`, { path: params.path, replaced: edits.length });
     },
   };
 }

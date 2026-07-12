@@ -3,7 +3,7 @@ import * as Type from "typebox";
 import { minimatch } from "minimatch";
 import type { AgentTool } from "@earendil-works/pi-agent-core/node";
 import type { ExecutionEnv } from "@earendil-works/pi-agent-core/node";
-import { resolveAbsolutePath, textResult, walkFiles } from "./shared.js";
+import { resolveAbsolutePath, textResult, truncateWithFooter, walkFiles } from "./shared.js";
 
 const Parameters = Type.Object({
   pattern: Type.String(),
@@ -27,11 +27,16 @@ export function createGlobTool(env: ExecutionEnv): AgentTool<typeof Parameters> 
         .map((f) => path.relative(base, f.path))
         .filter((rel) => minimatch(rel, params.pattern, { dot: true }))
         .sort();
-      return textResult(matched.length ? matched.join("\n") : "(no matches)", {
+      const { text, truncation } = truncateWithFooter(
+        matched.length ? matched.join("\n") : "(no matches)",
+        "head",
+      );
+      return textResult(text, {
         path: base,
         pattern: params.pattern,
         count: matched.length,
         matches: matched,
+        truncation,
       });
     },
   };

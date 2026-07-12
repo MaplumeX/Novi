@@ -1,9 +1,67 @@
+import {
+  truncateHead,
+  truncateTail,
+  truncateLine,
+  DEFAULT_MAX_LINES,
+  DEFAULT_MAX_BYTES,
+  GREP_MAX_LINE_LENGTH,
+  type TruncationResult,
+} from "@earendil-works/pi-agent-core/node";
 import type { AgentToolResult, ExecutionEnv } from "@earendil-works/pi-agent-core/node";
 
 /**
  * Shared helpers for built-in tools. Tools depend only on the `ExecutionEnv`
  * capability (child 1 contract) + node std lib — never on TUI/harness internals.
  */
+
+export { truncateLine, GREP_MAX_LINE_LENGTH, DEFAULT_MAX_LINES, DEFAULT_MAX_BYTES };
+
+/**
+ * Metadata describing a truncation result. Included in tool `details` so
+ * logs/UI can surface that output was cut.
+ */
+export interface TruncationInfo {
+  truncated: boolean;
+  truncatedBy: "lines" | "bytes" | null;
+  totalLines: number;
+  totalBytes: number;
+  outputLines: number;
+  outputBytes: number;
+}
+
+function infoFromResult(r: TruncationResult): TruncationInfo {
+  return {
+    truncated: r.truncated,
+    truncatedBy: r.truncatedBy,
+    totalLines: r.totalLines,
+    totalBytes: r.totalBytes,
+    outputLines: r.outputLines,
+    outputBytes: r.outputBytes,
+  };
+}
+
+/**
+ * Apply head/tail truncation to `content` and, when truncation occurred, append
+ * a human-readable footer noting the original size and which limit was hit.
+ *
+ * `direction="head"` keeps the beginning (read_file/grep/glob/ls);
+ * `direction="tail"` keeps the end (bash, where errors/results land last).
+ *
+ * Returns the (possibly footer-augmented) text plus {@link TruncationInfo} for
+ * `details`. When no truncation is needed, returns `content` as-is.
+ */
+export function truncateWithFooter(
+  content: string,
+  direction: "head" | "tail",
+): { text: string; truncation: TruncationInfo } {
+  const result = direction === "head" ? truncateHead(content) : truncateTail(content);
+  const truncation = infoFromResult(result);
+  if (!result.truncated) {
+    return { text: content, truncation };
+  }
+  const footer = `\n[Output truncated: ${result.truncatedBy} limit hit. Original: ${result.totalLines} lines / ${result.totalBytes} bytes. Showing ${result.outputLines} lines / ${result.outputBytes} bytes.]`;
+  return { text: result.content + footer, truncation };
+}
 
 /** Wrap a plain text string into a standard {@link AgentToolResult}. */
 export function textResult(

@@ -38,7 +38,7 @@ src/
 │   ├── ls.ts
 │   ├── glob.ts
 │   ├── grep.ts
-│   ├── todo.ts             # In-memory per-session todo store (Map<string, Todo[]>)
+│   ├── todo.ts             # Per-session todo store with disk persistence (~/.novi/todos/<sessionId>.json)
 │   ├── web-search.ts        # web_search tool (createWebSearchTool)
 │   ├── fetch-content.ts     # fetch_content tool (createFetchContentTool)
 │   ├── web-search/          # Search provider abstraction + SSRF guard

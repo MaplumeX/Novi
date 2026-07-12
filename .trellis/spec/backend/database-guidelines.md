@@ -10,7 +10,7 @@ Novi has **no database**. All persistence is file-based via the
 `@earendil-works/pi-agent-core` APIs:
 
 - **Sessions** → JSONL files on disk, managed by `JsonlSessionRepo`.
-- **TODOs** → in-memory process singleton (`tools/todo.ts`).
+- **TODOs** → file-based persistence at `~/.novi/todos/<sessionId>.json` with an in-memory cache (`tools/todo.ts`).
 - **Skills / prompt templates** → YAML / markdown files loaded from disk at
   startup (`resources.ts`).
 
@@ -44,19 +44,24 @@ const session = await repo.open({ path } as JsonlSessionMetadata);
 
 ## TODO Store
 
-`tools/todo.ts` keeps a module-level `Map<string, Todo[]>` bucketed by
-sessionId. Each session gets its own list; `createTodoTool(sessionId)` closes
-over the sessionId and scopes all operations to `store.get(sessionId) ?? []`.
-`createBuiltinTools(env, sessionId)` threads the session id through to the
-tool factory. Scope: a single app process lifetime — the store is in-memory
-only and never persisted to disk. `/new`/`/resume` switching sessions gives
-each session an isolated todo list; switching back to an old session restores
-its previous todos.
+`tools/todo.ts` persists todos to `~/.novi/todos/<sessionId>.json` with an
+in-memory `Map<string, Todo[]>` as a write-through cache. Each session gets
+its own list; `createTodoTool(sessionId)` closes over the sessionId and scopes
+all operations to `getSessionTodos(sessionId)` (cache-first, lazy-loads from
+disk on cache miss). `createBuiltinTools(env, sessionId)` threads the session id
+through to the tool factory.
+
+Persistence is best-effort: if the directory cannot be created or the file
+written, the tool still works in-memory and logs a warning to stderr (no
+throw). Corrupt JSON files degrade to an empty list. `/resume` (new process,
+same session ID) reads from disk on first access; `/new` starts a new session
+with an empty list. Session deletion does not clean up todo files (orphan
+files accepted; data is small).
 
 ```ts
 export function createTodoTool(sessionId: string): AgentTool<typeof Parameters, TodoDetails> { … }
-/** Reset the store. Test-only escape hatch. */
-export function __resetTodoStoreForTests(): void { store.clear(); }
+/** Reset the store (in-memory cache + disk files). Test-only escape hatch. */
+export function __resetTodoStoreForTests(): void { store.clear(); rmSync(…, { recursive: true, force: true }); }
 ```
 
 ---
@@ -145,5 +150,5 @@ injectCredentialsIntoEnv(creds, process.env);          // only fills UNDEFINED v
 - Do not introduce a database (SQLite, Prisma, etc.) without an explicit task.
 - Do not read/write session JSONL files directly; use `JsonlSessionRepo` /
   `Session` public APIs.
-- Do not persist TODOs to disk — they are intentionally in-memory.
+- TODO files at `~/.novi/todos/<sessionId>.json` are write-through cached; do not bypass `persistToDisk` / `getSessionTodos`.
 - Do not throw from resource loaders; collect diagnostics and continue.

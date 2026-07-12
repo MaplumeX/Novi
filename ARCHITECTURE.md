@@ -222,7 +222,7 @@ compaction settings 消费 `settings.json` 的 `compaction.{enabled, reserveToke
 | `read-file` / `write-file` / `edit-file` | 文件编辑（`shared.ts` 提供 `sliceLines`/`unwrap`/`resolveAbsolutePath`/`walkFiles`/`shellQuote`） |
 | `bash` | shell 执行 |
 | `ls` / `glob` / `grep` | 文件列举与检索 |
-| `todo` | 按 sessionId 分桶的 TODO 存储（`Map<string, Todo[]>`），`/new`/`/resume` 切换 session 后 todo 隔离；进程内生命周期，不持久化 |
+| `todo` | 按 sessionId 分桶的 TODO 存储（`~/.novi/todos/<sessionId>.json` 磁盘持久化 + 内存 write-through 缓存），`/new`/`/resume` 切换 session 后 todo 隔离；`/resume` 后从磁盘恢复 |
 | `web_search` | 网页搜索（`web-search.ts`）。Provider 抽象在 `web-search/` 子目录下：`provider.ts`（`SearchProvider` 接口 + `resolveProvider()`）、`duckduckgo.ts`（零配置 provider）、`ssrf.ts`（私有 IP 检查）。DuckDuckGo 默认开箱即用，未来 key-gated provider 只需新增一个文件 + 注册到 `PROVIDERS` 数组 |
 | `fetch_content` | 抓取 URL 正文并转 markdown/text（`fetch-content.ts`）。用 `@mozilla/readability` + `linkedom` 提取，base64 图片替换为 `[IMAGE: alt]`，超长内容截断+全量存到 `~/.novi/cache/web/` + footer 指向 `read_file` 翻页。SSRF 防护拒绝私有/内网 URL |
 

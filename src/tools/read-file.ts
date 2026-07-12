@@ -1,7 +1,7 @@
 import * as Type from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core/node";
 import type { ExecutionEnv } from "@earendil-works/pi-agent-core/node";
-import { resolveAbsolutePath, sliceLines, textResult, unwrap } from "./shared.js";
+import { resolveAbsolutePath, sliceLines, textResult, truncateWithFooter, unwrap } from "./shared.js";
 
 const Parameters = Type.Object({
   path: Type.String(),
@@ -24,11 +24,13 @@ export function createReadFileTool(env: ExecutionEnv): AgentTool<typeof Paramete
       const res = await env.readTextFile(abs, signal);
       const text = unwrap(res, `read_file failed for "${params.path}"`);
       const sliced = sliceLines(text, params.offset, params.limit);
-      return textResult(sliced, {
+      const { text: outText, truncation } = truncateWithFooter(sliced, "head");
+      return textResult(outText, {
         path: params.path,
         offset: params.offset ?? null,
         limit: params.limit ?? null,
         lines: sliced.split("\n").length,
+        truncation,
       });
     },
   };

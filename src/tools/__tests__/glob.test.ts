@@ -29,4 +29,25 @@ describe("glob tool", () => {
       await cleanup();
     }
   });
+
+  it("truncates when matching more than the line limit", async () => {
+    const { env, cwd, cleanup } = await setupEnv();
+    try {
+      // Create 3000 files.
+      for (let i = 0; i < 3000; i++) {
+        await writeFixture(cwd, `f${i}.txt`, "x");
+      }
+      const tool = getTool(env, "glob");
+      const res = await tool.execute("t", { pattern: "**/*.txt" });
+      const text = (res.content[0] as { text: string }).text;
+      expect(text).toContain("[Output truncated:");
+      const outputLines = text.split("\n");
+      expect(outputLines.length).toBeLessThanOrEqual(2001);
+      const truncation = (res.details as { truncation: { truncated: boolean; truncatedBy: string } }).truncation;
+      expect(truncation.truncated).toBe(true);
+      expect(truncation.truncatedBy).toBe("lines");
+    } finally {
+      await cleanup();
+    }
+  });
 });

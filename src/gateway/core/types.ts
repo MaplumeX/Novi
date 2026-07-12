@@ -84,8 +84,12 @@ export interface ChannelAdapter {
   sendEvent?(chatId: string, event: ChannelEvent): Promise<void>;
   /** Best-effort typing indicator. */
   sendTyping?(chatId: string): Promise<void>;
+  /** Remove an in-progress streamed placeholder when the final reply is silent. */
+  cancelStream?(chatId: string): Promise<void>;
   /** Acknowledge receipt of an inbound message back to the platform. */
   acknowledgeMessage?(msgId: string): Promise<void>;
+  /** Lightweight connectivity check; must not start an agent turn. */
+  probe?(): Promise<{ ok: boolean; detail?: string }>;
 }
 
 // ---------------------------------------------------------------------------

@@ -92,7 +92,62 @@ describe("loadGatewayConfig", () => {
     expect(config.session.idleTimeoutMs).toBe(86_400_000);
     expect(config.session.maxConcurrent).toBe(10);
     expect(config.security.allowlist).toEqual(new Set());
+    expect(config.security.adminAllowlist).toEqual(new Set());
+    expect(config.security.dmPolicy).toBe("pairing");
+    expect(config.security.groupPolicy).toBe("disabled");
     expect(config.channels).toEqual([]);
+  });
+
+  it("keeps legacy allowlist deployments in allowlist DM mode", async () => {
+    const { env, home, cleanup } = await setupEnv();
+    cleanups.push(cleanup);
+    mockedHome = home;
+    await writeJson(path.join(home, "gateway.json"), { security: { allowlist: ["42"] } });
+    const { config } = await loadGatewayConfig(env);
+    expect(config.security.dmPolicy).toBe("allowlist");
+    expect(config.security.adminAllowlist).toEqual(new Set());
+  });
+
+  it("requires an explicit pairing administrator and resolves it separately from allowlist", async () => {
+    const { env, home, cleanup } = await setupEnv();
+    cleanups.push(cleanup);
+    mockedHome = home;
+    await writeJson(path.join(home, "gateway.json"), {
+      security: { dmPolicy: "pairing", allowlist: ["legacy-user"], adminAllowlist: ["admin"] },
+    });
+    const { config, warnings } = await loadGatewayConfig(env);
+    expect(config.security.adminAllowlist).toEqual(new Set(["admin"]));
+    expect(warnings.some((warning) => warning.includes("requires security.adminAllowlist"))).toBe(
+      false,
+    );
+  });
+
+  it("warns when pairing has no administrator", async () => {
+    const { env, home, cleanup } = await setupEnv();
+    cleanups.push(cleanup);
+    mockedHome = home;
+    await writeJson(path.join(home, "gateway.json"), { security: { dmPolicy: "pairing" } });
+    const { warnings } = await loadGatewayConfig(env);
+    expect(warnings.some((warning) => warning.includes("requires security.adminAllowlist"))).toBe(
+      true,
+    );
+  });
+
+  it("resolves group routing policies and rejects invalid mention regexes", async () => {
+    const { env, home, cleanup } = await setupEnv();
+    cleanups.push(cleanup);
+    mockedHome = home;
+    await writeJson(path.join(home, "gateway.json"), {
+      security: { groupPolicy: "allowlist" },
+      telegram: {
+        groups: { allowlist: ["-100"], ignoredThreadIds: ["7"], mentionPatterns: ["[bad"] },
+      },
+    });
+    const { config, warnings } = await loadGatewayConfig(env);
+    expect(config.security.groupPolicy).toBe("allowlist");
+    expect(config.telegram.groups.allowlist.has("-100")).toBe(true);
+    expect(config.telegram.groups.ignoredThreadIds.has("7")).toBe(true);
+    expect(warnings.some((warning) => warning.includes("mentionPatterns"))).toBe(true);
   });
 
   it("expands ${ENV} in channel botToken", async () => {
@@ -101,12 +156,9 @@ describe("loadGatewayConfig", () => {
     cleanups.push(cleanup);
     mockedHome = home;
 
-    await writeJson(
-      path.join(home, "gateway.json"),
-      {
-        channels: [{ type: "telegram", id: "tg", botToken: "${MY_BOT_TOKEN}" }],
-      },
-    );
+    await writeJson(path.join(home, "gateway.json"), {
+      channels: [{ type: "telegram", id: "tg", botToken: "${MY_BOT_TOKEN}" }],
+    });
 
     const { config } = await loadGatewayConfig(env);
     expect(config.channels).toHaveLength(1);

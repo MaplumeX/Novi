@@ -1,10 +1,6 @@
 import type { ChannelAdapter, ChannelMessage, AgentProtocolAdapter } from "./types.js";
 import type { QueueMode } from "../config.js";
-import {
-  createSessionLane,
-  enqueueMessage,
-  type SessionLane,
-} from "./session-lane.js";
+import { createSessionLane, enqueueMessage, type SessionLane } from "./session-lane.js";
 
 /** Constructor options for {@link GatewaySessionManager}. */
 export interface GatewaySessionManagerOptions {
@@ -95,6 +91,17 @@ export class GatewaySessionManager {
     const keys = [...this.lanes.keys()];
     this.lanes.clear();
     await Promise.allSettled(keys.map((key) => this.agent.closeSession(key)));
+  }
+
+  /** Safe state summary for gateway diagnostics. */
+  getStats(): { activeSessions: number; runningSessions: number; queuedMessages: number } {
+    let runningSessions = 0;
+    let queuedMessages = 0;
+    for (const lane of this.lanes.values()) {
+      if (lane.status === "running") runningSessions++;
+      queuedMessages += lane.queue.length;
+    }
+    return { activeSessions: this.lanes.size, runningSessions, queuedMessages };
   }
 
   /** Close idle lanes that have exceeded the idle timeout. */

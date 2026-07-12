@@ -23,6 +23,8 @@ export type ChannelConfig = TelegramChannelConfig;
 
 /** Queue delivery mode for messages arriving mid-turn. */
 export type QueueMode = "steer" | "followup" | "interrupt";
+export type DmPolicy = "pairing" | "allowlist" | "open" | "disabled";
+export type GroupPolicy = "allowlist" | "open" | "disabled";
 
 /** Raw `gateway.json` shape — all fields optional, validated before use. */
 export interface RawGatewayConfig {
@@ -39,6 +41,20 @@ export interface RawGatewayConfig {
   };
   security?: {
     allowlist?: string[];
+    /** Telegram user ids allowed to approve pairing requests. Required for pairing to be usable. */
+    adminAllowlist?: string[];
+    dmPolicy?: DmPolicy;
+    groupPolicy?: GroupPolicy;
+    pairing?: { ttlMs?: number; maxPending?: number };
+  };
+  telegram?: {
+    groups?: {
+      allowlist?: string[];
+      requireMention?: boolean;
+      mentionPatterns?: string[];
+      ignoredThreadIds?: string[];
+      senderAllowlist?: string[];
+    };
   };
   channels?: ChannelConfig[];
 }
@@ -58,6 +74,19 @@ export interface ResolvedGatewayConfig {
   };
   security: {
     allowlist: Set<string>;
+    adminAllowlist: Set<string>;
+    dmPolicy: DmPolicy;
+    groupPolicy: GroupPolicy;
+    pairing: { ttlMs: number; maxPending: number };
+  };
+  telegram: {
+    groups: {
+      allowlist: Set<string>;
+      requireMention: boolean;
+      mentionPatterns: RegExp[];
+      ignoredThreadIds: Set<string>;
+      senderAllowlist: Set<string>;
+    };
   };
   channels: ChannelConfig[];
 }
@@ -77,6 +106,8 @@ const DEFAULTS = {
   editIntervalMs: 1000,
   idleTimeoutMs: 86_400_000, // 24h
   maxConcurrent: 10,
+  pairingTtlMs: 3_600_000,
+  pairingMaxPending: 3,
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -194,7 +225,12 @@ function validateChannels(channels: unknown, warnings: string[]): ChannelConfig[
         warnings.push(`gateway: channels[${i}] ("telegram") missing "botToken", skipping`);
         continue;
       }
-      valid.push({ type: "telegram", id, botToken, connectionMode: entry.connectionMode as "long-poll" | "webhook" | undefined });
+      valid.push({
+        type: "telegram",
+        id,
+        botToken,
+        connectionMode: entry.connectionMode as "long-poll" | "webhook" | undefined,
+      });
     } else {
       warnings.push(`gateway: channels[${i}] has unknown type "${type ?? ""}", skipping`);
     }
@@ -209,6 +245,58 @@ function resolveConfig(merged: RawGatewayConfig, warnings: string[]): ResolvedGa
   const idleTimeoutMs = merged.session?.idleTimeoutMs ?? DEFAULTS.idleTimeoutMs;
   const maxConcurrent = merged.session?.maxConcurrent ?? DEFAULTS.maxConcurrent;
   const allowlist = new Set(merged.security?.allowlist ?? []);
+  const adminAllowlist = new Set(merged.security?.adminAllowlist ?? []);
+  const rawDmPolicy = merged.security?.dmPolicy;
+  const dmPolicy: DmPolicy =
+    rawDmPolicy === "pairing" ||
+    rawDmPolicy === "allowlist" ||
+    rawDmPolicy === "open" ||
+    rawDmPolicy === "disabled"
+      ? rawDmPolicy
+      : allowlist.size > 0
+        ? "allowlist"
+        : "pairing";
+  if (rawDmPolicy !== undefined && rawDmPolicy !== dmPolicy)
+    warnings.push(`gateway: invalid security.dmPolicy "${String(rawDmPolicy)}", using ${dmPolicy}`);
+  const rawGroupPolicy = merged.security?.groupPolicy;
+  const groupPolicy: GroupPolicy =
+    rawGroupPolicy === "allowlist" || rawGroupPolicy === "open" || rawGroupPolicy === "disabled"
+      ? rawGroupPolicy
+      : "disabled";
+  if (rawGroupPolicy !== undefined && rawGroupPolicy !== groupPolicy)
+    warnings.push(
+      `gateway: invalid security.groupPolicy "${String(rawGroupPolicy)}", using disabled`,
+    );
+  const pairing = {
+    ttlMs: positiveNumber(
+      merged.security?.pairing?.ttlMs,
+      DEFAULTS.pairingTtlMs,
+      "security.pairing.ttlMs",
+      warnings,
+    ),
+    maxPending: positiveNumber(
+      merged.security?.pairing?.maxPending,
+      DEFAULTS.pairingMaxPending,
+      "security.pairing.maxPending",
+      warnings,
+    ),
+  };
+  if (dmPolicy === "pairing" && adminAllowlist.size === 0) {
+    warnings.push(
+      "gateway: security.dmPolicy=pairing requires security.adminAllowlist to approve requests",
+    );
+  }
+  const rawGroups = merged.telegram?.groups;
+  const mentionPatterns: RegExp[] = [];
+  for (const pattern of rawGroups?.mentionPatterns ?? []) {
+    try {
+      mentionPatterns.push(new RegExp(pattern, "i"));
+    } catch {
+      warnings.push(
+        `gateway: invalid telegram.groups.mentionPatterns entry "${pattern}", skipping`,
+      );
+    }
+  }
   const channels = validateChannels(merged.channels, warnings);
 
   if (channels.length === 0) {
@@ -219,9 +307,30 @@ function resolveConfig(merged: RawGatewayConfig, warnings: string[]): ResolvedGa
     queue: { mode: queueMode, byChannel },
     stream: { editIntervalMs },
     session: { idleTimeoutMs, maxConcurrent },
-    security: { allowlist },
+    security: { allowlist, adminAllowlist, dmPolicy, groupPolicy, pairing },
+    telegram: {
+      groups: {
+        allowlist: new Set(rawGroups?.allowlist ?? []),
+        requireMention: rawGroups?.requireMention !== false,
+        mentionPatterns,
+        ignoredThreadIds: new Set(rawGroups?.ignoredThreadIds ?? []),
+        senderAllowlist: new Set(rawGroups?.senderAllowlist ?? []),
+      },
+    },
     channels,
   };
+}
+
+function positiveNumber(
+  value: unknown,
+  fallback: number,
+  label: string,
+  warnings: string[],
+): number {
+  if (value === undefined) return fallback;
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) return value;
+  warnings.push(`gateway: invalid ${label}, using ${fallback}`);
+  return fallback;
 }
 
 // ---------------------------------------------------------------------------
@@ -263,7 +372,12 @@ export async function loadGatewayConfig(
     const layer = await readLayer(env, options.filePath, "config", warnings);
     if (layer) merged = layer;
   } else {
-    const global = await readLayer(env, path.join(getNoviDir(), "gateway.json"), "global", warnings);
+    const global = await readLayer(
+      env,
+      path.join(getNoviDir(), "gateway.json"),
+      "global",
+      warnings,
+    );
     const project =
       trusted === false
         ? null

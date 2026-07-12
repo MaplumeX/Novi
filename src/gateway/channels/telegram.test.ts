@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { chunkText } from "./telegram.js";
+import { TelegramError } from "telegraf";
+import {
+  chunkText,
+  isMessageNotModified,
+  isTransientTelegramError,
+  telegramErrorSummary,
+} from "./telegram.js";
 
 describe("chunkText", () => {
   it("returns a single empty chunk for empty input", () => {
@@ -52,5 +58,25 @@ describe("chunkText", () => {
     expect(chunks[1]).toHaveLength(4096);
     expect(chunks[2]).toHaveLength(10_000 - 8192);
     expect(chunks.join("")).toBe(text);
+  });
+});
+
+describe("Telegram retry classification", () => {
+  it("retries common transient network failures only", () => {
+    expect(isTransientTelegramError({ code: "ECONNRESET" })).toBe(true);
+    expect(isTransientTelegramError({ code: "ETIMEDOUT" })).toBe(true);
+    expect(isTransientTelegramError({ code: 400 })).toBe(false);
+  });
+  it("recognizes not-modified and redacts diagnostic detail", () => {
+    expect(
+      isMessageNotModified(
+        new TelegramError({ error_code: 400, description: "Bad Request: message is not modified" }),
+      ),
+    ).toBe(true);
+    expect(
+      telegramErrorSummary(
+        Object.assign(new Error("https://api.telegram.org/botSECRET"), { code: "ECONNRESET" }),
+      ),
+    ).toBe("API error ECONNRESET");
   });
 });

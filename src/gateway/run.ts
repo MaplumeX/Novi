@@ -15,6 +15,7 @@ import { createCommandRegistry } from "./core/commands.js";
 export interface RunGatewayOptions extends BootstrapOptions {
   /** Explicit `--config <path>` for gateway.json (optional). */
   configPath?: string;
+  action?: "run" | "status" | "probe";
 }
 
 function fail(message: string): never {
@@ -33,6 +34,45 @@ function fail(message: string): never {
  */
 export async function runGateway(options: RunGatewayOptions): Promise<void> {
   const cwd = options.cwd ?? process.cwd();
+
+  // Status/probe intentionally load only gateway configuration: no model or
+  // harness is constructed for an operational diagnostic.
+  if (options.action === "status" || options.action === "probe") {
+    const env = new NodeExecutionEnv({ cwd, shellEnv: process.env });
+    try {
+      const { config, warnings } = await loadGatewayConfig(env, {
+        filePath: options.configPath,
+        cwd,
+        trusted: options.trusted,
+      });
+      for (const warning of warnings) process.stderr.write(`warning: ${warning}\n`);
+      const channels = createChannels(config.channels, {
+        editIntervalMs: config.stream.editIntervalMs,
+      });
+      if (options.action === "probe") {
+        for (const channel of channels) {
+          const result = await (
+            channel.probe
+              ? channel.probe()
+              : Promise.resolve({ ok: true, detail: "probe unsupported" })
+          ).catch((e) => ({ ok: false, detail: e instanceof Error ? e.message : String(e) }));
+          process.stdout.write(
+            `${channel.id} (${channel.type}): ${result.ok ? "ok" : "failed"}${result.detail ? ` — ${result.detail}` : ""}\n`,
+          );
+        }
+      } else {
+        const configured = channels
+          .map((channel) => `${channel.id} (${channel.type}): configured`)
+          .join("\n");
+        process.stdout.write(
+          `channels: ${channels.length}\n${configured}${configured ? "\n" : ""}dmPolicy: ${config.security.dmPolicy}\ngroupPolicy: ${config.security.groupPolicy}\nactiveSessions: 0\n`,
+        );
+      }
+    } finally {
+      await env.cleanup();
+    }
+    return;
+  }
 
   // 1. Provider probe — fail with guidance when unconfigured (headless path).
   const probeEnv = new NodeExecutionEnv({ cwd, shellEnv: process.env });
@@ -121,12 +161,37 @@ export async function runGateway(options: RunGatewayOptions): Promise<void> {
     sessionManager,
     queueMode: config.queue.mode,
     queueModeByChannel: config.queue.byChannel,
-    allowlist: config.security.allowlist,
+    config,
     commands,
     gatewayEnv,
   });
 
   await app.start();
+
+  const reload = () => {
+    void loadGatewayConfig(gatewayEnv.env, { filePath: options.configPath, cwd, trusted })
+      .then(({ config: next, warnings: reloadWarnings }) => {
+        // Warnings mean the candidate was recovered from invalid input; keep
+        // the known-good runtime snapshot instead of partially applying it.
+        if (reloadWarnings.length > 0) {
+          process.stderr.write(`warning: gateway reload rejected: ${reloadWarnings.join("; ")}\n`);
+          return;
+        }
+        if (!app.reloadPolicy(next)) {
+          process.stderr.write(
+            "warning: gateway reload rejected: channels, queue, session, and stream settings require restart; only access and group routing policy can reload\n",
+          );
+          return;
+        }
+        process.stderr.write("warning: gateway access and group routing policy reloaded\n");
+      })
+      .catch((e) =>
+        process.stderr.write(
+          `warning: gateway reload failed: ${e instanceof Error ? e.message : String(e)}\n`,
+        ),
+      );
+  };
+  process.on("SIGHUP", reload);
 
   // 7. Graceful shutdown on SIGINT/SIGTERM.
   let shuttingDown = false;
@@ -141,6 +206,7 @@ export async function runGateway(options: RunGatewayOptions): Promise<void> {
         );
       })
       .finally(() => {
+        process.off("SIGHUP", reload);
         process.exit(0);
       });
   };

@@ -7,12 +7,7 @@ import { renderApp } from "./tui/App.js";
 import { runPrint, runJson } from "./headless/run.js";
 import { probeProviderConfigured, formatHeadlessGuidance } from "./onboarding.js";
 import { renderOnboardingWizard } from "./tui/OnboardingWizard.js";
-import {
-  loadTrust,
-  hasGatedResources,
-  resolveProjectTrust,
-  saveTrust,
-} from "./trust.js";
+import { loadTrust, hasGatedResources, resolveProjectTrust, saveTrust } from "./trust.js";
 import { loadSettings, resolveSettings } from "./settings.js";
 import { renderTrustPrompt } from "./tui/TrustPrompt.js";
 import { builtinModels } from "@earendil-works/pi-ai/providers/all";
@@ -71,7 +66,7 @@ if (values.help) {
       "  --cwd <dir>       Working directory (default: process.cwd())",
       "  --resume <path>   Resume an existing session JSONL file",
       "  -p, --print       Print mode: run once, print assistant text, exit (no TUI)",
-      "  --mode <mode>     Headless mode: \"json\" streams all events as JSONL",
+      '  --mode <mode>     Headless mode: "json" streams all events as JSONL',
       "  -a, --approve     Trust project-local files for this run",
       "  --no-approve      Ignore project-local files for this run",
       "  --yes             Auto-approve tools that would ask (ask→allow). Not project trust.",
@@ -93,6 +88,8 @@ if (values.print && values.mode === "json") {
 }
 
 const promptText = positionals.join(" ");
+const gatewayAction =
+  positionals[0] === "status" || positionals[0] === "probe" ? positionals[0] : "run";
 
 const isHeadless =
   values.print || values.mode === "json" || values["list-models"] || values.gateway;
@@ -101,23 +98,15 @@ const cliOverrides = {
   provider: values.provider,
   model: values.model,
   thinkingLevel: values.thinking as
-    | "off"
-    | "minimal"
-    | "low"
-    | "medium"
-    | "high"
-    | "xhigh"
-    | undefined,
-  transport: values.transport as
-    | "sse"
-    | "websocket"
-    | "websocket-cached"
-    | "auto"
-    | undefined,
+    "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | undefined,
+  transport: values.transport as "sse" | "websocket" | "websocket-cached" | "auto" | undefined,
   steeringMode: values["steering-mode"] as "one-at-a-time" | "all" | undefined,
   followUpMode: values["follow-up-mode"] as "one-at-a-time" | "all" | undefined,
   scopedModels: values.models
-    ? values.models.split(",").map((s) => s.trim()).filter((s) => s.length > 0)
+    ? values.models
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0)
     : undefined,
 };
 
@@ -173,31 +162,32 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
-  try {
-    const probeEnv = new NodeExecutionEnv({ cwd: process.cwd(), shellEnv: process.env });
-    let probeResult;
+  if (!(values.gateway && gatewayAction !== "run"))
     try {
-      probeResult = await probeProviderConfigured(probeEnv, cliOverrides);
-    } finally {
-      await probeEnv.cleanup();
-    }
-
-    if (!probeResult.configured) {
-      if (isHeadless) {
-        fail(formatHeadlessGuidance(probeResult.provider));
+      const probeEnv = new NodeExecutionEnv({ cwd: process.cwd(), shellEnv: process.env });
+      let probeResult;
+      try {
+        probeResult = await probeProviderConfigured(probeEnv, cliOverrides);
+      } finally {
+        await probeEnv.cleanup();
       }
-      // TUI mode: run the onboarding wizard, which on completion bootstraps
-      // and renders the app itself.
-      await renderOnboardingWizard(bootstrapOptions);
-      return;
+
+      if (!probeResult.configured) {
+        if (isHeadless) {
+          fail(formatHeadlessGuidance(probeResult.provider));
+        }
+        // TUI mode: run the onboarding wizard, which on completion bootstraps
+        // and renders the app itself.
+        await renderOnboardingWizard(bootstrapOptions);
+        return;
+      }
+    } catch (error) {
+      // Probe failure (e.g. corrupt settings) is non-fatal here — let bootstrap()
+      // surface the real error via its own resolveModel() guard.
+      process.stderr.write(
+        `warning: provider check failed: ${error instanceof Error ? error.message : String(error)}\n`,
+      );
     }
-  } catch (error) {
-    // Probe failure (e.g. corrupt settings) is non-fatal here — let bootstrap()
-    // surface the real error via its own resolveModel() guard.
-    process.stderr.write(
-      `warning: provider check failed: ${error instanceof Error ? error.message : String(error)}\n`,
-    );
-  }
 
   // --- Project trust gate ---
   // Resolve trust for the cwd. Only prompt when gated resources exist, the
@@ -252,7 +242,12 @@ async function main(): Promise<void> {
   try {
     if (values.gateway) {
       const { runGateway } = await import("./gateway/run.js");
-      await runGateway({ ...bootstrapOptions, trusted, configPath: values.config });
+      await runGateway({
+        ...bootstrapOptions,
+        trusted,
+        configPath: values.config,
+        action: gatewayAction,
+      });
       return;
     }
 

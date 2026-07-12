@@ -1,9 +1,6 @@
-import type {
-  ChannelAdapter,
-  ChannelMessage,
-  AgentProtocolAdapter,
-} from "./types.js";
+import type { ChannelAdapter, ChannelMessage, AgentProtocolAdapter } from "./types.js";
 import type { QueueMode } from "../config.js";
+import { isSilentReply } from "./routing.js";
 
 /** A queued inbound message awaiting dispatch after the current run. */
 export interface QueuedMessage {
@@ -120,8 +117,17 @@ async function runTurn(
   lane.lastActivity = Date.now();
 
   const chatId = msg.remoteChatId;
+  let silentCandidate = "";
+  let silentPending = true;
   const callbacks = {
     onTextDelta: async (delta: string) => {
+      if (silentPending) {
+        silentCandidate += delta;
+        if (isSilentPrefix(silentCandidate)) return;
+        silentPending = false;
+        await channel.sendEvent?.(chatId, { type: "text-delta", delta: silentCandidate });
+        return;
+      }
       await channel.sendEvent?.(chatId, { type: "text-delta", delta });
     },
     onReasoningDelta: async (delta: string) => {
@@ -134,7 +140,8 @@ async function runTurn(
       await channel.sendTyping?.(chatId);
     },
     onTurnEnd: async (text: string) => {
-      await channel.send(chatId, text);
+      if (isSilentReply(text)) await channel.cancelStream?.(chatId);
+      else await channel.send(chatId, text);
     },
   };
 
@@ -156,4 +163,9 @@ async function runTurn(
 
   lane.status = "idle";
   lane.lastActivity = Date.now();
+}
+
+const SILENT_MARKERS = ["SILENT", "[SILENT]", "NO_REPLY", "NO REPLY"];
+function isSilentPrefix(text: string): boolean {
+  return SILENT_MARKERS.some((marker) => marker.startsWith(text.trim().toUpperCase()));
 }

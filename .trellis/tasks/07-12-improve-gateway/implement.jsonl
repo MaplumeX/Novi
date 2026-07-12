@@ -1,0 +1,7 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/index.md", "reason": "Gateway backend implementation standards"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "TypeScript quality and verification requirements"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Gateway runtime error-boundary conventions"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "Safe gateway diagnostics conventions"}
+{"file": ".trellis/spec/backend/pi-agent-core-api.md", "reason": "Harness and existing gateway contracts"}
+{"file": ".trellis/tasks/07-12-improve-gateway/research/openclaw-hermes-baseline.md", "reason": "External capability baseline and scope rationale"}

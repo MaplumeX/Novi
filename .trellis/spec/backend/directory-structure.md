@@ -67,10 +67,12 @@ src/
 │   ├── core/
 │   │   ├── types.ts          # ChannelAdapter / ChannelCapabilities / ChannelMessage / ChannelEvent / AgentProtocolAdapter
 │   │   ├── abstract-channel.ts  # AbstractChannel base (emitMessage + abstract start/stop/send)
-│   │   ├── gateway-app.ts    # GatewayApp orchestration: channels ↔ agent, allowlist, slash bypass
+│   │   ├── gateway-app.ts    # GatewayApp orchestration: authorization, group gating, dedupe, commands → lanes
 │   │   ├── session-lane.ts   # per-sessionKey queue + steer/followup/interrupt dispatch
 │   │   ├── session-manager.ts# lazy harness creation + idle timeout + maxConcurrent eviction
 │   │   └── commands.ts      # CommandRegistry: /new /stop /help /status
+│   │   ├── routing.ts        # pure session-key, silent-reply and bounded inbound-dedup helpers
+│   │   └── pairing-store.ts  # fail-closed persistent DM pairing authorization
 │   ├── agent/
 │   │   ├── event-bridge.ts   # createEventBridge — single raw-event → callbacks projector (N2 boundary)
 │   │   └── novi-agent-adapter.ts  # NoviAgentAdapter wraps AgentHarness behind AgentProtocolAdapter
@@ -114,6 +116,18 @@ src/
   change to `GatewayApp`. `event-bridge.ts` is the gateway-side single
   harness-event projection point (the IM analogue of TUI's `useHarnessState`
   and headless's `events.ts` — N2 single event boundary).
+- **Gateway authorization order.** Normalize and deduplicate an inbound update
+  before authorization. `GatewayApp` owns DM pairing, DM/group policies,
+  group mention/reply gates, and command bypass; only already-authorized,
+  non-command text reaches `SessionManager`. Pairing approval is direct-chat
+  only and must never be forwarded to the agent from a group. Use
+  `routing.ts` for session keys so a forum topic cannot share a harness with
+  its parent chat.
+- **Gateway streaming.** A final explicit silence marker (`SILENT`,
+  `[SILENT]`, `NO_REPLY`, or `NO REPLY`) must produce no delivery. Because
+  the final text arrives after deltas, `session-lane.ts` buffers a possible
+  marker prefix before forwarding deltas, then releases it in order as soon
+  as it cannot be a silence marker. Do not bypass that helper in a channel.
 
 ### Reusable tool patterns
 

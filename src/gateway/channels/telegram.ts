@@ -44,6 +44,8 @@ export class TelegramChannel extends AbstractChannel {
   private readonly bot: Telegraf;
   private readonly editIntervalMs: number;
   private readonly streamBuffers = new Map<string, StreamBuffer>();
+  private botUserId: number | undefined;
+  private botUsername: string | undefined;
 
   constructor(options: TelegramChannelOptions) {
     super(options.id, "telegram");
@@ -56,13 +58,16 @@ export class TelegramChannel extends AbstractChannel {
       const tgMsg = ctx.message;
       const chat = ctx.chat as TgChat | undefined;
       const from = tgMsg.from as TgUser | undefined;
-      // MVP: only handle private chats.
-      if (!chat || chat.type !== "private") return;
+      if (!chat || (chat.type !== "private" && chat.type !== "group" && chat.type !== "supergroup"))
+        return;
       if (!from) return;
 
-      void this.emitMessage(this.normalizeMessage(chat, tgMsg, from));
+      void this.emitMessage(this.normalizeMessage(chat, tgMsg, from, ctx.update.update_id));
     });
 
+    const me = await this.bot.telegram.getMe();
+    this.botUserId = me.id;
+    this.botUsername = me.username;
     await this.bot.launch();
   }
 
@@ -103,7 +108,7 @@ export class TelegramChannel extends AbstractChannel {
   async sendEvent(chatId: string, event: ChannelEvent): Promise<void> {
     switch (event.type) {
       case "typing":
-        await this.bot.telegram.sendChatAction(chatId, "typing").catch(() => {});
+        await this.sendTyping(chatId);
         break;
       case "text-delta":
         await this.handleStreamDelta(chatId, event.delta);
@@ -123,7 +128,32 @@ export class TelegramChannel extends AbstractChannel {
 
   /** Best-effort typing indicator. */
   async sendTyping(chatId: string): Promise<void> {
-    await this.bot.telegram.sendChatAction(chatId, "typing").catch(() => {});
+    await this.callWithRetry("sendChatAction", () =>
+      this.bot.telegram.sendChatAction(chatId, "typing"),
+    ).catch((e) => {
+      process.stderr.write(`warning: telegram sendChatAction failed: ${telegramErrorSummary(e)}\n`);
+    });
+  }
+
+  async cancelStream(chatId: string): Promise<void> {
+    const buffer = this.streamBuffers.get(chatId);
+    if (!buffer) return;
+    this.streamBuffers.delete(chatId);
+    if (!buffer.messageId) return;
+    await this.callWithRetry("deleteMessage", () =>
+      this.bot.telegram.deleteMessage(chatId, buffer.messageId),
+    ).catch((e) => {
+      process.stderr.write(`warning: telegram deleteMessage failed: ${telegramErrorSummary(e)}\n`);
+    });
+  }
+
+  async probe(): Promise<{ ok: boolean; detail?: string }> {
+    try {
+      const me = await this.bot.telegram.getMe();
+      return { ok: true, detail: me.username ? `@${me.username}` : String(me.id) };
+    } catch (e) {
+      return { ok: false, detail: telegramErrorSummary(e) };
+    }
   }
 
   // -----------------------------------------------------------------------
@@ -137,9 +167,11 @@ export class TelegramChannel extends AbstractChannel {
       message_id: number;
       date: number;
       text: string;
-      reply_to_message?: { message_id: number };
+      reply_to_message?: { message_id: number; from?: { id: number } };
+      message_thread_id?: number;
     },
     from: TgUser,
+    updateId: number,
   ): ChannelMessage {
     const senderName = [from.first_name, from.last_name].filter(Boolean).join(" ") || undefined;
     return {
@@ -154,7 +186,19 @@ export class TelegramChannel extends AbstractChannel {
       replyToMessageId: tgMsg.reply_to_message
         ? String(tgMsg.reply_to_message.message_id)
         : undefined,
-      metadata: { telegramChatType: chat.type, telegramMessageId: tgMsg.message_id },
+      threadId:
+        "message_thread_id" in tgMsg && typeof tgMsg.message_thread_id === "number"
+          ? String(tgMsg.message_thread_id)
+          : undefined,
+      metadata: {
+        telegramChatType: chat.type,
+        telegramMessageId: tgMsg.message_id,
+        updateId,
+        replyToBot: tgMsg.reply_to_message?.from?.id === this.botUserId,
+        mentionedBot: this.botUsername
+          ? new RegExp(`(^|\\s)@${escapeRegExp(this.botUsername)}\\b`, "i").test(tgMsg.text)
+          : false,
+      },
     };
   }
 
@@ -190,39 +234,42 @@ export class TelegramChannel extends AbstractChannel {
    * Telegram message id (needed for edit-stream bookkeeping).
    */
   private async sendOrRetry(chatId: string, text: string): Promise<number> {
-    try {
-      const sent = await this.bot.telegram.sendMessage(chatId, text);
-      return sent.message_id;
-    } catch (e) {
-      const retryAfter = readRetryAfter(e);
-      if (retryAfter !== undefined) {
-        await delay(retryAfter * 1000);
-        const sent = await this.bot.telegram.sendMessage(chatId, text);
-        return sent.message_id;
-      }
-      throw e;
-    }
+    const sent = await this.callWithRetry("sendMessage", () =>
+      this.bot.telegram.sendMessage(chatId, text),
+    );
+    return sent.message_id;
   }
 
   /** Edit a message, retrying once after a FloodWait delay. */
   private async editOrRetry(chatId: string, messageId: number, text: string): Promise<void> {
     try {
-      await this.bot.telegram.editMessageText(chatId, messageId, undefined, text);
+      await this.callWithRetry("editMessageText", () =>
+        this.bot.telegram.editMessageText(chatId, messageId, undefined, text),
+      );
     } catch (e) {
       // "message is not modified" happens when the throttled text equals the
       // last sent text — swallow it to avoid noise.
       if (isMessageNotModified(e)) return;
-      const retryAfter = readRetryAfter(e);
-      if (retryAfter !== undefined) {
-        await delay(retryAfter * 1000);
-        await this.bot.telegram.editMessageText(chatId, messageId, undefined, text).catch(() => {});
-        return;
-      }
       // Best-effort: don't let an edit failure crash the turn.
       process.stderr.write(
-        `warning: telegram editMessageText failed: ${e instanceof Error ? e.message : String(e)}\n`,
+        `warning: telegram editMessageText failed: ${telegramErrorSummary(e)}\n`,
       );
     }
+  }
+
+  private async callWithRetry<T>(name: string, call: () => Promise<T>): Promise<T> {
+    let last: unknown;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        return await call();
+      } catch (e) {
+        last = e;
+        if (!isTransientTelegramError(e) || attempt === 2) break;
+        await delay((readRetryAfter(e) ?? Math.pow(2, attempt)) * 1000);
+      }
+    }
+    if (last instanceof Error) throw last;
+    throw new Error(`telegram ${name} failed: ${telegramErrorSummary(last)}`);
   }
 }
 
@@ -256,8 +303,31 @@ function readRetryAfter(e: unknown): number | undefined {
 }
 
 /** Detect the "message is not modified" Telegram error. */
-function isMessageNotModified(e: unknown): boolean {
+export function isMessageNotModified(e: unknown): boolean {
   return e instanceof TelegramError && e.description.includes("not modified");
+}
+
+export function isTransientTelegramError(e: unknown): boolean {
+  const code = (e as { code?: number } | null)?.code;
+  const networkCode = (e as { code?: string } | null)?.code;
+  return (
+    readRetryAfter(e) !== undefined ||
+    code === 429 ||
+    (typeof code === "number" && code >= 500) ||
+    networkCode === "ECONNRESET" ||
+    networkCode === "ETIMEDOUT" ||
+    networkCode === "EAI_AGAIN"
+  );
+}
+
+export function telegramErrorSummary(error: unknown): string {
+  const code = (error as { code?: string | number } | null)?.code;
+  if (code !== undefined) return `API error ${String(code)}`;
+  return error instanceof Error && error.name ? error.name : "unknown error";
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /** Promise-based delay. */

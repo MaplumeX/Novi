@@ -7,16 +7,18 @@ import { createSessionLane, enqueueMessage } from "./session-lane.js";
 /** Build a mock AgentProtocolAdapter with vi.fn for every method. */
 function makeAgentMock(): AgentProtocolAdapter {
   // Simulate the real adapter: runTurn invokes onTurnEnd with the final text.
-  const runTurn = vi.fn().mockImplementation(async (input: {
-    sessionKey: string;
-    text: string;
-    callbacks?: {
-      onTurnEnd?(text: string): Promise<void>;
-    };
-  }) => {
-    await input.callbacks?.onTurnEnd?.("reply");
-    return { text: "reply" };
-  });
+  const runTurn = vi.fn().mockImplementation(
+    async (input: {
+      sessionKey: string;
+      text: string;
+      callbacks?: {
+        onTurnEnd?(text: string): Promise<void>;
+      };
+    }) => {
+      await input.callbacks?.onTurnEnd?.("reply");
+      return { text: "reply" };
+    },
+  );
   return {
     runTurn,
     steer: vi.fn().mockResolvedValue(undefined),
@@ -87,6 +89,81 @@ describe("enqueueMessage (idle state)", () => {
 
     expect(channel.send).toHaveBeenCalledWith("123", expect.stringContaining("boom"));
     expect(lane.status).toBe("idle");
+  });
+
+  it("removes a streamed placeholder instead of sending a SILENT final reply", async () => {
+    const agent = makeAgentMock();
+    (agent.runTurn as ReturnType<typeof vi.fn>).mockImplementation(
+      async (input: { callbacks?: { onTurnEnd?(text: string): Promise<void> } }) => {
+        await input.callbacks?.onTurnEnd?.("SILENT");
+        return { text: "SILENT" };
+      },
+    );
+    const channel = makeChannelMock();
+    channel.cancelStream = vi.fn().mockResolvedValue(undefined);
+    await enqueueMessage(
+      createSessionLane("tg:123"),
+      agent,
+      makeEntry(channel, makeMsg("hi"), "steer"),
+    );
+    expect(channel.send).not.toHaveBeenCalled();
+    expect(channel.cancelStream).toHaveBeenCalledWith("123");
+  });
+
+  it("buffers silent marker prefixes and releases ordinary text once in order", async () => {
+    const agent = makeAgentMock();
+    (agent.runTurn as ReturnType<typeof vi.fn>).mockImplementation(
+      async (input: {
+        callbacks?: {
+          onTextDelta?(text: string): Promise<void>;
+          onTurnEnd?(text: string): Promise<void>;
+        };
+      }) => {
+        for (const delta of ["S", "I", "L", "E", "N", "T"])
+          await input.callbacks?.onTextDelta?.(delta);
+        await input.callbacks?.onTurnEnd?.("SILENT");
+        return { text: "SILENT" };
+      },
+    );
+    const silentChannel = makeChannelMock();
+    await enqueueMessage(
+      createSessionLane("tg:silent"),
+      agent,
+      makeEntry(silentChannel, makeMsg("hi"), "steer"),
+    );
+    expect(silentChannel.sendEvent).not.toHaveBeenCalled();
+
+    (agent.runTurn as ReturnType<typeof vi.fn>).mockImplementation(
+      async (input: {
+        callbacks?: {
+          onTextDelta?(text: string): Promise<void>;
+          onTurnEnd?(text: string): Promise<void>;
+        };
+      }) => {
+        for (const delta of ["S", "o", "!", " more"]) await input.callbacks?.onTextDelta?.(delta);
+        await input.callbacks?.onTurnEnd?.("So! more");
+        return { text: "So! more" };
+      },
+    );
+    const ordinaryChannel = makeChannelMock();
+    await enqueueMessage(
+      createSessionLane("tg:ordinary"),
+      agent,
+      makeEntry(ordinaryChannel, makeMsg("hi"), "steer"),
+    );
+    expect(ordinaryChannel.sendEvent).toHaveBeenCalledTimes(3);
+    expect(ordinaryChannel.sendEvent).toHaveBeenNthCalledWith(1, "123", {
+      type: "text-delta",
+      delta: "So",
+    });
+    expect(ordinaryChannel.sendEvent).toHaveBeenNthCalledWith(2, "123", {
+      type: "text-delta",
+      delta: "!",
+    });
+    expect(ordinaryChannel.sendEvent).toHaveBeenNthCalledWith(3, "123", {
+      type: "text-delta",
+      delta: " more",
+    });
   });
 });
 

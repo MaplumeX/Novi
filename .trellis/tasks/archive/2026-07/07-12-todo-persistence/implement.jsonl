@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Typebox schemas, ESM imports, JSDoc, test requirements for new tool functions"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "throw-on-failure model, unwrap helper, tool error → isError surface — must follow for tool execute changes"}
+{"file": ".trellis/spec/backend/pi-agent-core-api.md", "reason": "AgentTool/execute signature, onUpdate callback, ExecutionEnv contract, setTools behavior"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Tool file organization (one file per tool), reusable patterns, naming conventions"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "File-based persistence patterns, no-database principle — todo persistence follows this"}

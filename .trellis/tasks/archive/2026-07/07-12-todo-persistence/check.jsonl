@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify: typecheck, lint, test, build pass; no any without eslint-disable; ESM .js imports; co-located tests"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Verify: tools throw on failure (not return error text); unwrap with context; no silent catch {}"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Verify: one file per tool, factory naming, no barrel imports from dist/ internals"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Verify: file-based persistence, no database, graceful degradation on IO failure"}

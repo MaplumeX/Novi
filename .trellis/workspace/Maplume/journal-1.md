@@ -1119,3 +1119,36 @@ Planned and implemented TUI multimodal image attachments: pending queue, /image 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 34: 完善 Novi agent 网关层
+
+**Date**: 2026-07-12
+**Task**: 完善 Novi agent 网关层
+**Branch**: `main`
+
+### Summary
+
+实现 Telegram 网关的 pairing 访问控制、群聊/话题门控、入站去重、可靠投递、诊断与策略快照重载；网关专项质量门通过。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `07d1a93` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

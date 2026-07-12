@@ -1152,3 +1152,36 @@ Planned and implemented TUI multimodal image attachments: pending queue, /image 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 35: 修复 fetch_content 截断存储测试
+
+**Date**: 2026-07-12
+**Task**: 修复 fetch_content 截断存储测试
+**Branch**: `main`
+
+### Summary
+
+隔离 fetch_content 测试的用户缓存目录，验证截断全文实际落盘与 footer；恢复全量测试通过。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ddb67a8` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

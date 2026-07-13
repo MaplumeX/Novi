@@ -41,11 +41,11 @@ export const theme = {
 
 /** Centralized icon/glyph registry — no component hardcodes emoji or ad-hoc unicode. */
 export const icons = {
-  /** Dingbat spinner frames (U+2736, U+273B, U+2733, U+2722). */
-  spinner: ["✶", "✻", "✳", "✢"],
+  /** Braille spinner frames; single-column in common terminals. */
+  spinner: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
   /** Stable transcript anchors. Keep every glyph single-column in common terminals. */
   assistant: "◆",
-  thinking: "✻",
+  thinking: "⠿",
   tool: "●",
   success: "✓",
   error: "×",

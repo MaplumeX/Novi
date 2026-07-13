@@ -10,12 +10,12 @@ interface SpinnerProps {
 /**
  * Pure React dingbat spinner — no external dependency.
  *
- * Cycles through `icons.spinner` every 80ms via `setInterval`.
+ * Cycles through `icons.spinner` every 100ms via `setInterval`.
  */
 export function Spinner({ color }: SpinnerProps): React.ReactElement {
   const [i, setI] = useState(0);
   useEffect(() => {
-    const t = setInterval(() => setI((v) => (v + 1) % icons.spinner.length), 80);
+    const t = setInterval(() => setI((v) => (v + 1) % icons.spinner.length), 100);
     return () => clearInterval(t);
   }, []);
   return <Text color={color ?? theme.accent}>{icons.spinner[i]}</Text>;

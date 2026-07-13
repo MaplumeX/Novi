@@ -43,14 +43,14 @@
 
 ## Acceptance Criteria
 
-- [ ] 已有 session grant 无法绕过后续生效的 `deny`，并有回归测试覆盖。
-- [ ] 文件写入/编辑默认受 workspace 边界约束，越界拒绝在 TUI、Headless、Gateway 中一致。
-- [ ] 新工具注册必须声明 descriptor/capability；重复名、名字不一致和无效元数据会被确定性拒绝或诊断。
-- [ ] 大输出、深目录和长期 Web 缓存均有配置上限，不再依赖执行完成后的表面截断。
-- [ ] Headless JSON 客户端可以关联并消费一次工具调用的开始、增量、结束、结构化结果与错误。
-- [ ] `edit_file.edits[]` 的单项和多项编辑在 TUI 中均显示正确摘要/diff。
-- [ ] 全量 lint、typecheck、test 通过，并新增跨层集成测试验证 bootstrap/reload/resume/gateway 一致性。
-- [ ] 四个子任务分别通过验收，父任务完成最终契约一致性复核。
+- [x] 已有 session grant 无法绕过后续生效的 `deny`，并有回归测试覆盖。
+- [x] 文件写入/编辑默认受 workspace 边界约束，越界拒绝在 TUI、Headless、Gateway 中一致。
+- [x] 新工具注册必须声明 descriptor/capability；重复名、名字不一致和无效元数据会被确定性拒绝或诊断。
+- [x] 大输出、深目录和长期 Web 缓存均有配置上限，不再依赖执行完成后的表面截断。
+- [x] Headless JSON 客户端可以关联并消费一次工具调用的开始、增量、结束、结构化结果与错误。
+- [x] `edit_file.edits[]` 的单项和多项编辑在 TUI 中均显示正确摘要/diff。
+- [x] 全量 lint、typecheck、test 通过，并新增跨层集成测试验证 bootstrap/reload/resume/gateway 一致性。
+- [x] 四个子任务分别通过验收，父任务完成最终契约一致性复核。
 
 ## Out of Scope
 

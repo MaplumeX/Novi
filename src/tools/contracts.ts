@@ -111,6 +111,11 @@ export interface ToolAssembly {
   diagnostics: string[];
   /** Runtime-only guard shared with the permission gate for this harness. */
   scopeGuard: WorkspaceScopeGuard;
+  /**
+   * Live descriptor lookup for PermissionGate (includes factories/resolvers).
+   * Must cover both builtin and external/MCP tools present in this assembly.
+   */
+  resolveDescriptor: (name: string) => Readonly<ToolDescriptor> | undefined;
 }
 
 /** Serializable/carryable view used by commands and Headless projection. */

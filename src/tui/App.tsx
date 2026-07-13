@@ -83,6 +83,7 @@ function App({
         toolCatalog: initialHandle.toolCatalog,
         toolMode: initialHandle.toolMode,
         toolBudget: initialHandle.toolBudget,
+        mcp: initialHandle.mcp,
       },
       {
         env,
@@ -145,16 +146,26 @@ function App({
     print,
   );
 
+  const closeMcpAndExit = (): void => {
+    // Best-effort: stop stdio MCP children before process.exit (design risk).
+    void (async () => {
+      try {
+        await handle.mcp?.close();
+      } catch {
+        // ignore
+      }
+      exit();
+      process.exit(0);
+    })();
+  };
+
   const commandCtx: CommandContext = {
     harness: handle.harness,
     models,
     session: handle.session,
     sessionsDir,
     isIdle: state.phase === "idle",
-    exit: () => {
-      exit();
-      process.exit(0);
-    },
+    exit: closeMcpAndExit,
     print,
     handle,
     setOverlay,
@@ -362,8 +373,7 @@ function App({
       }
       tuiApprover?.denyAll();
       void handle.harness.abort().finally(() => {
-        exit();
-        process.exit(0);
+        closeMcpAndExit();
       });
     }
   });
@@ -559,6 +569,7 @@ export function renderApp(
       toolCatalog: bootstrapResult.toolCatalog,
       toolMode: bootstrapResult.toolMode,
       toolBudget: bootstrapResult.toolBudget,
+      mcp: bootstrapResult.mcp,
     },
     {
       env,

@@ -5,7 +5,11 @@ import type {
   Session,
 } from "@earendil-works/pi-agent-core/node";
 import type { Models } from "@earendil-works/pi-ai";
-import { createBuiltinToolAssembly } from "../tools/index.js";
+import {
+  assembleSessionTools,
+  type McpRuntimeHandle,
+  type ToolAssemblyWithMcp,
+} from "../tools/assembly.js";
 import {
   snapshotToolAssembly,
   type ToolCatalogSnapshot,
@@ -51,8 +55,12 @@ export interface HarnessHandle {
   toolCatalog: ToolCatalogSnapshot;
   toolMode: ToolRuntimeMode;
   toolBudget?: ResolvedToolExecutionBudget;
+  /** Live MCP connections for the current harness (closed on replace/dispose). */
+  mcp?: McpRuntimeHandle;
   /**
    * Rebuild the harness and update the holder state.
+   *
+   * Closes the previous MCP runtime (if any) after the new assembly is ready.
    *
    * - `session`/`sessionPath` omitted → reuse current session (`/reload`).
    * - `session`/`sessionPath` provided → switch to a new session (`/new`/
@@ -64,6 +72,14 @@ export interface HarnessHandle {
    * Returns resource-load diagnostics (warnings from skill/template files).
    */
   replace: (next: ReplaceOptions) => Promise<{ diagnostics: string[] }>;
+  /**
+   * Hot-rebuild tools/MCP for the current harness without full replace.
+   * Used by `/mcp approve|deny|reconnect`. Updates React state so toolCatalog
+   * identity changes and event decoder re-subscribes.
+   */
+  refreshTools: (opts?: {
+    mcpPlan?: import("../mcp/types.js").McpPlan;
+  }) => Promise<{ diagnostics: string[]; toolCatalog: ToolCatalogSnapshot }>;
 }
 
 export interface ReplaceOptions {
@@ -148,11 +164,17 @@ export async function replayHarnessState(
     approver?: Approver;
     toolMode?: ToolRuntimeMode;
     toolBudget?: ResolvedToolExecutionBudget;
+    /** When provided, skip plan resolution and use this plan (approve/deny path). */
+    mcpPlan?: import("../mcp/types.js").McpPlan;
+    /** Injectable MCP transport options for tests. */
+    mcpOptions?: import("../tools/assembly.js").CreateToolAssemblyOptions["mcp"];
   } = {},
 ): Promise<{
   diagnostics: string[];
   permissionGate: PermissionGate | undefined;
   toolCatalog: ToolCatalogSnapshot;
+  mcp?: McpRuntimeHandle;
+  toolAssembly: ToolAssemblyWithMcp;
 }> {
   const diagnostics: string[] = [];
 
@@ -177,7 +199,7 @@ export async function replayHarnessState(
       layers: opts.settingsLayers,
       workspace: cwd,
     });
-  const toolAssembly = createBuiltinToolAssembly(env, sessionId, {
+  const toolAssembly = await assembleSessionTools(env, sessionId, cwd, {
     webSearch: (opts.toolSettings ?? opts.resolvedSettings)?.webSearch,
     fetchContent: (opts.toolSettings ?? opts.resolvedSettings)?.fetchContent,
     exposure: toolSettings?.tools,
@@ -186,11 +208,15 @@ export async function replayHarnessState(
     workspace: cwd,
     budget: opts.toolBudget?.values,
     artifactsEnabled: opts.toolBudget?.artifactsEnabled,
+    connectMcp: true,
+    mcpPlan: opts.mcpPlan,
+    mcp: opts.mcpOptions,
   });
   await newHarness.setTools(toolAssembly.tools, toolAssembly.activeToolNames);
   diagnostics.push(...toolAssembly.diagnostics);
   if (permissionGate) {
     permissionGate.setScopeGuard(toolAssembly.scopeGuard);
+    permissionGate.setResolveDescriptor(toolAssembly.resolveDescriptor);
   } else if (opts.permissionStore) {
     permissionGate = buildPermissionGate(
       {
@@ -199,6 +225,7 @@ export async function replayHarnessState(
         approver: opts.approver,
       },
       toolAssembly.scopeGuard,
+      toolAssembly.resolveDescriptor,
     );
   }
 
@@ -279,6 +306,8 @@ export async function replayHarnessState(
     diagnostics,
     permissionGate,
     toolCatalog: snapshotToolAssembly(toolAssembly),
+    mcp: toolAssembly.mcp,
+    toolAssembly,
   };
 }
 
@@ -301,6 +330,7 @@ export function createHarnessHandle(
     toolCatalog: ToolCatalogSnapshot;
     toolMode: ToolRuntimeMode;
     toolBudget?: ResolvedToolExecutionBudget;
+    mcp?: McpRuntimeHandle;
   },
   deps: CreateHarnessHandleDeps,
 ): HarnessHandle {
@@ -340,7 +370,7 @@ export function createHarnessHandle(
       //    handle (trust is cwd-scoped, not session-scoped; re-resolving would
       //    require a fresh trust prompt mid-session, which we don't support).
       //    Session permission store is the same instance (AC13).
-      const { diagnostics, permissionGate, toolCatalog } = await replayHarnessState(
+      const { diagnostics, permissionGate, toolCatalog, mcp } = await replayHarnessState(
         newHarness,
         old.harness,
         env,
@@ -361,7 +391,15 @@ export function createHarnessHandle(
           toolBudget,
         },
       );
-      // 6. Build the new handle with its own replace closure, then publish.
+      // 6. Close previous MCP clients after new ones are connected (process leak).
+      if (old.mcp) {
+        try {
+          await old.mcp.close();
+        } catch {
+          // best-effort
+        }
+      }
+      // 7. Build the new handle with its own replace/refreshTools closures, then publish.
       const newHandle: HarnessHandle = {
         harness: newHarness,
         session,
@@ -372,14 +410,55 @@ export function createHarnessHandle(
         toolCatalog,
         toolMode: old.toolMode,
         toolBudget,
-        replace: async () => {
-          // Placeholder overwritten immediately below (TDZ-safe fixup).
-          return { diagnostics: [] };
-        },
+        mcp,
+        replace: async () => ({ diagnostics: [] }),
+        refreshTools: async () => ({ diagnostics: [], toolCatalog }),
       };
       newHandle.replace = makeReplace(newHandle);
+      newHandle.refreshTools = makeRefreshTools(newHandle);
       setHandle(newHandle);
       return { diagnostics };
+    };
+  }
+
+  function makeRefreshTools(current: HarnessHandle): HarnessHandle["refreshTools"] {
+    return async (opts = {}): Promise<{ diagnostics: string[]; toolCatalog: ToolCatalogSnapshot }> => {
+      const sessionMeta = await current.session.getMetadata();
+      const permissions = current.permissionGate.getPermissions();
+      const toolAssembly = await assembleSessionTools(env, sessionMeta.id, cwd, {
+        webSearch: resolvedSettings?.webSearch,
+        fetchContent: resolvedSettings?.fetchContent,
+        exposure: resolvedSettings?.tools,
+        permissions,
+        mode: current.toolMode,
+        workspace: cwd,
+        budget: toolBudget?.values,
+        artifactsEnabled: toolBudget?.artifactsEnabled,
+        connectMcp: true,
+        mcpPlan: opts.mcpPlan,
+      });
+      await current.harness.setTools(toolAssembly.tools, toolAssembly.activeToolNames);
+      current.permissionGate.setScopeGuard(toolAssembly.scopeGuard);
+      current.permissionGate.setResolveDescriptor(toolAssembly.resolveDescriptor);
+      if (current.mcp) {
+        try {
+          await current.mcp.close();
+        } catch {
+          // best-effort
+        }
+      }
+      const toolCatalog = snapshotToolAssembly(toolAssembly);
+      const nextHandle: HarnessHandle = {
+        ...current,
+        toolCatalog,
+        mcp: toolAssembly.mcp,
+        replace: async () => ({ diagnostics: [] }),
+        refreshTools: async () => ({ diagnostics: [], toolCatalog }),
+      };
+      nextHandle.replace = makeReplace(nextHandle);
+      nextHandle.refreshTools = makeRefreshTools(nextHandle);
+      setHandle(nextHandle);
+      return { diagnostics: toolAssembly.diagnostics, toolCatalog };
     };
   }
 
@@ -393,11 +472,11 @@ export function createHarnessHandle(
     toolCatalog: initial.toolCatalog,
     toolMode: initial.toolMode,
     toolBudget: initial.toolBudget ?? deps.toolBudget,
-    replace: async () => {
-      // Placeholder overwritten immediately below.
-      return { diagnostics: [] };
-    },
+    mcp: initial.mcp,
+    replace: async () => ({ diagnostics: [] }),
+    refreshTools: async () => ({ diagnostics: [], toolCatalog: initial.toolCatalog }),
   };
   handle.replace = makeReplace(handle);
+  handle.refreshTools = makeRefreshTools(handle);
   return handle;
 }

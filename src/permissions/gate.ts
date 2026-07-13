@@ -67,7 +67,7 @@ export class PermissionGate {
   private readonly approver: Approver;
   private readonly store: SessionPermissionStore;
   private scopeGuard: WorkspaceScopeGuard;
-  private readonly resolveDescriptor: PermissionGateOptions["resolveDescriptor"];
+  private resolveDescriptor: PermissionGateOptions["resolveDescriptor"];
   private readonly interactive: boolean;
 
   constructor(opts: PermissionGateOptions) {
@@ -85,6 +85,11 @@ export class PermissionGate {
 
   setScopeGuard(next: WorkspaceScopeGuard): void {
     this.scopeGuard = next;
+  }
+
+  /** Hot-swap descriptor lookup after tool catalog rebuild (builtin + MCP). */
+  setResolveDescriptor(next: PermissionGateOptions["resolveDescriptor"]): void {
+    this.resolveDescriptor = next;
   }
 
   getPermissions(): ResolvedPermissions {

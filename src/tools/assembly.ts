@@ -59,19 +59,41 @@ export async function createToolAssembly(
   options: CreateToolAssemblyOptions = {},
 ): Promise<ToolAssemblyWithMcp> {
   const plan = options.mcpPlan;
-  if (!plan || options.connectMcp === false) {
+  // No MCP config / empty plan → identical to pre-MCP builtin-only behavior (R9).
+  if (!plan || plan.entries.length === 0) {
+    return createBuiltinToolAssembly(env, sessionId, options);
+  }
+  if (options.connectMcp === false) {
     const builtin = createBuiltinToolAssembly(env, sessionId, options);
-    if (!plan) return builtin;
-
+    // Preflight / diagnostics-only: keep plan + empty manager, never spawn.
     const manager = new McpClientManager({
       workspaceCwd: options.workspace ?? env.cwd,
       ...options.mcp,
     });
     const handle = createMcpRuntimeHandle(manager, plan);
-    return { ...builtin, mcp: handle, diagnostics: [...builtin.diagnostics, ...handle.getDiagnostics()] };
+    return {
+      ...builtin,
+      mcp: handle,
+      diagnostics: [...builtin.diagnostics, ...plan.diagnostics, ...formatPlanStatusDiagnostics(plan)],
+    };
   }
 
   return buildMergedAssembly(env, sessionId, options, plan);
+}
+
+/** Surface non-connectable MCP plan rows as diagnostics without connecting. */
+function formatPlanStatusDiagnostics(plan: McpPlan): string[] {
+  const out: string[] = [];
+  for (const entry of plan.entries) {
+    if (entry.status === "pending") {
+      out.push(`mcp server "${entry.name}" pending approval (${entry.origin})`);
+    } else if (entry.status === "denied") {
+      out.push(`mcp server "${entry.name}" denied (${entry.origin})`);
+    } else if (entry.status === "invalid") {
+      out.push(`mcp server "${entry.name}" invalid: ${entry.reason ?? "invalid config"}`);
+    }
+  }
+  return out;
 }
 
 /**
@@ -223,8 +245,10 @@ async function buildMergedAssembly(
       ...assembly.diagnostics,
       ...manager.getDiagnostics(),
       ...mcpDiagnostics,
+      ...formatPlanStatusDiagnostics(plan),
     ],
     scopeGuard,
+    resolveDescriptor: assembly.resolveDescriptor,
     mcp: handle,
   };
 }
@@ -237,4 +261,45 @@ function createMcpRuntimeHandle(manager: McpClientManager, plan: McpPlan): McpRu
     reconnect: (serverName?: string) => manager.reconnect(serverName),
     getDiagnostics: () => manager.getDiagnostics(),
   };
+}
+
+export interface AssembleSessionToolsOptions extends CreateBuiltinToolAssemblyOptions {
+  /**
+   * When true (default), resolve MCP plan and connect approved servers.
+   * Preflight should pass `false` to avoid spawning MCP processes.
+   */
+  connectMcp?: boolean;
+  /** Optional injectable MCP manager options (tests). */
+  mcp?: McpClientManagerOptions;
+  /** Override plan resolution (tests / hot path that already has a plan). */
+  mcpPlan?: McpPlan;
+}
+
+/**
+ * Shared session tool assembly used by bootstrap, resume, gateway create,
+ * and TUI harness rebuild.
+ *
+ * - Preflight: `connectMcp: false` → builtin tools + MCP plan diagnostics only.
+ * - Real sessions: resolve plan (unless provided), connect approved servers,
+ *   merge external descriptors into one registry/runtime/scopeGuard.
+ */
+export async function assembleSessionTools(
+  env: ExecutionEnv,
+  sessionId: string,
+  cwd: string,
+  options: AssembleSessionToolsOptions = {},
+): Promise<ToolAssemblyWithMcp> {
+  const connectMcp = options.connectMcp !== false;
+  let plan = options.mcpPlan;
+  if (plan === undefined) {
+    const { resolveMcpPlan } = await import("../mcp/plan.js");
+    plan = await resolveMcpPlan(env, cwd);
+  }
+  return createToolAssembly(env, sessionId, {
+    ...options,
+    workspace: options.workspace ?? cwd,
+    mcpPlan: plan,
+    connectMcp,
+    mcp: options.mcp,
+  });
 }

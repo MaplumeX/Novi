@@ -297,7 +297,13 @@ export function createBuiltinToolAssembly(
     },
     policy,
   );
-  return { ...assembly, tools: assembly.tools.map((tool) => runtime.wrap(tool)), scopeGuard };
+  return {
+    ...assembly,
+    tools: assembly.tools.map((tool) => runtime.wrap(tool)),
+    scopeGuard,
+    // Prefer registry lookup (covers only builtins here); fall back to static table.
+    resolveDescriptor: (name) => assembly.resolveDescriptor(name) ?? getBuiltinToolDescriptor(name),
+  };
 }
 
 /** Serializable descriptor lookup used by permission and presentation layers. */

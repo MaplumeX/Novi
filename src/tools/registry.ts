@@ -135,6 +135,7 @@ export class ToolRegistry {
       availability,
       diagnostics,
       scopeGuard: context.scopeGuard,
+      resolveDescriptor: (name: string) => this.descriptors.get(name),
     };
   }
 }

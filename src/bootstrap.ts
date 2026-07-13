@@ -21,11 +21,16 @@ import type { LoadedResources } from "./resources.js";
 import type { HookConfig } from "./hooks/index.js";
 import { getNoviDir, getSessionsDir } from "./config.js";
 import { DEFAULT_SYSTEM_PROMPT } from "./default-system-prompt.js";
-import { createBuiltinToolAssembly } from "./tools/index.js";
 import { getBuiltinToolDescriptor } from "./tools/index.js";
+import {
+  assembleSessionTools,
+  type McpRuntimeHandle,
+  type ToolAssemblyWithMcp,
+} from "./tools/assembly.js";
 import {
   snapshotToolAssembly,
   type ToolCatalogSnapshot,
+  type ToolDescriptor,
   type ToolRuntimeMode,
 } from "./tools/contracts.js";
 import type { WorkspaceScopeGuard } from "./permissions/scope.js";
@@ -137,6 +142,8 @@ export interface BootstrapResult {
   toolCatalog: ToolCatalogSnapshot;
   toolMode: ToolRuntimeMode;
   toolBudget: ResolvedToolExecutionBudget;
+  /** Live MCP runtime (undefined when no MCP config / not connected). */
+  mcp?: McpRuntimeHandle;
 }
 
 /**
@@ -184,6 +191,11 @@ export interface GatewayEnv {
   toolCatalog: ToolCatalogSnapshot;
   toolMode: ToolRuntimeMode;
   toolBudget: ResolvedToolExecutionBudget;
+  /**
+   * Preflight MCP plan diagnostics only (connectMcp:false). Real connections
+   * are owned by each CreatedSession / BootstrapResult.mcp handle.
+   */
+  mcpPlanDiagnostics: string[];
 }
 
 /**
@@ -359,7 +371,9 @@ export async function prepareGatewayEnv(options: BootstrapOptions = {}): Promise
   const permissionStore = options.permissionStore ?? new SessionPermissionStore();
   const approver = options.approver;
 
-  const toolPreflight = createBuiltinToolAssembly(env, "preflight", {
+  // Preflight avoids spawning MCP processes (connectMcp:false). Real sessions
+  // connect approved servers inside createHarnessForSession / resume.
+  const toolPreflight = await assembleSessionTools(env, "preflight", cwd, {
     webSearch: resolvedSettings.webSearch,
     fetchContent: resolvedSettings.fetchContent,
     exposure: resolvedSettings.tools,
@@ -367,6 +381,7 @@ export async function prepareGatewayEnv(options: BootstrapOptions = {}): Promise
     mode: toolMode,
     budget: toolBudget.values,
     artifactsEnabled: toolBudget.artifactsEnabled,
+    connectMcp: false,
   });
   for (const diagnostic of toolPreflight.diagnostics) {
     process.stderr.write(`warning: ${diagnostic}\n`);
@@ -427,6 +442,7 @@ export async function prepareGatewayEnv(options: BootstrapOptions = {}): Promise
     toolCatalog: snapshotToolAssembly(toolPreflight),
     toolMode,
     toolBudget,
+    mcpPlanDiagnostics: toolPreflight.diagnostics.filter((d) => d.startsWith("mcp ")),
   };
 }
 
@@ -438,6 +454,7 @@ export interface CreatedSession {
   permissionGate: PermissionGate;
   toolCatalog: ToolCatalogSnapshot;
   permissionStore: SessionPermissionStore;
+  mcp?: McpRuntimeHandle;
 }
 
 /**
@@ -469,7 +486,7 @@ export async function createHarnessForSession(
     thinkingLevel,
   });
 
-  const toolAssembly = createBuiltinToolAssembly(env, metadata.id, {
+  const toolAssembly = await assembleSessionTools(env, metadata.id, cwd, {
     webSearch: gatewayEnv.resolvedSettings.webSearch,
     fetchContent: gatewayEnv.resolvedSettings.fetchContent,
     exposure: gatewayEnv.resolvedSettings.tools,
@@ -478,7 +495,11 @@ export async function createHarnessForSession(
     workspace: cwd,
     budget: gatewayEnv.toolBudget.values,
     artifactsEnabled: gatewayEnv.toolBudget.artifactsEnabled,
+    connectMcp: true,
   });
+  for (const diagnostic of toolAssembly.diagnostics) {
+    process.stderr.write(`warning: ${diagnostic}\n`);
+  }
   await harness.setTools(toolAssembly.tools, toolAssembly.activeToolNames);
 
   await harness.setResources({
@@ -493,6 +514,7 @@ export async function createHarnessForSession(
   const permissionGate = buildPermissionGate(
     { ...gatewayEnv, permissionStore },
     toolAssembly.scopeGuard,
+    toolAssembly.resolveDescriptor,
   );
   registerHooks(harness, hookConfig, { env, cwd, sessionId: metadata.id }, { permissionGate });
 
@@ -516,6 +538,7 @@ export async function createHarnessForSession(
     permissionGate,
     toolCatalog: snapshotToolAssembly(toolAssembly),
     permissionStore,
+    mcp: toolAssembly.mcp,
   };
 }
 
@@ -535,12 +558,13 @@ export function buildPermissionGate(
     approver: Approver | undefined;
   },
   scopeGuard: WorkspaceScopeGuard,
+  resolveDescriptor: (name: string) => Readonly<ToolDescriptor> | undefined = getBuiltinToolDescriptor,
 ): PermissionGate {
   const common = {
     permissions: gatewayEnv.permissions,
     store: gatewayEnv.permissionStore,
     scopeGuard,
-    resolveDescriptor: getBuiltinToolDescriptor,
+    resolveDescriptor,
   };
   if (gatewayEnv.approver) {
     return createPermissionGate({
@@ -569,6 +593,7 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
   let permissionGate: PermissionGate;
   let permissionStore = gatewayEnv.permissionStore;
   let toolCatalog: ToolCatalogSnapshot;
+  let mcp: McpRuntimeHandle | undefined;
 
   if (options.resumePath) {
     const { env } = gatewayEnv;
@@ -590,23 +615,37 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
       thinkingLevel: gatewayEnv.thinkingLevel,
     });
 
-    const toolAssembly = createBuiltinToolAssembly(env, metadata.id, {
-      webSearch: gatewayEnv.resolvedSettings.webSearch,
-      fetchContent: gatewayEnv.resolvedSettings.fetchContent,
-      exposure: gatewayEnv.resolvedSettings.tools,
-      permissions: gatewayEnv.permissions,
-      mode: gatewayEnv.toolMode,
-      workspace: gatewayEnv.cwd,
-      budget: gatewayEnv.toolBudget.values,
-      artifactsEnabled: gatewayEnv.toolBudget.artifactsEnabled,
-    });
+    const toolAssembly: ToolAssemblyWithMcp = await assembleSessionTools(
+      env,
+      metadata.id,
+      gatewayEnv.cwd,
+      {
+        webSearch: gatewayEnv.resolvedSettings.webSearch,
+        fetchContent: gatewayEnv.resolvedSettings.fetchContent,
+        exposure: gatewayEnv.resolvedSettings.tools,
+        permissions: gatewayEnv.permissions,
+        mode: gatewayEnv.toolMode,
+        workspace: gatewayEnv.cwd,
+        budget: gatewayEnv.toolBudget.values,
+        artifactsEnabled: gatewayEnv.toolBudget.artifactsEnabled,
+        connectMcp: true,
+      },
+    );
+    for (const diagnostic of toolAssembly.diagnostics) {
+      process.stderr.write(`warning: ${diagnostic}\n`);
+    }
     await harness.setTools(toolAssembly.tools, toolAssembly.activeToolNames);
     toolCatalog = snapshotToolAssembly(toolAssembly);
+    mcp = toolAssembly.mcp;
     await harness.setResources({
       skills: gatewayEnv.resources.skills,
       promptTemplates: gatewayEnv.resources.promptTemplates,
     });
-    permissionGate = buildPermissionGate(gatewayEnv, toolAssembly.scopeGuard);
+    permissionGate = buildPermissionGate(
+      gatewayEnv,
+      toolAssembly.scopeGuard,
+      toolAssembly.resolveDescriptor,
+    );
     registerHooks(
       harness,
       gatewayEnv.hookConfig,
@@ -631,6 +670,7 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
     permissionGate = created.permissionGate;
     permissionStore = created.permissionStore;
     toolCatalog = created.toolCatalog;
+    mcp = created.mcp;
   }
 
   return {
@@ -658,5 +698,6 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
     toolCatalog,
     toolMode: gatewayEnv.toolMode,
     toolBudget: gatewayEnv.toolBudget,
+    mcp,
   };
 }

@@ -6,6 +6,8 @@ import {
   nextThinkingLevel,
   THINKING_LEVELS,
   formatToolCatalog,
+  formatMcpList,
+  COMMANDS,
 } from "./commands.js";
 import type { CommandContext } from "./commands.js";
 
@@ -36,9 +38,19 @@ function makeCtx(opts: {
     isIdle: opts.isIdle ?? true,
     exit: vi.fn(),
     print: vi.fn(),
-    handle: { replace: vi.fn() },
+    handle: {
+      replace: vi.fn(),
+      refreshTools: vi.fn().mockResolvedValue({
+        diagnostics: [],
+        toolCatalog: { descriptors: [], activeToolNames: [], availability: [], diagnostics: [] },
+      }),
+      toolCatalog: { descriptors: [], activeToolNames: [], availability: [], diagnostics: [] },
+    },
     setOverlay: vi.fn(),
-    env: {},
+    env: {
+      readTextFile: async () => ({ ok: false, error: { message: "missing" } }),
+      fileInfo: async () => ({ ok: false, error: { message: "missing" } }),
+    },
     cwd: "/tmp",
     systemPrompt: () => "",
     cliOverrides: {},
@@ -221,6 +233,35 @@ describe("/tools", () => {
     expect(text).toContain("web_search  unavailable");
     expect(text).toContain("INITIALIZATION_FAILED: missing BRAVE_API_KEY");
     expect(text).toContain("Diagnostics:");
+  });
+
+  it("labels external MCP sources clearly", () => {
+    const text = formatToolCatalog({
+      descriptors: [
+        {
+          name: "mcp_demo_echo",
+          label: "echo",
+          source: { kind: "external", id: "mcp:demo" },
+          capabilities: ["external.invoke"],
+          risk: "execute",
+          defaultPermission: "ask",
+          defaultEnabled: true,
+          streaming: "none",
+          modes: ["tui"],
+          optional: true,
+        },
+      ],
+      activeToolNames: ["mcp_demo_echo"],
+      availability: [
+        {
+          name: "mcp_demo_echo",
+          source: { kind: "external", id: "mcp:demo" },
+          status: "active",
+        },
+      ],
+      diagnostics: [],
+    });
+    expect(text).toContain("[external:mcp:demo]");
   });
 
   it("prints the current handle catalog", async () => {
@@ -740,5 +781,51 @@ describe("/image and /paste-image", () => {
     };
     await runCommand("/paste-image", ctx);
     expect(ctx.print).toHaveBeenCalledWith("no image on clipboard");
+  });
+});
+
+describe("/mcp command", () => {
+  it("is registered in COMMANDS", () => {
+    const cmd = COMMANDS.find((c) => c.name === "mcp");
+    expect(cmd).toBeDefined();
+    expect(cmd!.description.toLowerCase()).toContain("mcp");
+    expect(cmd!.description.toLowerCase()).toContain("trust");
+  });
+
+  it("formatMcpList distinguishes empty config and trust note", () => {
+    const empty = formatMcpList(
+      { entries: [], diagnostics: [] },
+      { descriptors: [], activeToolNames: [], availability: [], diagnostics: [] },
+    );
+    expect(empty).toContain("No MCP servers configured");
+    expect(empty).toContain("/mcp approve");
+
+    const listed = formatMcpList(
+      {
+        entries: [
+          {
+            name: "demo",
+            origin: "project",
+            status: "pending",
+            fingerprint: "fp",
+            config: { command: "npx", args: ["-y", "pkg"] },
+            reason: "project server awaiting approval",
+          },
+        ],
+        diagnostics: [],
+      },
+      { descriptors: [], activeToolNames: [], availability: [], diagnostics: [] },
+    );
+    expect(listed).toContain("demo");
+    expect(listed).toContain("status=pending");
+    expect(listed).toContain("/trust is project settings");
+  });
+
+  it("/mcp list prints via command runner", async () => {
+    const { ctx } = makeCtx({});
+    await runCommand("/mcp", ctx);
+    expect(ctx.print).toHaveBeenCalled();
+    const text = String((ctx.print as ReturnType<typeof vi.fn>).mock.calls[0]![0]);
+    expect(text.toLowerCase()).toContain("mcp");
   });
 });

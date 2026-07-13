@@ -2,8 +2,19 @@ import type { BootstrapResult } from "../bootstrap.js";
 import { extractText, HeadlessEventProjector, projectToolCatalog } from "./events.js";
 import { mergePrompt, readStdinIfPiped } from "./stdin.js";
 
+/** Best-effort MCP shutdown so stdio servers do not leak past process exit. */
+async function closeMcp(result: BootstrapResult): Promise<void> {
+  if (!result.mcp) return;
+  try {
+    await result.mcp.close();
+  } catch {
+    // ignore
+  }
+}
+
 /** Write to stderr and exit non-zero (mirrors `cli.fail` for headless paths). */
-function fail(message: string): never {
+async function fail(message: string, result?: BootstrapResult): Promise<never> {
+  if (result) await closeMcp(result);
   process.stderr.write(`Novi: ${message}\n`);
   process.exit(1);
 }
@@ -40,7 +51,7 @@ export async function runPrint(opts: RunOptions): Promise<void> {
   const stdin = await readStdinIfPiped();
   const fullPrompt = mergePrompt(stdin, opts.prompt);
   if (!fullPrompt) {
-    fail(`No prompt provided (use -p "prompt" or pipe stdin)`);
+    await fail(`No prompt provided (use -p "prompt" or pipe stdin)`, opts.result);
   }
 
   let lastAssistantText = "";
@@ -57,6 +68,7 @@ export async function runPrint(opts: RunOptions): Promise<void> {
   } catch (e) {
     unsub();
     const message = e instanceof Error ? e.message : String(e);
+    await closeMcp(opts.result);
     process.stderr.write(`Novi: ${message}\n`);
     process.exit(1);
   }
@@ -65,6 +77,7 @@ export async function runPrint(opts: RunOptions): Promise<void> {
   await new Promise<void>((resolve) => {
     process.stdout.write(lastAssistantText + "\n", () => resolve());
   });
+  await closeMcp(opts.result);
   process.exit(0);
 }
 
@@ -80,7 +93,7 @@ export async function runJson(opts: RunOptions): Promise<void> {
   const stdin = await readStdinIfPiped();
   const fullPrompt = mergePrompt(stdin, opts.prompt);
   if (!fullPrompt) {
-    fail(`No prompt provided (use --mode json "prompt" or pipe stdin)`);
+    await fail(`No prompt provided (use --mode json "prompt" or pipe stdin)`, opts.result);
   }
 
   process.stdout.write(
@@ -100,10 +113,12 @@ export async function runJson(opts: RunOptions): Promise<void> {
     process.stdout.write(JSON.stringify({ type: "error", message }) + "\n");
     await flushStdout();
     unsub();
+    await closeMcp(opts.result);
     process.stderr.write(`Novi: ${message}\n`);
     process.exit(1);
   }
   unsub();
   await flushStdout();
+  await closeMcp(opts.result);
   process.exit(0);
 }

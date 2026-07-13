@@ -12,6 +12,7 @@ import type {
   AgentProtocolTurnResult,
 } from "../core/types.js";
 import type { ToolCatalogSnapshot } from "../../tools/contracts.js";
+import type { McpRuntimeHandle } from "../../tools/assembly.js";
 
 /** Cached harness + session for one session key. */
 interface SessionEntry {
@@ -19,6 +20,7 @@ interface SessionEntry {
   session: Session<JsonlSessionMetadata>;
   sessionPath: string;
   toolCatalog: ToolCatalogSnapshot;
+  mcp?: McpRuntimeHandle;
 }
 
 /**
@@ -52,6 +54,7 @@ export class NoviAgentAdapter implements AgentProtocolAdapter {
       session: created.session,
       sessionPath: created.sessionPath,
       toolCatalog: created.toolCatalog,
+      mcp: created.mcp,
     };
     this.sessions.set(sessionKey, entry);
     return entry;
@@ -128,6 +131,13 @@ export class NoviAgentAdapter implements AgentProtocolAdapter {
           e instanceof Error ? e.message : String(e)
         }\n`,
       );
+    }
+    if (entry.mcp) {
+      try {
+        await entry.mcp.close();
+      } catch {
+        // best-effort
+      }
     }
     this.sessions.delete(sessionKey);
   }

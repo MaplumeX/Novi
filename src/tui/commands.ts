@@ -24,6 +24,14 @@ import { loadTrust, resolveProjectTrust, saveTrust, hasGatedResources } from "..
 import { matchScopedModels } from "./scoped-models.js";
 import { getNoviDir } from "../config.js";
 import {
+  isHttpServerConfig,
+  isStdioServerConfig,
+  resolveMcpPlan,
+  setMcpApproval,
+  type McpPlan,
+  type McpPlanEntry,
+} from "../mcp/index.js";
+import {
   appendPending,
   loadImageFile,
   MAX_PENDING_IMAGES,
@@ -158,15 +166,63 @@ export function formatToolCatalog(catalog: ToolCatalogSnapshot): string {
   for (const descriptor of catalog.descriptors) {
     const state = availability.get(descriptor.name);
     const status = state?.status ?? "unavailable";
+    const sourceLabel =
+      descriptor.source.kind === "external"
+        ? `external:${descriptor.source.id}`
+        : `${descriptor.source.kind}:${descriptor.source.id}`;
     lines.push(
-      `  ${descriptor.name}  ${status}  [${descriptor.source.kind}:${descriptor.source.id}] ` +
-        descriptor.capabilities.join(","),
+      `  ${descriptor.name}  ${status}  [${sourceLabel}] ` + descriptor.capabilities.join(","),
     );
     if (state?.reason) lines.push(`    ${state.reasonCode ?? "UNAVAILABLE"}: ${state.reason}`);
   }
   if (catalog.diagnostics.length > 0) {
     lines.push("Diagnostics:", ...catalog.diagnostics.map((diagnostic) => `  ${diagnostic}`));
   }
+  return lines.join("\n");
+}
+
+function formatMcpTransportSummary(entry: McpPlanEntry): string {
+  if (!entry.config) return "-";
+  if (isStdioServerConfig(entry.config)) {
+    const args = entry.config.args?.length ? ` ${entry.config.args.join(" ")}` : "";
+    return `stdio:${entry.config.command}${args}`;
+  }
+  if (isHttpServerConfig(entry.config)) {
+    return `http:${entry.config.url}`;
+  }
+  return "-";
+}
+
+/** Format MCP server rows for `/mcp list`. */
+export function formatMcpList(plan: McpPlan, catalog: ToolCatalogSnapshot): string {
+  if (plan.entries.length === 0) {
+    return [
+      "No MCP servers configured.",
+      "User: ~/.novi/mcp.json  Project: .mcp.json (requires /mcp approve, not /trust).",
+    ].join("\n");
+  }
+  const lines = ["MCP servers:"];
+  for (const entry of plan.entries) {
+    const toolCount = catalog.descriptors.filter(
+      (d) => d.source.kind === "external" && d.source.id === `mcp:${entry.name}`,
+    ).length;
+    const activeCount = catalog.activeToolNames.filter((name) =>
+      catalog.descriptors.some(
+        (d) =>
+          d.name === name && d.source.kind === "external" && d.source.id === `mcp:${entry.name}`,
+      ),
+    ).length;
+    lines.push(
+      `  ${entry.name}  origin=${entry.origin}  status=${entry.status}  tools=${activeCount}/${toolCount}  ${formatMcpTransportSummary(entry)}`,
+    );
+    if (entry.reason) lines.push(`    ${entry.reason}`);
+  }
+  if (plan.diagnostics.length > 0) {
+    lines.push("Diagnostics:", ...plan.diagnostics.map((d) => `  ${d}`));
+  }
+  lines.push(
+    "Note: /trust is project settings/skills trust; /mcp approve is MCP server connection approval.",
+  );
   return lines.join("\n");
 }
 
@@ -428,6 +484,14 @@ export const COMMANDS: readonly Command[] = [
     },
   },
   {
+    name: "mcp",
+    description:
+      "Manage MCP servers (/mcp [list|approve <name>|deny <name>|reconnect [name]]). Distinct from /trust.",
+    run: async (ctx, args) => {
+      await runMcpCommand(ctx, args);
+    },
+  },
+  {
     name: "compact",
     description: "Compact context (optional custom instructions)",
     run: async (ctx, args) => {
@@ -640,7 +704,89 @@ export const COMMANDS: readonly Command[] = [
 ];
 
 const COMMAND_HINT =
-  "Try /quit /model /tools /session /new /resume /name /compact /settings /trust /scoped-models /reload /image /paste-image /skill:<name>.";
+  "Try /quit /model /tools /mcp /session /new /resume /name /compact /settings /trust /scoped-models /reload /image /paste-image /skill:<name>.";
+
+/** `/mcp` subcommands: list / approve / deny / reconnect. */
+async function runMcpCommand(ctx: CommandContext, args: string): Promise<void> {
+  const trimmed = args.trim();
+  const spaceIdx = trimmed.search(/\s/);
+  const sub = (spaceIdx === -1 ? trimmed : trimmed.slice(0, spaceIdx)).toLowerCase() || "list";
+  const rest = spaceIdx === -1 ? "" : trimmed.slice(spaceIdx + 1).trim();
+
+  if (sub === "list" || sub === "") {
+    const plan = await resolveMcpPlan(ctx.env, ctx.cwd);
+    ctx.print(formatMcpList(plan, ctx.handle.toolCatalog));
+    return;
+  }
+
+  if (sub === "approve" || sub === "deny") {
+    if (!rest) {
+      ctx.print(`Usage: /mcp ${sub} <server>`);
+      return;
+    }
+    const plan = await resolveMcpPlan(ctx.env, ctx.cwd);
+    const entry = plan.entries.find((e) => e.name === rest);
+    if (!entry) {
+      ctx.print(`Unknown MCP server: ${rest}`);
+      return;
+    }
+    if (entry.origin !== "project") {
+      ctx.print(
+        `MCP server "${entry.name}" is origin=${entry.origin}; approval store is only required for project servers.`,
+      );
+      // Still allow writing an entry if user insists? Prefer no-op with guidance.
+      return;
+    }
+    try {
+      await setMcpApproval(ctx.env, {
+        serverName: entry.name,
+        fingerprint: entry.fingerprint,
+        decision: sub === "approve" ? "approved" : "denied",
+        origin: "project",
+        projectRoot: ctx.cwd,
+      });
+    } catch (e) {
+      ctx.print(`Failed to save MCP approval: ${e instanceof Error ? e.message : String(e)}`);
+      return;
+    }
+    try {
+      const { diagnostics, toolCatalog } = await ctx.handle.refreshTools();
+      for (const d of diagnostics) ctx.print(`warning: ${d}`);
+      const nextPlan = await resolveMcpPlan(ctx.env, ctx.cwd);
+      ctx.print(
+        `MCP server "${entry.name}" ${sub === "approve" ? "approved" : "denied"}.\n` +
+          formatMcpList(nextPlan, toolCatalog),
+      );
+    } catch (e) {
+      ctx.print(`MCP tool refresh failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    return;
+  }
+
+  if (sub === "reconnect") {
+    try {
+      // Explicit reconnect: re-resolve plan + rebuild assembly (no background reconnect).
+      const planBefore = await resolveMcpPlan(ctx.env, ctx.cwd);
+      if (rest && !planBefore.entries.some((e) => e.name === rest)) {
+        ctx.print(`Unknown MCP server: ${rest}`);
+        return;
+      }
+      const { diagnostics, toolCatalog } = await ctx.handle.refreshTools();
+      for (const d of diagnostics) ctx.print(`warning: ${d}`);
+      const plan = await resolveMcpPlan(ctx.env, ctx.cwd);
+      ctx.print(
+        rest
+          ? `Reconnected MCP server "${rest}".\n${formatMcpList(plan, toolCatalog)}`
+          : `Reconnected MCP servers.\n${formatMcpList(plan, toolCatalog)}`,
+      );
+    } catch (e) {
+      ctx.print(`MCP reconnect failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    return;
+  }
+
+  ctx.print("Usage: /mcp [list|approve <name>|deny <name>|reconnect [name]]");
+}
 
 /**
  * Read the system clipboard image and append it to pending.

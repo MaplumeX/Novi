@@ -1,5 +1,56 @@
 # Novi
 
+## MCP external tools
+
+Novi can load Model Context Protocol (MCP) servers and expose their tools
+alongside the built-in catalog.
+
+Config files:
+
+- User (always loadable): `~/.novi/mcp.json`
+- Project (requires MCP approval before connect): `<cwd>/.mcp.json`
+  (secondary: `<cwd>/.novi/mcp.json`)
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "."]
+    },
+    "remote-docs": {
+      "url": "https://example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${DOCS_MCP_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+Approvals are **not** project trust:
+
+- `/trust` controls whether project settings/skills/prompts/models load.
+- `/mcp approve|deny` controls whether a **project** MCP server may connect.
+  Approvals live in user-local `~/.novi/mcp-approvals.json` and are keyed by
+  server name + transport fingerprint (command/args/url change → re-approve).
+- User-origin MCP servers connect without approval; every MCP tool still uses
+  the normal tool permission gate (default `ask`).
+
+TUI management:
+
+```text
+/mcp                 # list servers, status, tool counts
+/mcp approve <name>  # approve project server + hot-refresh tools
+/mcp deny <name>     # deny and drop tools (persists across restarts)
+/mcp reconnect       # explicit reconnect (no background auto-reconnect)
+/tools               # shows builtin + external source labels
+```
+
+Headless/Gateway paths never prompt for MCP approval; pending project servers
+appear only as diagnostics. Operators approve via TUI (preferred) or by writing
+the approval store.
+
 ## Tool permissions and workspace boundary
 
 Known tools use their validated descriptor default, then apply permission

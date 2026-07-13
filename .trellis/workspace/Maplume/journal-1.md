@@ -1185,3 +1185,36 @@ Planned and implemented TUI multimodal image attachments: pending queue, /image 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 36: Rewrite web search and content fetch tools
+
+**Date**: 2026-07-13
+**Task**: Rewrite web search and content fetch tools
+**Branch**: `main`
+
+### Summary
+
+Replaced Novi web_search and fetch_content with batch-only normalized contracts, explicit DuckDuckGo/Brave/Tavily provider selection, DNS-pinned guarded networking, persistent TTL caches, HTML/text/JSON/PDF extraction, Tavily fallback, full-document continuation, documentation, specs, and comprehensive tests.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `53c2384` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

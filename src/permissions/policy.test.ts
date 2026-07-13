@@ -18,6 +18,12 @@ const read = {
   defaultPermission: "allow",
 } as Pick<ToolDescriptor, "name" | "capabilities" | "defaultPermission">;
 
+const external = {
+  name: "mcp_demo_echo",
+  capabilities: ["external.invoke"],
+  defaultPermission: "ask",
+} as Pick<ToolDescriptor, "name" | "capabilities" | "defaultPermission">;
+
 describe("scoped permission policy", () => {
   it("uses descriptor defaults instead of an implicit allow map", () => {
     const permissions = resolvePermissionsFromSettings(undefined, { workspace: "/work" });
@@ -101,5 +107,18 @@ describe("scoped permission policy", () => {
     );
     expect(resolveWholeToolPermission(permissions, bash).level).toBe("deny");
     expect(permissions.diagnostics[0]).toContain("failing closed");
+  });
+
+  it("accepts external.invoke capability rules for MCP tools", () => {
+    const permissions = resolvePermissionsFromSettings(
+      {
+        permissions: {
+          rules: [{ capability: "external.invoke", effect: "deny" }],
+        },
+      },
+      { workspace: "/work" },
+    );
+    expect(resolveWholeToolPermission(permissions, external).level).toBe("deny");
+    expect(resolveWholeToolPermission(permissions, bash).level).toBe("ask");
   });
 });

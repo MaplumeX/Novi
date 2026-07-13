@@ -1,4 +1,4 @@
-/** Public MCP config/approval domain API (no transport connect). */
+/** Public MCP domain API: config/approval + client/transport/adapter. */
 
 export type {
   McpApprovalDecision,
@@ -40,3 +40,28 @@ export {
 } from "./approval.js";
 
 export { resolveMcpPlan } from "./plan.js";
+
+export { createMcpTransport, type CreateMcpTransportOptions } from "./transport.js";
+
+export {
+  DEFAULT_MCP_CALL_TIMEOUT_MS,
+  DEFAULT_MCP_CONNECT_TIMEOUT_MS,
+  McpClientManager,
+  type McpClientManagerOptions,
+  type McpServerConnectionStatus,
+  type McpServerRuntimeState,
+  type McpTransportFactory,
+} from "./client-manager.js";
+
+export {
+  adaptMcpTools,
+  buildMcpToolName,
+  mapMcpCapabilities,
+  mapMcpRisk,
+  mcpInputSchemaToTypeBox,
+  mcpResultToPreview,
+  resolveMcpPermissionIntents,
+  sanitizeNamePart,
+  type AdaptedMcpTool,
+  type AdaptMcpToolsOptions,
+} from "./tool-adapter.js";

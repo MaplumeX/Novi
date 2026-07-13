@@ -12,6 +12,8 @@ export const TOOL_CAPABILITIES = [
   "network.search",
   "network.fetch",
   "state.todo",
+  /** Conservative fallback for external/MCP tools without a tighter capability map. */
+  "external.invoke",
 ] as const;
 
 export type ToolCapability = (typeof TOOL_CAPABILITIES)[number];

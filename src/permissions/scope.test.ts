@@ -26,6 +26,21 @@ describe("WorkspaceScopeGuard", () => {
     await rm(root, { recursive: true, force: true });
   });
 
+  it("canonicalizes external.invoke intents for MCP tools", async () => {
+    const guard = new WorkspaceScopeGuard({ env, workspace });
+    const intent = await guard.canonicalize({
+      capability: "external.invoke",
+      target: "mcp:demo/echo",
+      scope: "session",
+      summary: "invoke echo on demo",
+    });
+    expect(intent).toMatchObject({
+      capability: "external.invoke",
+      target: "mcp:demo/echo",
+      scope: "session",
+    });
+  });
+
   it("requires both lexical and effective paths to remain inside", async () => {
     await writeFile(path.join(outside, "secret.txt"), "secret");
     await symlink(outside, path.join(workspace, "link"));

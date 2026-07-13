@@ -304,3 +304,8 @@ export function createBuiltinToolAssembly(
 export function getBuiltinToolDescriptor(name: string): Readonly<ToolDescriptor> | undefined {
   return descriptors.find((descriptor) => descriptor.name === name);
 }
+
+/** Code-owned builtin descriptors (read-only). Used by unified assembly. */
+export function getBuiltinToolDescriptors(): readonly ToolDescriptor[] {
+  return descriptors;
+}

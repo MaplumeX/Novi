@@ -60,6 +60,10 @@ export class WorkspaceScopeGuard {
     if (intent.capability === "state.todo") {
       return { ...intent, target: "current-session" };
     }
+    if (intent.capability === "external.invoke") {
+      // Session-scoped MCP/external invokes keep the adapter-provided target as-is.
+      return { ...intent, target: intent.target || "external" };
+    }
     throw new Error(
       encodePermissionError(
         "PERMISSION_INTENT_INVALID",

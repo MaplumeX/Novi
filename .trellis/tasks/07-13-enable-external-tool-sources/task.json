@@ -1,0 +1,30 @@
+{
+  "id": "enable-external-tool-sources",
+  "name": "enable-external-tool-sources",
+  "title": "Enable external tool sources (MCP)",
+  "description": "",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "Maplume",
+  "assignee": "Maplume",
+  "createdAt": "2026-07-13",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "07-13-mcp-config-approval",
+    "07-13-mcp-client-assembly",
+    "07-13-mcp-session-wiring"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

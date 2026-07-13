@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/backend/tool-runtime-contracts.md", "reason": "Descriptor/assembly/permission/events contracts MCP must reuse"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Settings merge and user-local store conventions for MCP config/approvals"}
+{"file": ".trellis/spec/backend/pi-agent-core-api.md", "reason": "setTools/activeToolNames and harness rebuild contracts"}

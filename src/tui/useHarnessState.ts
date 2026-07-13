@@ -7,10 +7,7 @@ import type {
 } from "@earendil-works/pi-agent-core/node";
 import type { JsonlSessionMetadata } from "@earendil-works/pi-agent-core/node";
 import type { Api, Model } from "@earendil-works/pi-ai";
-import {
-  AutoCompactor,
-  CONTEXT_WINDOW_FALLBACK,
-} from "../compaction.js";
+import { AutoCompactor, CONTEXT_WINDOW_FALLBACK } from "../compaction.js";
 import type { CompactionSettings } from "@earendil-works/pi-agent-core/node";
 import {
   addUsage,
@@ -27,7 +24,105 @@ export type Phase = "idle" | "turn" | "compaction";
 export interface ToolCallView {
   id: string;
   name: string;
+  args: Record<string, unknown>;
   status: "running" | "done" | "error";
+  partialText?: string;
+  resultText?: string;
+}
+
+/** Normalize dependency-owned `any` tool arguments at the event boundary. */
+export function normalizeToolArgs(value: unknown): Record<string, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return {};
+  return { ...(value as Record<string, unknown>) };
+}
+
+/** Extract display-safe text from a final or partial AgentToolResult-like value. */
+export function normalizeToolResultText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value === null || typeof value !== "object") return "";
+  const content = (value as Record<string, unknown>).content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .flatMap((part) => {
+      if (part === null || typeof part !== "object") return [];
+      const record = part as Record<string, unknown>;
+      return record.type === "text" && typeof record.text === "string" ? [record.text] : [];
+    })
+    .join("\n");
+}
+
+/** Upsert a running call so duplicate start events cannot duplicate transcript rows. */
+export function projectToolCallStart(
+  calls: ToolCallView[],
+  id: string,
+  name: string,
+  args: unknown,
+): ToolCallView[] {
+  const next: ToolCallView = {
+    id,
+    name,
+    args: normalizeToolArgs(args),
+    status: "running",
+  };
+  const index = calls.findIndex((call) => call.id === id);
+  if (index < 0) return [...calls, next];
+  return calls.map((call, i) => (i === index ? next : call));
+}
+
+/** Attach a streaming partial result without exposing raw event payloads to components. */
+export function projectToolCallUpdate(
+  calls: ToolCallView[],
+  id: string,
+  name: string,
+  args: unknown,
+  partialResult: unknown,
+): ToolCallView[] {
+  const partialText = normalizeToolResultText(partialResult);
+  const index = calls.findIndex((call) => call.id === id);
+  if (index < 0) {
+    return [
+      ...calls,
+      {
+        id,
+        name,
+        args: normalizeToolArgs(args),
+        status: "running",
+        ...(partialText ? { partialText } : {}),
+      },
+    ];
+  }
+  return calls.map((call, i) =>
+    i === index
+      ? {
+          ...call,
+          name,
+          args: normalizeToolArgs(args),
+          ...(partialText ? { partialText } : {}),
+        }
+      : call,
+  );
+}
+
+/** Freeze a call's result while the matching persisted ToolResultMessage arrives. */
+export function projectToolCallEnd(
+  calls: ToolCallView[],
+  id: string,
+  name: string,
+  result: unknown,
+  isError: boolean,
+): ToolCallView[] {
+  const resultText = normalizeToolResultText(result);
+  const index = calls.findIndex((call) => call.id === id);
+  const finish = (call: ToolCallView): ToolCallView => ({
+    ...call,
+    name,
+    status: isError ? "error" : "done",
+    ...(resultText ? { resultText } : {}),
+  });
+  if (index < 0) {
+    return [finish({ id, name, args: {}, status: "running" })];
+  }
+  return calls.map((call, i) => (i === index ? finish(call) : call));
 }
 
 /**
@@ -52,6 +147,8 @@ export interface HarnessState {
   streamingText: string;
   /** Accumulated thinking text for the current streaming response. */
   streamingThinking: string;
+  /** True only between thinking_start and thinking_end. */
+  streamingThinkingActive: boolean;
   /** Tool calls currently executing (or just finished this turn). */
   streamingToolCalls: ToolCallView[];
   /** Active model, kept in sync with `model_update` events. */
@@ -90,6 +187,7 @@ export function useHarnessState(
     messages: [],
     streamingText: "",
     streamingThinking: "",
+    streamingThinkingActive: false,
     streamingToolCalls: [],
     model: harness.getModel(),
     thinkingLevel: harness.getThinkingLevel(),
@@ -151,7 +249,12 @@ export function useHarnessState(
           break;
         case "message_start":
           if (event.message.role === "assistant") {
-            setState((prev) => ({ ...prev, streamingText: "", streamingThinking: "" }));
+            setState((prev) => ({
+              ...prev,
+              streamingText: "",
+              streamingThinking: "",
+              streamingThinkingActive: false,
+            }));
           }
           break;
         case "message_update": {
@@ -159,11 +262,23 @@ export function useHarnessState(
           if (ame.type === "text_delta") {
             setState((prev) => ({ ...prev, streamingText: prev.streamingText + ame.delta }));
           } else if (ame.type === "thinking_start") {
-            setState((prev) => ({ ...prev, streamingThinking: "" }));
+            setState((prev) => ({
+              ...prev,
+              streamingThinking: "",
+              streamingThinkingActive: true,
+            }));
           } else if (ame.type === "thinking_delta") {
-            setState((prev) => ({ ...prev, streamingThinking: prev.streamingThinking + ame.delta }));
+            setState((prev) => ({
+              ...prev,
+              streamingThinking: prev.streamingThinking + ame.delta,
+              streamingThinkingActive: true,
+            }));
           } else if (ame.type === "thinking_end") {
-            setState((prev) => ({ ...prev, streamingThinking: ame.content }));
+            setState((prev) => ({
+              ...prev,
+              streamingThinking: ame.content,
+              streamingThinkingActive: false,
+            }));
           }
           break;
         }
@@ -176,22 +291,21 @@ export function useHarnessState(
             const messages = [...messagesRef.current, event.message];
             messagesRef.current = messages;
             const isAssistantMsg = event.message.role === "assistant";
-            const streamingText =
-              isAssistantMsg ? "" : undefined;
-            const streamingThinking =
-              isAssistantMsg ? "" : undefined;
+            const streamingText = isAssistantMsg ? "" : undefined;
+            const streamingThinking = isAssistantMsg ? "" : undefined;
             // Project usage from the just-finished assistant message. Skipped
             // for other roles (no usage block). See usage.ts for the single
             // projection owner. Inline the role check so TS narrows
             // `event.message` to AssistantMessage before reading `.usage`.
-            const usageDelta = event.message.role === "assistant"
-              ? usageToSummary(event.message.usage)
-              : undefined;
+            const usageDelta =
+              event.message.role === "assistant" ? usageToSummary(event.message.usage) : undefined;
             setState((prev) => ({
               ...prev,
               messages,
               streamingText: streamingText === undefined ? prev.streamingText : streamingText,
-              streamingThinking: streamingThinking === undefined ? prev.streamingThinking : streamingThinking,
+              streamingThinking:
+                streamingThinking === undefined ? prev.streamingThinking : streamingThinking,
+              streamingThinkingActive: isAssistantMsg ? false : prev.streamingThinkingActive,
               lastUsage: usageDelta ?? prev.lastUsage,
               cumulativeUsage: usageDelta
                 ? addUsage(prev.cumulativeUsage, usageDelta)
@@ -202,19 +316,35 @@ export function useHarnessState(
         case "tool_execution_start":
           setState((prev) => ({
             ...prev,
-            streamingToolCalls: [
-              ...prev.streamingToolCalls,
-              { id: event.toolCallId, name: event.toolName, status: "running" },
-            ],
+            streamingToolCalls: projectToolCallStart(
+              prev.streamingToolCalls,
+              event.toolCallId,
+              event.toolName,
+              event.args,
+            ),
+          }));
+          break;
+        case "tool_execution_update":
+          setState((prev) => ({
+            ...prev,
+            streamingToolCalls: projectToolCallUpdate(
+              prev.streamingToolCalls,
+              event.toolCallId,
+              event.toolName,
+              event.args,
+              event.partialResult,
+            ),
           }));
           break;
         case "tool_execution_end":
           setState((prev) => ({
             ...prev,
-            streamingToolCalls: prev.streamingToolCalls.map((tc) =>
-              tc.id === event.toolCallId
-                ? { ...tc, status: event.isError ? "error" : "done" }
-                : tc,
+            streamingToolCalls: projectToolCallEnd(
+              prev.streamingToolCalls,
+              event.toolCallId,
+              event.toolName,
+              event.result,
+              event.isError,
             ),
           }));
           break;
@@ -243,6 +373,7 @@ export function useHarnessState(
             phase: "idle",
             streamingText: "",
             streamingThinking: "",
+            streamingThinkingActive: false,
             streamingToolCalls: [],
           }));
           break;
@@ -265,17 +396,13 @@ export function useHarnessState(
             .catch(() => {
               // A skipped compaction never flipped the phase. A failed one did
               // (onStart fired) but emitted no `session_compact`, so reset it.
-              setState((prev) =>
-                prev.phase === "compaction" ? { ...prev, phase: "idle" } : prev,
-              );
+              setState((prev) => (prev.phase === "compaction" ? { ...prev, phase: "idle" } : prev));
             });
           break;
         case "session_compact":
           // Compaction rewrote the active leaf: reload the branch, and the
           // harness is back to idle, so clear any optimistic "compaction" phase.
-          setState((prev) =>
-            prev.phase === "compaction" ? { ...prev, phase: "idle" } : prev,
-          );
+          setState((prev) => (prev.phase === "compaction" ? { ...prev, phase: "idle" } : prev));
           void reloadMessages();
           break;
         case "session_tree":

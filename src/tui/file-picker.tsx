@@ -3,6 +3,8 @@ import { Text, Box, useInput } from "ink";
 import path from "node:path";
 import type { ExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import { theme } from "./theme.js";
+import { Panel } from "./components/Panel.js";
+import { SelectionRow } from "./components/SelectionRow.js";
 
 /**
  * Scan `cwd` for project files, filtering out common noise directories,
@@ -65,7 +67,15 @@ async function walkFiles(env: ExecutionEnv, dir: string): Promise<string[]> {
   return out;
 }
 
-const IGNORE_DIRS = new Set(["node_modules", ".git", "dist", ".novi", ".pi", ".claude", ".trellis"]);
+const IGNORE_DIRS = new Set([
+  "node_modules",
+  ".git",
+  "dist",
+  ".novi",
+  ".pi",
+  ".claude",
+  ".trellis",
+]);
 
 /**
  * Fuzzy match files against a query using subsequence matching.
@@ -126,14 +136,7 @@ export interface FilePickerProps {
 }
 
 /** Decoded intent from a FilePicker keypress (pure — unit-testable in isolation). */
-export type FilePickerAction =
-  | "up"
-  | "down"
-  | "select"
-  | "cancel"
-  | "backspace"
-  | "append"
-  | null;
+export type FilePickerAction = "up" | "down" | "select" | "cancel" | "backspace" | "append" | null;
 
 /**
  * Map a raw Ink `useInput(value, key)` payload to a FilePicker action.
@@ -235,21 +238,26 @@ export function FilePicker({
   });
 
   return (
-    <Box flexDirection="column" marginTop={1}>
-      <Text bold>
-        {title} — filter: <Text color={theme.accent}>{query || "(all)"}</Text>
-      </Text>
-      {candidates.length === 0 ? (
-        <Text color={theme.dim}>No files match &quot;{query}&quot;</Text>
-      ) : (
-        candidates.map((p, i) => (
-          <Text key={p} color={i === cursor ? theme.accent : undefined}>
-            {i === cursor ? "› " : "  "}
-            {p}
-          </Text>
-        ))
-      )}
-      <Text color={theme.dim}>{footer}</Text>
-    </Box>
+    <Panel
+      title={title}
+      description={
+        <Text>
+          Filter: <Text color={theme.accent}>{query || "(all)"}</Text>
+        </Text>
+      }
+      footer={footer}
+    >
+      <Box flexDirection="column">
+        {candidates.length === 0 ? (
+          <Text color={theme.text.muted}>No files match &quot;{query}&quot;</Text>
+        ) : (
+          candidates.map((candidate, index) => (
+            <SelectionRow key={candidate} selected={index === cursor}>
+              {candidate}
+            </SelectionRow>
+          ))
+        )}
+      </Box>
+    </Panel>
   );
 }

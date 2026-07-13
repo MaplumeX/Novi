@@ -71,6 +71,10 @@ streaming), document it:
 - Component rendering tests (Ink `render` + assertions) are acceptable but
   currently the codebase tests logic over rendered output — match existing
   style unless a visual regression needs verifying.
+- Transcript hierarchy is a visual contract. `visual.test.tsx` renders Ink to
+  a `PassThrough` stream and asserts semantic text at both compact and detailed
+  density. Keep those assertions focused on visible hierarchy, not ANSI escape
+  sequences or exact spinner frames.
 
 ---
 

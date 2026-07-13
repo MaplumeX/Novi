@@ -9,8 +9,15 @@ import { writeSettings } from "../settings.js";
 import { writeCredentials, injectCredentialsIntoEnv } from "../credentials.js";
 import { getNoviDir, getSessionsDir } from "../config.js";
 import { theme } from "./theme.js";
+import { Panel } from "./components/Panel.js";
+import { SelectionRow } from "./components/SelectionRow.js";
 import { providerEnvKeys } from "../onboarding.js";
-import { DEFAULT_PROVIDER, DEFAULT_MODEL_ID, bootstrap, type BootstrapOptions } from "../bootstrap.js";
+import {
+  DEFAULT_PROVIDER,
+  DEFAULT_MODEL_ID,
+  bootstrap,
+  type BootstrapOptions,
+} from "../bootstrap.js";
 import { renderApp } from "./App.js";
 
 /** What the wizard hands back on completion. */
@@ -166,106 +173,97 @@ export function OnboardingWizard({
   }
 
   const lines: React.ReactElement[] = [];
-
-  lines.push(
-    <Text key="title" bold>
-      Novi first-run setup
-    </Text>,
-  );
+  let description: string;
+  let footer: string;
 
   if (step === "provider") {
-    lines.push(
-      <Text key="hint" color={theme.dim}>
-        Select a provider · ↑↓ navigate · Enter confirm · Esc/Ctrl-C cancel
-      </Text>,
-    );
+    description = "Select the provider Novi should use by default.";
+    footer = "↑↓ navigate · Enter confirm · Esc/Ctrl-C cancel";
     // Show a scroll window around the cursor.
     const window = 12;
     const start = Math.max(0, providerCursor - Math.floor(window / 2));
     const end = Math.min(providers.length, start + window);
     for (let i = start; i < end; i++) {
       const p = providers[i]!;
-      const marker = i === providerCursor ? "›" : " ";
       lines.push(
-        <Text key={p} color={i === providerCursor ? theme.accent : undefined}>
-          {marker} {p}
-        </Text>,
+        <SelectionRow key={p} selected={i === providerCursor}>
+          {p}
+        </SelectionRow>,
       );
     }
     if (providers.length > window) {
       lines.push(
-        <Text key="more" color={theme.dim}>
+        <Text key="more" color={theme.text.muted}>
           ({providers.length} providers · scroll for more)
         </Text>,
       );
     }
   } else if (step === "key") {
     const currentKey = envKeyList[envKeyIndex];
-    lines.push(
-      <Text key="hint" color={theme.dim}>
-        Provider: {selectedProvider} · Enter your {currentKey} · Esc back
-      </Text>,
-    );
+    description = `Enter ${currentKey} for ${selectedProvider}.`;
+    footer = "Enter continue · Esc back · Ctrl-C cancel";
     lines.push(
       <Text key="prompt">
-        <Text color={theme.dim}>{currentKey}: </Text>
-        {keyBuffer ? "•".repeat(keyBuffer.length) : <Text color={theme.dim}>(hidden)</Text>}
+        <Text color={theme.text.muted}>{currentKey}: </Text>
+        {keyBuffer ? "•".repeat(keyBuffer.length) : <Text color={theme.text.muted}>(hidden)</Text>}
       </Text>,
     );
     if (envKeyList.length > 1) {
       lines.push(
-        <Text key="progress" color={theme.dim}>
+        <Text key="progress" color={theme.text.muted}>
           credential {envKeyIndex + 1} of {envKeyList.length}
         </Text>,
       );
     }
     lines.push(
-      <Text key="hint2" color={theme.dim}>
+      <Text key="hint2" color={theme.text.muted}>
         The value is stored in ~/.novi/credentials.json (0600) and never shown again.
       </Text>,
     );
   } else {
     // step === "model"
-    const defaultIdx = selectedProvider === DEFAULT_PROVIDER
-      ? models.findIndex((m) => m.id === DEFAULT_MODEL_ID)
-      : 0;
+    const defaultIdx =
+      selectedProvider === DEFAULT_PROVIDER
+        ? models.findIndex((m) => m.id === DEFAULT_MODEL_ID)
+        : 0;
     const cursor = modelCursor;
-    lines.push(
-      <Text key="hint" color={theme.dim}>
-        Provider: {selectedProvider} · Pick a model · ↑↓ navigate · Enter confirm · Esc back
-      </Text>,
-    );
+    description = `Select a default model for ${selectedProvider}.`;
+    footer = "↑↓ navigate · Enter finish · Esc back · Ctrl-C cancel";
     const window = 12;
     const start = Math.max(0, cursor - Math.floor(window / 2));
     const end = Math.min(models.length, start + window);
     for (let i = start; i < end; i++) {
       const m = models[i]!;
-      const marker = i === cursor ? "›" : " ";
       const isDefault = i === defaultIdx;
       lines.push(
-        <Text key={m.id} color={i === cursor ? theme.accent : undefined}>
-          {marker} {m.id}
-          {isDefault ? <Text color={theme.dim}> (recommended)</Text> : null}
-        </Text>,
+        <SelectionRow
+          key={m.id}
+          selected={i === cursor}
+          description={isDefault ? "recommended" : undefined}
+        >
+          {m.id}
+        </SelectionRow>,
       );
     }
   }
 
   if (error) {
-    lines.push(<Text key="error" color={theme.status.error}>{error}</Text>);
+    lines.push(
+      <Text key="error" color={theme.status.error}>
+        {error}
+      </Text>,
+    );
   }
 
   return (
-    <Box flexDirection="column" marginTop={1}>
-      {lines}
-    </Box>
+    <Panel title="Novi first-run setup" description={description} footer={footer}>
+      <Box flexDirection="column">{lines}</Box>
+    </Panel>
   );
 }
 
 /** Render the wizard standalone; on completion bootstrap + render the app. */
-export async function renderOnboardingWizard(
-  options: BootstrapOptions,
-): Promise<void> {
+export async function renderOnboardingWizard(options: BootstrapOptions): Promise<void> {
   const cwd = options.cwd ?? process.cwd();
   const env = new NodeExecutionEnv({ cwd, shellEnv: process.env });
 

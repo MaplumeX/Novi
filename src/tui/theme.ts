@@ -1,25 +1,37 @@
 /**
- * Shared theme module: all TUI components consume these color mappings and
- * divider utilities instead of hardcoding Ink color strings or `dimColor`.
+ * Shared theme module: all TUI components consume these semantic colors,
+ * glyphs, and layout limits instead of hardcoding visual values.
  *
- * Replacing scattered `dimColor` / `color="cyan"` calls with `theme.*`
- * gives a single source of truth for the visual palette.
+ * A single source of truth keeps transcript, input, and temporary panels
+ * visually coherent.
  */
 
 /** Color literals accepted by Ink `<Text color>`. */
 export const theme = {
+  text: {
+    muted: "dim",
+    subtle: "gray",
+  },
   role: {
     user: "cyan",
     assistant: "magenta",
   },
   status: {
-    idle: "green",
-    active: "yellow",
     error: "red",
+    running: "yellow",
+    success: "green",
   },
   accent: "cyan",
-  border: "gray",
-  dim: "dim",
+  borderTone: {
+    subtle: "gray",
+    focus: "cyan",
+    warning: "yellow",
+  },
+  surface: {
+    user: "#262626",
+    focus: "#1f2933",
+    code: "#333333",
+  },
   link: "blue",
   diff: {
     del: "red",
@@ -31,15 +43,20 @@ export const theme = {
 export const icons = {
   /** Dingbat spinner frames (U+2736, U+273B, U+2733, U+2722). */
   spinner: ["✶", "✻", "✳", "✢"],
-  /** Tool block marker / status dot (color-coded by caller). */
-  statusDot: "⏺",
+  /** Stable transcript anchors. Keep every glyph single-column in common terminals. */
+  assistant: "◆",
+  thinking: "✻",
+  tool: "●",
+  success: "✓",
+  error: "×",
+  selection: "›",
+  edit: "✎",
+  listBullet: "·",
   /** Left guide line for assistant content / tool args. */
   guide: "│",
   /** Result-tree indent prefix for tool-call expanded/collapsed output. */
   bracket: "⎿",
-  /** Content-block separator within expanded tool/thinking views. */
-  separatorDotted: "╌",
-  /** (Already exists as DIVIDER_CHAR.) */
+  /** Content separator used by Markdown horizontal rules. */
   separatorSolid: "─",
   /** InputBox prompt prefix + user label prefix. */
   prompt: "›",
@@ -47,13 +64,10 @@ export const icons = {
   mode: "·",
 } as const;
 
-/** Fixed divider width (no dynamic responsive sizing). */
-export const DIVIDER_WIDTH = 40;
-
-/** Character used for horizontal divider lines. */
-export const DIVIDER_CHAR = "─";
-
-/** Produce a horizontal divider string of the given width. */
-export function divider(width: number = DIVIDER_WIDTH): string {
-  return DIVIDER_CHAR.repeat(width);
-}
+/** Shared content limits for compact transcript presentation. */
+export const layout = {
+  previewWidth: 88,
+  toolResultLines: 20,
+  panelPaddingX: 1,
+  ruleWidth: 40,
+} as const;

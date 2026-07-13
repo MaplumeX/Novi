@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { Text, Box, useInput } from "ink";
 import { theme } from "./theme.js";
+import { Panel } from "./components/Panel.js";
+import { SelectionRow } from "./components/SelectionRow.js";
 
 /** A selectable entry in the session picker list. */
 export interface SessionInfo {
@@ -25,7 +27,11 @@ interface SessionPickerProps {
  * `Esc` cancels. Owns its own `useInput` — `InputBox` is unmounted while
  * this overlay is open.
  */
-export function SessionPicker({ sessions, onPick, onCancel }: SessionPickerProps): React.ReactElement {
+export function SessionPicker({
+  sessions,
+  onPick,
+  onCancel,
+}: SessionPickerProps): React.ReactElement {
   const [cursor, setCursor] = useState(0);
 
   useInput((_value, key) => {
@@ -50,19 +56,22 @@ export function SessionPicker({ sessions, onPick, onCancel }: SessionPickerProps
   });
 
   return (
-    <Box flexDirection="column" marginTop={1}>
-      <Text bold>Resume session — ↑↓ select · Enter resume · Esc cancel</Text>
-      {sessions.length === 0 ? (
-        <Text color={theme.dim}>No sessions found.</Text>
-      ) : (
-        sessions.map((s, i) => (
-          <Text key={s.path} color={i === cursor ? theme.accent : undefined}>
-            {i === cursor ? "› " : "  "}
-            {s.label}{"  "}
-            <Text color={theme.dim}>({s.mtime.toLocaleString()})</Text>
-          </Text>
-        ))
-      )}
-    </Box>
+    <Panel title="Resume session" footer="↑↓ navigate · Enter resume · Esc cancel">
+      <Box flexDirection="column">
+        {sessions.length === 0 ? (
+          <Text color={theme.text.muted}>No sessions found.</Text>
+        ) : (
+          sessions.map((session, index) => (
+            <SelectionRow
+              key={session.path}
+              selected={index === cursor}
+              description={session.mtime.toLocaleString()}
+            >
+              {session.label}
+            </SelectionRow>
+          ))
+        )}
+      </Box>
+    </Panel>
   );
 }

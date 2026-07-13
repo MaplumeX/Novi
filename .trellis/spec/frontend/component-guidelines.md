@@ -96,12 +96,11 @@ export function MessageList(…): React.ReactElement { … }
 ## Composition
 
 - Compose via children / fragments, not deep prop drilling. `App` returns a
-  `<>` fragment whose top-to-bottom order is: `MessageList`, `notice` lines,
-  `InputBox` (or an overlay), a full-width divider, `StatusBar`, then the
-  session/keybinding hint lines. `StatusBar` lives **below** the input box,
-  separated by a divider, so the editor prompt stays anchored to the
-  conversation; it shows only `model` · `thinkingLevel` · `usage` (no phase
-  indicator, no tools/queue counts).
+  `<>` fragment whose top-to-bottom order is: `MessageList`, optional notice
+  rail, focused `InputBox` (or one temporary panel), then one compact
+  `StatusBar`. The footer owns model, thinking level, usage, session name,
+  detail-mode action, and `/help`; do not restore separate divider/session/help
+  rows or duplicate the active-turn status in the input.
 - Keyed lists use the index for short-lived render output (acceptable for
   markdown tokens / notice lines):
   ```tsx
@@ -195,20 +194,19 @@ strings directly.
 // Good
 import { theme } from "../theme.js";
 <Text color={theme.role.user}>…</Text>
-<Text color={theme.dim}>…</Text>      // replaces dimColor
+<Text color={theme.text.muted}>…</Text>
 
 // Bad — scattered hardcoded colors
 <Text dimColor>…</Text>
 <Text color="cyan">…</Text>
 ```
 
-- `theme.dim` (`"dim"`) is the semantic replacement for `dimColor`. Ink
-  resolves `color="dim"` to a chalk dim modifier, so it is functionally
-  equivalent.
-- `divider(width?)` produces a `─` line of the given width. Callers pass
-  the live terminal width from `useStdout().stdout?.columns ?? 80` so
-  dividers span the full screen; the `width` argument defaults to
-  `DIVIDER_WIDTH` (40) only as a fallback.
+- Prefer semantic tokens such as `theme.text.muted`, `theme.status.running`,
+  `theme.borderTone.focus`, and `theme.surface.user`. Do not choose a literal
+  color based on the component name.
+- The focused `InputBox` owns the persistent boundary. Do not add full-width
+  dividers between transcript, input, and footer; spacing and the focus border
+  already express those regions.
 - When adding a new color role, add it to `theme.ts` first, then consume it
   via `theme.*` — do not add a new hardcoded color literal in a component.
 - `theme.ts` also exports an `icons` constant registry — all visual glyphs
@@ -217,6 +215,36 @@ import { theme } from "../theme.js";
   unicode glyphs in a component; import from `icons` and consume via
   `icons.*`. This keeps the glyph vocabulary centralized and avoids
   monospace-alignment-breaking emoji in the TUI.
+
+### Transcript density and detail mode
+
+- The default transcript protects the user/answer reading path. Thinking is a
+  compact `Thought` row and tools are one or two semantic lines.
+- `App` owns one `detailMode` boolean toggled by `Ctrl-O`. It controls complete
+  thinking and tool arguments/output/diffs together; do not add independent
+  global expansion state for each content type.
+- `MessageList` associates live tool state, assistant `toolCall` parts, and
+  persisted `ToolResultMessage`s by `toolCallId`. A tool must not use a separate
+  live-only component that changes shape when it completes.
+- Tool-facing labels come from `tool-presentation.ts`. Default rows describe
+  user actions (`Read`, `Update`, `Run`, `Search web`), not raw JSON or internal
+  snake_case names.
+
+### Shared temporary panels
+
+Use `Panel` for permission prompts, pickers, settings, onboarding, and trust
+decisions. Its semantic order is title → optional description → content → key
+hints. Use `SelectionRow` for selected markers and secondary row descriptions.
+The owning screen keeps its own `useInput` and business state.
+
+```tsx
+<Panel title="Switch model" footer="↑↓ navigate · Enter switch · Esc cancel">
+  <SelectionRow selected={index === cursor}>{model.id}</SelectionRow>
+</Panel>
+```
+
+This keeps the visual vocabulary shared without coupling unrelated keyboard
+state or save behavior.
 
 ## Forbidden Patterns
 

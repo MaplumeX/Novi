@@ -1,5 +1,7 @@
 import { useState } from "react";
-import { Text, Box, useInput, render } from "ink";
+import { Box, Text, useInput, render } from "ink";
+import { Panel } from "./components/Panel.js";
+import { SelectionRow } from "./components/SelectionRow.js";
 import { theme } from "./theme.js";
 
 /** The user's choice from the trust prompt. */
@@ -51,24 +53,26 @@ export function TrustPrompt({ cwd, onChoose }: TrustPromptProps): React.ReactEle
   });
 
   return (
-    <Box flexDirection="column" marginTop={1}>
-      <Text bold>Project trust</Text>
-      <Text color={theme.dim}>
-        This folder contains a `.novi/` with project-level settings, skills,
-        prompts, or a custom models file.
-      </Text>
-      <Text color={theme.dim}>Working directory: {cwd}</Text>
-      <Text> </Text>
-      {OPTIONS.map((o, i) => (
-        <Text key={o.value} color={i === cursor ? theme.accent : undefined}>
-          {i === cursor ? "› " : "  "}
-          {o.label}
-          {i === cursor ? <Text color={theme.dim}> — {o.hint}</Text> : null}
-        </Text>
-      ))}
-      <Text> </Text>
-      <Text color={theme.dim}>↑↓ navigate · Enter select · Esc/Ctrl-C abort</Text>
-    </Box>
+    <Panel
+      title="Project trust"
+      description="This folder can load project settings, skills, prompts, and model configuration."
+      footer="↑↓ navigate · Enter select · Esc/Ctrl-C abort"
+      tone="warning"
+    >
+      <Box flexDirection="column">
+        <Text color={theme.text.muted}>Working directory: {cwd}</Text>
+        <Text> </Text>
+        {OPTIONS.map((option, index) => (
+          <SelectionRow
+            key={option.value}
+            selected={index === cursor}
+            description={index === cursor ? option.hint : undefined}
+          >
+            {option.label}
+          </SelectionRow>
+        ))}
+      </Box>
+    </Panel>
   );
 }
 

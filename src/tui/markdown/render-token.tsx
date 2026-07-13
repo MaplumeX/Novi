@@ -1,7 +1,7 @@
 import { Fragment, type ReactNode } from "react";
 import { Box, Text } from "ink";
 import type { Token, Tokens } from "marked";
-import { theme } from "../theme.js";
+import { icons, layout, theme } from "../theme.js";
 
 /**
  * Pure `marked` token → Ink element mapping. No harness access, no state —
@@ -14,9 +14,7 @@ import { theme } from "../theme.js";
 
 function renderInlineTokens(tokens: Token[] | undefined): ReactNode {
   if (!tokens || tokens.length === 0) return null;
-  return tokens.map((tok, i) => (
-    <Fragment key={i}>{renderInline(tok)}</Fragment>
-  ));
+  return tokens.map((tok, i) => <Fragment key={i}>{renderInline(tok)}</Fragment>);
 }
 
 function renderInline(token: Token): ReactNode {
@@ -26,7 +24,11 @@ function renderInline(token: Token): ReactNode {
     case "em":
       return <Text italic>{renderInlineTokens((token as Tokens.Em).tokens)}</Text>;
     case "codespan":
-      return <Text backgroundColor="#333" color={theme.accent}>{(token as Tokens.Codespan).text}</Text>;
+      return (
+        <Text backgroundColor={theme.surface.code} color={theme.accent}>
+          {(token as Tokens.Codespan).text}
+        </Text>
+      );
     case "del":
       return <Text strikethrough>{renderInlineTokens((token as Tokens.Del).tokens)}</Text>;
     case "link":
@@ -51,11 +53,16 @@ function renderInline(token: Token): ReactNode {
   }
 }
 
-function renderListItem(item: Tokens.ListItem, index: number, ordered: boolean, start: number): ReactNode {
-  const marker = ordered ? `${start + index}.` : "·";
+function renderListItem(
+  item: Tokens.ListItem,
+  index: number,
+  ordered: boolean,
+  start: number,
+): ReactNode {
+  const marker = ordered ? `${start + index}.` : icons.listBullet;
   return (
     <Text key={index}>
-      <Text color={theme.dim}>{marker} </Text>
+      <Text color={theme.text.muted}>{marker} </Text>
       {item.tokens ? renderBlockTokens(item.tokens) : item.text}
     </Text>
   );
@@ -82,8 +89,8 @@ function renderBlock(token: Token): ReactNode {
       const lang = c.lang || "";
       return (
         <Box flexDirection="column">
-          {lang ? <Text color={theme.dim}>{lang}</Text> : null}
-          <Box borderStyle="single" borderColor={theme.border} paddingX={1}>
+          {lang ? <Text color={theme.text.muted}>{lang}</Text> : null}
+          <Box borderStyle="single" borderColor={theme.borderTone.subtle} paddingX={1}>
             <Text>{c.text}</Text>
           </Box>
         </Box>
@@ -102,13 +109,13 @@ function renderBlock(token: Token): ReactNode {
       const b = token as Tokens.Blockquote;
       return (
         <Box marginLeft={2}>
-          <Text color={theme.dim}>│ </Text>
+          <Text color={theme.text.muted}>{icons.guide} </Text>
           <Box flexDirection="column">{renderBlockTokens(b.tokens)}</Box>
         </Box>
       );
     }
     case "hr":
-      return <Text color={theme.dim}>{"─".repeat(40)}</Text>;
+      return <Text color={theme.text.muted}>{icons.separatorSolid.repeat(layout.ruleWidth)}</Text>;
     case "space":
       return null;
     case "html":
@@ -128,9 +135,11 @@ function renderBlock(token: Token): ReactNode {
       // block) carries *inline* sub-tokens in marked, so route them through
       // `renderInlineTokens` — otherwise inline codespan/strong/em tokens hit
       // the block default and bleed raw markdown (backticks/asterisks).
-      return (token as Tokens.Text).tokens
-        ? renderInlineTokens((token as Tokens.Text).tokens)
-        : <Text>{(token as Tokens.Text).text}</Text>;
+      return (token as Tokens.Text).tokens ? (
+        renderInlineTokens((token as Tokens.Text).tokens)
+      ) : (
+        <Text>{(token as Tokens.Text).text}</Text>
+      );
     default: {
       const raw = "raw" in token ? (token as { raw: string }).raw : "";
       return raw ? <Text>{raw}</Text> : null;

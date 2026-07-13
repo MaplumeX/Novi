@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { Box, Text, useInput } from "ink";
-import { theme } from "./theme.js";
+import { Box, useInput } from "ink";
 import type { ApprovalChoice } from "../permissions/types.js";
 import type { PermissionPromptState } from "../permissions/tui-approver.js";
+import { Panel } from "./components/Panel.js";
+import { SelectionRow } from "./components/SelectionRow.js";
 
 interface PermissionPromptProps {
   prompt: PermissionPromptState;
@@ -19,10 +20,7 @@ const OPTIONS: { value: ApprovalChoice; label: string; key: string }[] = [
  * In-app overlay for tool permission confirmation.
  * Keys: 1/2/3 or ↑↓+Enter; Esc = Deny.
  */
-export function PermissionPrompt({
-  prompt,
-  onChoose,
-}: PermissionPromptProps): React.ReactElement {
+export function PermissionPrompt({ prompt, onChoose }: PermissionPromptProps): React.ReactElement {
   const [cursor, setCursor] = useState(0);
 
   useInput((value, key) => {
@@ -57,19 +55,19 @@ export function PermissionPrompt({
   });
 
   return (
-    <Box flexDirection="column" marginTop={1} borderStyle="round" borderColor={theme.accent} paddingX={1}>
-      <Text bold color={theme.accent}>
-        Allow tool: {prompt.toolName}
-      </Text>
-      <Text color={theme.dim}>{prompt.summary}</Text>
-      <Text> </Text>
-      {OPTIONS.map((o, i) => (
-        <Text key={o.value} color={i === cursor ? theme.accent : undefined}>
-          {i === cursor ? "› " : "  "}
-          [{o.key}] {o.label}
-        </Text>
-      ))}
-      <Text color={theme.dim}>1/2/3 or ↑↓+Enter · Esc = Deny</Text>
-    </Box>
+    <Panel
+      title={`Allow ${prompt.toolName}?`}
+      description={prompt.summary}
+      footer="1/2/3 choose · ↑↓ navigate · Enter confirm · Esc deny"
+      tone="warning"
+    >
+      <Box flexDirection="column">
+        {OPTIONS.map((option, index) => (
+          <SelectionRow key={option.value} selected={index === cursor} shortcut={option.key}>
+            {option.label}
+          </SelectionRow>
+        ))}
+      </Box>
+    </Panel>
   );
 }

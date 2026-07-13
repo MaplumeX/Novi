@@ -7,7 +7,8 @@ import type { ResolvedSettings } from "../settings.js";
 import { writeSettings, loadSettings, resolveSettings } from "../settings.js";
 import { loadCredentials, getCredentialsPath } from "../credentials.js";
 import { getNoviDir } from "../config.js";
-import { theme } from "./theme.js";
+import { Panel } from "./components/Panel.js";
+import { icons, theme } from "./theme.js";
 
 interface SettingsFormProps {
   settings: ResolvedSettings;
@@ -38,19 +39,38 @@ const PERMISSION_LEVELS: readonly string[] = ["allow", "ask", "deny"];
 const FIELDS: readonly FieldDef[] = [
   { key: "defaultProvider", label: "defaultProvider", type: "text" },
   { key: "defaultModel", label: "defaultModel", type: "text" },
-  { key: "defaultThinkingLevel", label: "defaultThinkingLevel", type: "select", options: THINKING_LEVELS },
-  { key: "defaultProjectTrust", label: "defaultProjectTrust", type: "select", options: TRUST_OPTIONS },
+  {
+    key: "defaultThinkingLevel",
+    label: "defaultThinkingLevel",
+    type: "select",
+    options: THINKING_LEVELS,
+  },
+  {
+    key: "defaultProjectTrust",
+    label: "defaultProjectTrust",
+    type: "select",
+    options: TRUST_OPTIONS,
+  },
   { key: "transport", label: "transport", type: "select", options: TRANSPORT_OPTIONS },
   { key: "steeringMode", label: "steeringMode", type: "select", options: QUEUE_MODE_OPTIONS },
   { key: "followUpMode", label: "followUpMode", type: "select", options: QUEUE_MODE_OPTIONS },
   { key: "scopedModels", label: "scopedModels (comma-sep)", type: "text" },
-  { key: "permissions.tools.bash", label: "permissions.tools.bash", type: "select", options: PERMISSION_LEVELS },
+  {
+    key: "permissions.tools.bash",
+    label: "permissions.tools.bash",
+    type: "select",
+    options: PERMISSION_LEVELS,
+  },
   { key: "compaction.enabled", label: "compaction.enabled", type: "toggle" },
   { key: "compaction.reserveTokens", label: "compaction.reserveTokens", type: "number" },
   { key: "compaction.keepRecentTokens", label: "compaction.keepRecentTokens", type: "number" },
   { key: "retry.provider.timeoutMs", label: "retry.provider.timeoutMs", type: "number" },
   { key: "retry.provider.maxRetries", label: "retry.provider.maxRetries", type: "number" },
-  { key: "retry.provider.maxRetryDelayMs", label: "retry.provider.maxRetryDelayMs", type: "number" },
+  {
+    key: "retry.provider.maxRetryDelayMs",
+    label: "retry.provider.maxRetryDelayMs",
+    type: "number",
+  },
 ];
 
 function getFieldValue(settings: ResolvedSettings, key: string): string {
@@ -155,10 +175,16 @@ export function SettingsForm({
         setEditBuffer("");
         return;
       }
-      if ((f.type === "select" || f.type === "toggle") && (key.upArrow || key.downArrow) && f.options) {
+      if (
+        (f.type === "select" || f.type === "toggle") &&
+        (key.upArrow || key.downArrow) &&
+        f.options
+      ) {
         const idx = f.options.indexOf(editBuffer);
         const next = key.upArrow
-          ? idx <= 0 ? f.options.length - 1 : idx - 1
+          ? idx <= 0
+            ? f.options.length - 1
+            : idx - 1
           : (idx + 1) % f.options.length;
         setEditBuffer(f.options[next]);
         return;
@@ -233,17 +259,20 @@ export function SettingsForm({
       const resolved = resolveSettings(loaded.merged, loaded.layers, cliOverrides);
       onSaved(resolved);
       setDraft({});
-      setMessage(`Saved to ${target === "global" ? "~/.novi" : ".novi"}/settings.json — press r to reload, other key to continue.`);
+      setMessage(
+        `Saved to ${target === "global" ? "~/.novi" : ".novi"}/settings.json — press r to reload, other key to continue.`,
+      );
     } catch (e) {
       setMessage(`Save failed: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
   const lines: React.ReactElement[] = [];
-  const header = savePrompt
-    ? "Settings — save to (g)lobal · (p)roject · Esc cancel"
-    : "Settings — ↑↓ navigate · Enter edit · s save · Esc exit";
-  lines.push(<Text key="title" bold>{header}</Text>);
+  const footer = savePrompt
+    ? "g save global · p save project · Esc cancel"
+    : editing !== null
+      ? "Enter apply · Esc cancel"
+      : "↑↓ navigate · Enter edit · s save · Esc exit";
 
   for (let i = 0; i < FIELDS.length; i++) {
     const f = FIELDS[i];
@@ -252,38 +281,58 @@ export function SettingsForm({
     const src = getSource(settings, f.key);
     const val = i === cursor ? effectiveValue : getFieldValue(settings, f.key);
     const modified = draft[f.key] !== undefined;
-    const marker = isEditing ? "✎" : isCursor ? "›" : modified ? "*" : " ";
+    const marker = isEditing ? icons.edit : isCursor ? icons.selection : modified ? "*" : " ";
     lines.push(
       <Text key={f.key} color={isCursor || isEditing ? theme.accent : undefined}>
-        {marker} {f.label}: {val || "(unset)"}{" "}
-        <Text color={theme.dim}>[{src}]</Text>
-        {isEditing && f.type === "select" ? <Text color={theme.dim}> ↑↓ cycle</Text> : null}
+        {marker} {f.label}: {val || "(unset)"} <Text color={theme.text.muted}>[{src}]</Text>
+        {isEditing && f.type === "select" ? <Text color={theme.text.muted}> ↑↓ cycle</Text> : null}
       </Text>,
     );
   }
 
   if (message) {
-    lines.push(<Text key="msg" color={message.startsWith("Save failed") ? theme.status.error : theme.status.idle}>{message}</Text>);
+    lines.push(
+      <Text
+        key="msg"
+        color={message.startsWith("Save failed") ? theme.status.error : theme.status.success}
+      >
+        {message}
+      </Text>,
+    );
   }
 
   // Read-only credentials section (from ~/.novi/credentials.json).
   const credEntries = Object.entries(creds);
-  lines.push(<Text key="creds-hdr" bold>Credentials (read-only — {getCredentialsPath()})</Text>);
+  lines.push(
+    <Text key="creds-hdr" bold>
+      Credentials (read-only — {getCredentialsPath()})
+    </Text>,
+  );
   if (credEntries.length === 0) {
-    lines.push(<Text key="creds-empty" color={theme.dim}>  (none configured)</Text>);
+    lines.push(
+      <Text key="creds-empty" color={theme.text.muted}>
+        {" "}
+        (none configured)
+      </Text>,
+    );
   } else {
     for (const [name, value] of credEntries) {
       lines.push(
         <Text key={name}>
-          {" "} {name}: {maskSecret(value)}
+          {" "}
+          {name}: {maskSecret(value)}
         </Text>,
       );
     }
   }
 
   return (
-    <Box flexDirection="column" marginTop={1}>
-      {lines}
-    </Box>
+    <Panel
+      title="Settings"
+      description={savePrompt ? "Choose where to save the current changes." : undefined}
+      footer={footer}
+    >
+      <Box flexDirection="column">{lines}</Box>
+    </Panel>
   );
 }

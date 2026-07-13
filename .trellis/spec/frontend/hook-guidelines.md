@@ -107,3 +107,76 @@ void compactor.maybeCompact(harness, …, () => setState((prev) => ({ …prev, p
 - Do not call structural harness methods (`prompt`, `compact`,
   `navigateTree`) from the hook. Those require idle and belong in `App.tsx`
   handlers or commands.
+
+## Scenario: Stable live tool transcript projection
+
+### 1. Scope / Trigger
+
+Apply this contract when changing `tool_execution_start`,
+`tool_execution_update`, or `tool_execution_end` handling for the TUI. The
+dependency exposes generic tool payloads as `any`; components must never inherit
+that untyped boundary.
+
+### 2. Signatures
+
+```ts
+interface ToolCallView {
+  id: string;
+  name: string;
+  args: Record<string, unknown>;
+  status: "running" | "done" | "error";
+  partialText?: string;
+  resultText?: string;
+}
+
+normalizeToolArgs(value: unknown): Record<string, unknown>
+normalizeToolResultText(value: unknown): string
+```
+
+### 3. Contracts
+
+- `tool_execution_start` upserts one view by `toolCallId`, with normalized
+  arguments and `running` status.
+- `tool_execution_update` updates the same id and projects text content into
+  `partialText`; non-text/image-only parts are ignored for terminal summaries.
+- `tool_execution_end` preserves args/partial output, freezes `resultText`, and
+  sets `done` or `error` from `isError`.
+- `MessageList` joins this view to the persisted assistant tool call by `id`.
+  The later `ToolResultMessage` is authoritative for resumed history.
+
+### 4. Validation & Error Matrix
+
+| Input | Projection |
+|---|---|
+| args is a plain object | shallow `Record<string, unknown>` copy |
+| args is null/array/primitive | `{}` |
+| result has text content | text parts joined with newlines |
+| result is string | string retained |
+| result has no text | empty string; status still updates |
+| update/end arrives before start | resilient upsert; do not drop the event |
+
+### 5. Good/Base/Bad Cases
+
+- Good: start → multiple updates → end keeps one row and the latest text.
+- Base: start → end with no printable result still becomes `done`.
+- Bad: malformed args or image-only output never causes a component cast or
+  crashes the transcript.
+
+### 6. Tests Required
+
+- Pure projection tests assert one stable id across start/update/end.
+- Assert out-of-order update/end still produces a view with the correct status.
+- Transcript tests assert a live id already present in assistant history is not
+  rendered a second time.
+- Ink rendering tests assert compact mode hides raw args and detail mode reveals
+  complete output.
+
+### 7. Wrong vs Correct
+
+```tsx
+// Wrong: a second live-only renderer leaks the event contract and duplicates rows.
+streamingToolCalls.map((call) => <Text>{call.name} running</Text>)
+
+// Correct: attach the typed projection to the persisted toolCall by id.
+<ToolCallBlock call={part} live={liveById.get(part.id)} result={result} />
+```

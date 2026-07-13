@@ -2,6 +2,8 @@ import { useState } from "react";
 import { Text, Box, useInput } from "ink";
 import { theme } from "./theme.js";
 import type { ModelEntry } from "./commands.js";
+import { Panel } from "./components/Panel.js";
+import { SelectionRow } from "./components/SelectionRow.js";
 
 interface ModelPickerProps {
   models: ModelEntry[];
@@ -48,18 +50,18 @@ export function ModelPicker({
   });
 
   return (
-    <Box flexDirection="column" marginTop={1}>
-      <Text bold>Switch model — ↑↓ select · Enter switch · Esc cancel</Text>
-      {models.length === 0 ? (
-        <Text color={theme.dim}>No models available.</Text>
-      ) : (
-        models.map((m, i) => (
-          <Text key={`${m.provider}/${m.id}`} color={i === cursor ? theme.accent : undefined}>
-            {i === cursor ? "› " : "  "}
-            {m.provider}/{m.id}
-          </Text>
-        ))
-      )}
-    </Box>
+    <Panel title="Switch model" footer="↑↓ navigate · Enter switch · Esc cancel">
+      <Box flexDirection="column">
+        {models.length === 0 ? (
+          <Text color={theme.text.muted}>No models available.</Text>
+        ) : (
+          models.map((model, index) => (
+            <SelectionRow key={`${model.provider}/${model.id}`} selected={index === cursor}>
+              {model.provider}/{model.id}
+            </SelectionRow>
+          ))
+        )}
+      </Box>
+    </Panel>
   );
 }

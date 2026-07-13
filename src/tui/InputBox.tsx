@@ -22,8 +22,8 @@ import { COMMANDS } from "./commands.js";
 import { parseBang, runBang } from "./bang.js";
 import { openExternalEditor } from "./external-editor.js";
 import { loadFileCandidates } from "./file-picker.js";
-import { theme, divider, icons } from "./theme.js";
-import { Spinner } from "./components/Spinner.js";
+import { icons, theme } from "./theme.js";
+import { SelectionRow } from "./components/SelectionRow.js";
 import { MAX_PENDING_IMAGES } from "../images/encode.js";
 
 /** A slash-completable item (static command or dynamic skill). */
@@ -56,8 +56,6 @@ interface InputBoxProps {
   onHistoryDown: () => void;
   /** Shift+Tab: cycle the thinking level (off→minimal→…→xhigh→off). */
   onCycleThinking: () => void;
-  /** Terminal width for full-width dividers. */
-  terminalWidth: number;
   /** Loaded skills shown as `skill:<name>` in the slash list. */
   skills?: readonly { name: string; description: string }[];
   /** Ctrl+I: attach clipboard image to pending. */
@@ -77,17 +75,11 @@ export function buildSlashItems(
     name: `skill:${s.name}`,
     description: s.description,
   }));
-  return [
-    ...COMMANDS.map((c) => ({ name: c.name, description: c.description })),
-    ...skillItems,
-  ];
+  return [...COMMANDS.map((c) => ({ name: c.name, description: c.description })), ...skillItems];
 }
 
 /** Filter slash items by query (case-insensitive substring match on name). */
-export function filterSlashItems(
-  items: readonly SlashItem[],
-  query: string,
-): SlashItem[] {
+export function filterSlashItems(items: readonly SlashItem[], query: string): SlashItem[] {
   if (!query) return [...items];
   const q = query.toLowerCase();
   return items.filter((item) => item.name.toLowerCase().includes(q));
@@ -119,7 +111,6 @@ export function InputBox({
   onHistoryUp,
   onHistoryDown,
   onCycleThinking,
-  terminalWidth,
   skills,
   onPasteImage,
   pendingImages = [],
@@ -129,9 +120,7 @@ export function InputBox({
   const [slashDismissed, setSlashDismissed] = useState(false);
 
   // Derive slash query from the text: text after "/" up to the first space.
-  const slashQuery = state.text.startsWith("/")
-    ? (state.text.slice(1).split(/\s/)[0] ?? "")
-    : "";
+  const slashQuery = state.text.startsWith("/") ? (state.text.slice(1).split(/\s/)[0] ?? "") : "";
   const allSlashItems = buildSlashItems(skills);
   const matchedCommands = state.text.startsWith("/")
     ? filterSlashItems(allSlashItems, slashQuery)
@@ -233,7 +222,10 @@ export function InputBox({
 
     if (rels.length === 1) {
       const replacement = token.startsWith("@") ? `@${rels[0]}` : rels[0]!;
-      const cleared = { text: state.text.slice(0, start) + state.text.slice(state.cursor), cursor: start };
+      const cleared = {
+        text: state.text.slice(0, start) + state.text.slice(state.cursor),
+        cursor: start,
+      };
       setState(insert(cleared, replacement));
       return;
     }
@@ -241,7 +233,10 @@ export function InputBox({
     const prefix = longestCommonPrefix(rels);
     if (prefix.length > query.length) {
       const replacement = token.startsWith("@") ? `@${prefix}` : prefix;
-      const cleared = { text: state.text.slice(0, start) + state.text.slice(state.cursor), cursor: start };
+      const cleared = {
+        text: state.text.slice(0, start) + state.text.slice(state.cursor),
+        cursor: start,
+      };
       setState(insert(cleared, replacement));
     } else {
       onOpenFilePicker();
@@ -271,38 +266,78 @@ export function InputBox({
     // --- Emacs movement keys ---
     if (key.ctrl && !key.meta) {
       switch (value) {
-        case "a": setState(moveToLineStart); return;
-        case "e": setState(moveToLineEnd); return;
-        case "b": setState((s) => moveLeft(s)); return;
-        case "f": setState((s) => moveRight(s)); return;
-        case "w": setState(deleteWordBackward); return;
-        case "u": setState(deleteToLineStart); return;
-        case "k": setState(deleteToLineEnd); return;
-        case "j": setState((s) => insert(s, "\n")); return;
+        case "a":
+          setState(moveToLineStart);
+          return;
+        case "e":
+          setState(moveToLineEnd);
+          return;
+        case "b":
+          setState((s) => moveLeft(s));
+          return;
+        case "f":
+          setState((s) => moveRight(s));
+          return;
+        case "w":
+          setState(deleteWordBackward);
+          return;
+        case "u":
+          setState(deleteToLineStart);
+          return;
+        case "k":
+          setState(deleteToLineEnd);
+          return;
+        case "j":
+          setState((s) => insert(s, "\n"));
+          return;
       }
     }
 
     // --- Alt (meta) keys ---
     if (key.meta && !key.ctrl) {
-      if (value === "b") { setState((s) => moveLeft(s, true)); return; }
-      if (value === "f") { setState((s) => moveRight(s, true)); return; }
-      if (value === "d") { setState(deleteWordForward); return; }
+      if (value === "b") {
+        setState((s) => moveLeft(s, true));
+        return;
+      }
+      if (value === "f") {
+        setState((s) => moveRight(s, true));
+        return;
+      }
+      if (value === "d") {
+        setState(deleteWordForward);
+        return;
+      }
       // Alt+Up: preview the last queued message into the editor (no real
       // dequeue — the harness still delivers it; see onAltUp in App.tsx).
-      if (key.upArrow) { onAltUp(); return; }
-      if (key.backspace) { setState(deleteWordBackward); return; }
+      if (key.upArrow) {
+        onAltUp();
+        return;
+      }
+      if (key.backspace) {
+        setState(deleteWordBackward);
+        return;
+      }
     }
 
     // --- Arrow keys ---
-    if (key.leftArrow) { setState((s) => moveLeft(s)); return; }
-    if (key.rightArrow) { setState((s) => moveRight(s)); return; }
+    if (key.leftArrow) {
+      setState((s) => moveLeft(s));
+      return;
+    }
+    if (key.rightArrow) {
+      setState((s) => moveRight(s));
+      return;
+    }
     // ↑/↓ three-state dispatch: slash list → multi-line → input history
     if (key.upArrow) {
       if (slashActive) {
         setSlashSelectedIndex((i) => (i - 1 + matchedCommands.length) % matchedCommands.length);
         return;
       }
-      if (state.text.includes("\n")) { setState(moveLineUp); return; }
+      if (state.text.includes("\n")) {
+        setState(moveLineUp);
+        return;
+      }
       onHistoryUp();
       return;
     }
@@ -311,7 +346,10 @@ export function InputBox({
         setSlashSelectedIndex((i) => (i + 1) % matchedCommands.length);
         return;
       }
-      if (state.text.includes("\n")) { setState(moveLineDown); return; }
+      if (state.text.includes("\n")) {
+        setState(moveLineDown);
+        return;
+      }
       onHistoryDown();
       return;
     }
@@ -320,20 +358,27 @@ export function InputBox({
     if (key.return) {
       // Slash command list active: execute the selected command.
       if (slashActive) {
-        const cmd = matchedCommands[
-          Math.min(slashSelectedIndex, matchedCommands.length - 1)
-        ];
+        const cmd = matchedCommands[Math.min(slashSelectedIndex, matchedCommands.length - 1)];
         if (cmd) {
           setState({ text: "", cursor: 0 });
           onCommand(`/${cmd.name}${slashArgs}`);
         }
         return;
       }
-      if (key.shift) { setState((s) => insert(s, "\n")); return; }
+      if (key.shift) {
+        setState((s) => insert(s, "\n"));
+        return;
+      }
       // Alt/Meta+Enter: followUp during a turn, prompt when idle.
-      if (key.meta) { submit(phase === "turn" ? "followUp" : "prompt"); return; }
+      if (key.meta) {
+        submit(phase === "turn" ? "followUp" : "prompt");
+        return;
+      }
       // Plain Enter: steer during a turn, prompt when idle, no-op in compaction.
-      if (phase === "turn") { submit("steer"); return; }
+      if (phase === "turn") {
+        submit("steer");
+        return;
+      }
       submit("prompt");
       return;
     }
@@ -349,8 +394,14 @@ export function InputBox({
     }
 
     // --- Backspace / Delete ---
-    if (key.backspace) { setState(backspace); return; }
-    if (key.delete) { setState(deleteForward); return; }
+    if (key.backspace) {
+      setState(backspace);
+      return;
+    }
+    if (key.delete) {
+      setState(deleteForward);
+      return;
+    }
 
     // --- Tab: slash completion or path completion ---
     // Shift+Tab cycles the thinking level before any Tab handling.
@@ -360,11 +411,7 @@ export function InputBox({
     }
     if (key.tab) {
       if (slashActive) {
-        const completed = completeSlashSelection(
-          matchedCommands,
-          slashSelected,
-          slashArgs,
-        );
+        const completed = completeSlashSelection(matchedCommands, slashSelected, slashArgs);
         if (completed) {
           setState({ text: completed.text, cursor: completed.cursor });
         }
@@ -387,52 +434,58 @@ export function InputBox({
     setState((s) => insert(s, value));
   });
 
-  const busy = phase !== "idle" && !state.text.startsWith("/") && !state.text.startsWith("!");
-
   const before = state.text.slice(0, state.cursor);
   const at = state.text.slice(state.cursor);
 
   const slashSelected = Math.min(slashSelectedIndex, Math.max(0, matchedCommands.length - 1));
 
-  const maxNameWidth = matchedCommands.length > 0
-    ? Math.max(...matchedCommands.map((c) => c.name.length))
-    : 0;
+  const maxNameWidth =
+    matchedCommands.length > 0 ? Math.max(...matchedCommands.map((c) => c.name.length)) : 0;
 
   return (
-    <Box flexDirection="column">
-      <Text color={theme.dim}>{divider(terminalWidth)}</Text>
+    <Box
+      flexDirection="column"
+      marginTop={1}
+      borderStyle="round"
+      borderColor={theme.borderTone.focus}
+      paddingX={1}
+    >
       {pendingImages.length > 0 ? (
-        <Text color={theme.dim}>
+        <Text color={theme.text.muted}>
           attachments ({pendingImages.length}/{MAX_PENDING_IMAGES}):{" "}
           {pendingImages.map((p) => p.label).join(" · ")}
         </Text>
       ) : null}
       <Text>
-        <Text color={theme.accent} bold>{icons.prompt} </Text>
+        <Text color={theme.accent} bold>
+          {icons.prompt}{" "}
+        </Text>
         {before}
-        <Text color={theme.dim}>▏</Text>
+        <Text color={theme.text.muted}>▏</Text>
         {at}
-        {busy ? (
-          <Text>
-            {" "}
-            <Spinner color={theme.accent} />
-            <Text color={theme.dim}> working…</Text>
-          </Text>
-        ) : null}
       </Text>
       {slashListOpen ? (
         matchedCommands.length > 0 ? (
           <Box flexDirection="column">
             {matchedCommands.map((cmd, i) => (
-              <Text key={cmd.name} wrap="truncate">
-                {i === slashSelected ? "→ " : "  "}
-                {`/${cmd.name}`.padEnd(maxNameWidth + 3)}  {cmd.description}
-              </Text>
+              <SelectionRow
+                key={cmd.name}
+                selected={i === slashSelected}
+                description={cmd.description}
+              >
+                {`/${cmd.name}`.padEnd(maxNameWidth + 1)}
+              </SelectionRow>
             ))}
+            <Text color={theme.text.muted}>↑↓ choose · Tab complete · Enter run · Esc close</Text>
           </Box>
         ) : (
-          <Text color={theme.dim}>  No matching commands</Text>
+          <Text color={theme.text.muted}>No matching commands</Text>
         )
+      ) : null}
+      {phase === "turn" && !slashListOpen ? (
+        <Text color={theme.text.muted}>Enter steer · Alt+Enter follow up · Esc interrupt</Text>
+      ) : phase === "compaction" ? (
+        <Text color={theme.text.muted}>Compacting context…</Text>
       ) : null}
     </Box>
   );
@@ -460,9 +513,7 @@ export function completeSlashSelection(
     const completed = slashArgs ? `/${name}${slashArgs}` : `/${name} `;
     return { text: completed, cursor: completed.length };
   }
-  const cmd = matchedCommands[
-    Math.min(selectedIndex, matchedCommands.length - 1)
-  ];
+  const cmd = matchedCommands[Math.min(selectedIndex, matchedCommands.length - 1)];
   if (!cmd) return null;
   const completed = `/${cmd.name}${slashArgs}`;
   return { text: completed, cursor: completed.length };

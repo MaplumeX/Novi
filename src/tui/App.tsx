@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Text, useApp, useInput, render, useStdout } from "ink";
+import { Box, Text, useApp, useInput, render } from "ink";
 import type { Models } from "@earendil-works/pi-ai";
 import { JsonlSessionRepo } from "@earendil-works/pi-agent-core/node";
 import type { JsonlSessionMetadata } from "@earendil-works/pi-agent-core/node";
@@ -21,21 +21,14 @@ import {
   type CommandContext,
   type Overlay,
 } from "./commands.js";
-import {
-  createHarnessHandle,
-  type HarnessHandle,
-} from "./harness-handle.js";
+import { createHarnessHandle, type HarnessHandle } from "./harness-handle.js";
 import { insert, type EditorState } from "./editor-state.js";
 import { messageText, restoreText } from "./queue-helpers.js";
 import { matchScopedModels, nextScopedIndex } from "./scoped-models.js";
 import type { BootstrapResult } from "../bootstrap.js";
 import type { TuiApprover, PermissionPromptState } from "../permissions/index.js";
-import { theme, divider } from "./theme.js";
-import {
-  IMAGE_EXTENSIONS,
-  loadImageFile,
-  type PendingImage,
-} from "../images/encode.js";
+import { icons, theme } from "./theme.js";
+import { IMAGE_EXTENSIONS, loadImageFile, type PendingImage } from "../images/encode.js";
 import { nonVisionWarning, toPromptImages } from "./image-submit.js";
 
 /** Overlay union: null = normal input; settings = form; filePicker = @file; sessionPicker = /resume. */
@@ -111,11 +104,10 @@ function App({
 
   const state = useHarnessState(handle.harness, handle.session, compactionSettings);
   const { exit } = useApp();
-  const terminalWidth = useStdout().stdout?.columns ?? 80;
   const [notice, setNotice] = useState<string[]>([]);
   const [overlay, setOverlay] = useState<Overlay>(null);
   const [editorState, setEditorState] = useState<EditorState>({ text: "", cursor: 0 });
-  const [toolExpanded, setToolExpanded] = useState(false);
+  const [detailMode, setDetailMode] = useState(false);
   const [inputHistory, setInputHistory] = useState<string[]>([]);
   const [historyBrowse, setHistoryBrowse] = useState<{
     index: number;
@@ -172,10 +164,7 @@ function App({
     setHistoryBrowse(null);
   }
 
-  function submitWithImages(
-    text: string,
-    mode: "prompt" | "steer" | "followUp",
-  ): void {
+  function submitWithImages(text: string, mode: "prompt" | "steer" | "followUp"): void {
     const pending = pendingImagesRef.current;
     const warn = nonVisionWarning(handle.harness.getModel(), pending.length);
     if (warn) print(warn);
@@ -272,11 +261,7 @@ function App({
 
   /** Alt+Up: preview the last queued message into the editor (no real dequeue). */
   function handleAltUp(): void {
-    const all = [
-      ...state.queue.steer,
-      ...state.queue.followUp,
-      ...state.queue.nextTurn,
-    ];
+    const all = [...state.queue.steer, ...state.queue.followUp, ...state.queue.nextTurn];
     if (all.length === 0) {
       print("Queue is empty.");
       return;
@@ -348,7 +333,7 @@ function App({
   // Ctrl-P / Shift-Ctrl-P cycle scoped models.
   useInput((value, key) => {
     if (key.ctrl && value === "o") {
-      setToolExpanded((v) => !v);
+      setDetailMode((value) => !value);
       return;
     }
     if (key.ctrl && value === "p") {
@@ -376,18 +361,22 @@ function App({
     <>
       <MessageList
         messages={state.messages}
+        phase={state.phase}
         streamingText={state.streamingText}
         streamingThinking={state.streamingThinking}
+        streamingThinkingActive={state.streamingThinkingActive}
         streamingToolCalls={state.streamingToolCalls}
-        toolExpanded={toolExpanded}
+        detailed={detailMode}
       />
-      {notice.length > 0
-        ? notice.map((line, i) => (
-            <Text key={i} color={theme.dim}>
-              {line || " "}
+      {notice.length > 0 ? (
+        <Box flexDirection="column" marginTop={1} paddingLeft={2}>
+          {notice.map((line, i) => (
+            <Text key={i} color={theme.text.muted}>
+              {icons.guide} {line || " "}
             </Text>
-          ))
-        : null}
+          ))}
+        </Box>
+      ) : null}
       {permissionPrompt !== null && tuiApprover ? (
         <PermissionPrompt
           prompt={permissionPrompt}
@@ -413,7 +402,6 @@ function App({
           onHistoryDown={handleHistoryDown}
           onPasteImage={handlePasteImage}
           pendingImages={pendingImages}
-          terminalWidth={terminalWidth}
           skills={handle.harness.getResources().skills}
         />
       ) : overlay.kind === "settings" ? (
@@ -480,7 +468,11 @@ function App({
               try {
                 const repo = new JsonlSessionRepo({ fs: env, sessionsRoot: sessionsDir });
                 const session = await repo.open({ path: info.path } as JsonlSessionMetadata);
-                const { diagnostics } = await handle.replace({ session, sessionPath: info.path, reloadResources: true });
+                const { diagnostics } = await handle.replace({
+                  session,
+                  sessionPath: info.path,
+                  reloadResources: true,
+                });
                 setOverlay(null);
                 for (const d of diagnostics) print(`warning: ${d}`);
                 print(`Resumed session: ${info.path}`);
@@ -512,17 +504,14 @@ function App({
           onCancel={() => setOverlay(null)}
         />
       ) : null}
-      <Text color={theme.dim}>{divider(terminalWidth)}</Text>
       <StatusBar
         model={state.model}
         thinkingLevel={state.thinkingLevel}
         lastUsage={state.lastUsage}
         cumulativeUsage={state.cumulativeUsage}
+        sessionPath={handle.sessionPath}
+        detailed={detailMode}
       />
-      <Text color={theme.dim}>session: {handle.sessionPath}</Text>
-      <Text color={theme.dim}>
-        /help for commands · Ctrl-C to exit · Ctrl-O: {toolExpanded ? "collapse" : "expand"}
-      </Text>
     </>
   );
 }

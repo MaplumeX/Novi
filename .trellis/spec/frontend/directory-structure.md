@@ -22,6 +22,9 @@ src/tui/
 ├── useHarnessState.ts     # The event boundary: subscribes to harness, projects to state
 ├── harness-handle.ts      # HarnessHandle wrapper: replace() rebuilds harness + session
 ├── MessageList.tsx        # Renders conversation history + streaming text/tool calls
+├── ThinkingBlock.tsx      # Compact/default + detailed thinking presentation
+├── ToolCallBlock.tsx      # Stable live-to-history tool activity row
+├── tool-presentation.ts   # Pure semantic tool summaries, diffs, and truncation
 ├── StatusBar.tsx          # Single status line from HarnessState (no raw events)
 ├── InputBox.tsx           # Editor input: cursor model, Emacs keys, @file/!/Tab/Ctrl+G/Ctrl+I paste-image, pending attachments
 ├── editor-state.ts        # Pure editor model: { text, cursor } + insert/move/delete fns
@@ -36,8 +39,12 @@ src/tui/
 ├── commands.ts            # `/name args` registry + parseCommand + /skill: routing + /image /paste-image
 ├── image-submit.ts        # toPromptImages + nonVisionWarning helpers
 ├── commands.test.ts       # Co-located tests for parseCommand / skill invoke
-└── markdown/
-    └── render-token.tsx   # Pure marked-token → Ink element mapping
+├── markdown/
+│   └── render-token.tsx   # Pure marked-token → Ink element mapping
+└── components/
+    ├── Panel.tsx          # Shared temporary decision/selection surface
+    ├── SelectionRow.tsx   # Shared selected-row vocabulary
+    └── Spinner.tsx        # Shared animated activity glyph
 ```
 
 ---
@@ -53,6 +60,12 @@ src/tui/
 - **Pure logic** (`.ts`): `commands.ts` (command registry + `parseCommand`),
   `editor-state.ts` (cursor model), and `bang.ts` (`parseBang` / `runBang`)
   are kept framework-agnostic so their core logic is unit-testable without Ink.
+- **Presentation logic** (`tool-presentation.ts`): semantic labels, compact
+  summaries, diffs, and truncation stay outside Ink components. Live and
+  resumed transcripts must call the same helpers.
+- **Shared visual primitives** (`components/`): only stateless, cross-screen
+  primitives belong here. Picker/form keyboard state remains in its owning
+  component; do not build a generic form framework.
 - **Markdown rendering**: isolated in `markdown/render-token.tsx`. It is a
   pure token→element transform with no state and no harness access.
 

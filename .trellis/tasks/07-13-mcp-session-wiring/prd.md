@@ -34,14 +34,14 @@
 
 ## Acceptance Criteria
 
-- [ ] AC1: 配置 user MCP 后，新 session 自动暴露其 tools（仍默认 ask）。
-- [ ] AC2: project MCP 未批准时不连接；`/mcp approve` 后当前 session 出现工具。
-- [ ] AC3: `/mcp deny` 后工具从 active set 消失，且跨重启保持 denied。
-- [ ] AC4: `/mcp reconnect` 可恢复失败/已断线 server（在 server 可用时）。
-- [ ] AC5: `/reload` 后 catalog 与 approval 状态一致。
-- [ ] AC6: gateway/headless 路径不崩溃，并能看到 pending/unavailable 诊断。
-- [ ] AC7: `/tools` 显示 MCP source 信息。
-- [ ] AC8: 跨模式集成测试 + 全量质量门通过。
+- [x] AC1: 配置 user MCP 后，新 session 自动暴露其 tools（仍默认 ask）。
+- [x] AC2: project MCP 未批准时不连接；`/mcp approve` 后当前 session 出现工具。
+- [x] AC3: `/mcp deny` 后工具从 active set 消失，且跨重启保持 denied。
+- [x] AC4: `/mcp reconnect` 可恢复失败/已断线 server（在 server 可用时）。
+- [x] AC5: `/reload` 后 catalog 与 approval 状态一致。
+- [x] AC6: gateway/headless 路径不崩溃，并能看到 pending/unavailable 诊断。
+- [x] AC7: `/tools` 显示 MCP source 信息。
+- [x] AC8: 跨模式集成测试 + 全量质量门通过。
 
 ## Out of Scope
 

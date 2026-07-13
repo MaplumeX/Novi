@@ -31,7 +31,7 @@ src/
 │   ├── contracts.ts        # Descriptor/catalog/capability/availability contracts
 │   ├── events.ts           # JSON-safe tool envelope/event decoder + replay reducer
 │   ├── index.ts            # createBuiltinToolAssembly + built-in descriptors
-│   ├── assembly.ts         # async createToolAssembly (builtin + MCP external merge)
+│   ├── assembly.ts         # createToolAssembly + assembleSessionTools (MCP session wiring)
 │   ├── registry.ts         # ToolRegistry: validated descriptor assembly
 │   ├── shared.ts           # Shared helpers (unwrap / textResult / sliceLines …)
 │   ├── bash.ts             # Each tool: createXxxTool(env): AgentTool

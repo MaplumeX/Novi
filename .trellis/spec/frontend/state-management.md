@@ -66,7 +66,11 @@ disk; `/new`/`/resume` omit it to preserve the current runtime config.
 Compaction settings flow through React state: `App.tsx` computes
 `const compactionSettings = useMemo(() => resolveCompactionSettings(settings), [settings])`
 and passes it with `handle.toolCatalog` to `useHarnessState`. When `/reload`
-updates `settings`, the memo recomputes → the effect re-runs →
+or `/mcp approve|deny|reconnect` rebuilds tools, `HarnessHandle.refreshTools`
+(or replace) must publish a new `toolCatalog` identity and update the gate's
+`resolveDescriptor` so MCP labels/permissions stay in sync. `handle.mcp` holds
+the optional `McpRuntimeHandle` and must be closed before process exit.
+When `/reload` updates `settings`, the memo recomputes → the effect re-runs →
 `compactor.setSettings(compactionSettings)` syncs the new thresholds/enabled
 flag.
 

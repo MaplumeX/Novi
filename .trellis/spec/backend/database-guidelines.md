@@ -164,8 +164,10 @@ await setMcpApproval(env, {
   missing-env enforcement belongs to the MCP client layer (not this store).
 - Live MCP client lives beside this store (`transport.ts`, `client-manager.ts`,
   `tool-adapter.ts`) and consumes `resolveMcpPlan` connectable entries only.
-  Unified tool merge is `src/tools/assembly.ts` (`createToolAssembly`).
-  Bootstrap/TUI `/mcp` wiring is a separate session-layer concern.
+  Unified tool merge is `src/tools/assembly.ts` (`createToolAssembly`,
+  `assembleSessionTools`). Bootstrap / resume / reload / gateway and TUI
+  `/mcp` use that helper; close MCP handles on harness replace, quit, and
+  gateway session close.
 
 ---
 

@@ -161,6 +161,32 @@ await harness.setTools(tools, tools.map(t => t.name));
 
 （源码确认：`setTools` 中 `const nextActiveToolNames = activeToolNames ? [...activeToolNames] : this.activeToolNames;`）
 
+### MCP session assembly（Novi）
+
+当 session 可能加载 MCP 外部工具时，使用 async 装配而非仅 builtin：
+
+```ts
+import { assembleSessionTools } from "./tools/assembly.js";
+
+const assembled = await assembleSessionTools(env, sessionId, cwd, {
+  mode,
+  exposure: resolvedSettings.tools,
+  permissions,
+  workspace: cwd,
+  connectMcp: true, // session create / reload; preflight may pass false
+});
+await harness.setTools(assembled.tools, assembled.activeToolNames);
+// PermissionGate must resolve MCP descriptors too:
+// resolveDescriptor: assembled.resolveDescriptor
+// On replace / quit / gateway closeSession: await assembled.mcp?.close()
+```
+
+- Preflight may set `connectMcp: false` to collect plan diagnostics without
+  spawning servers; real session create connects approved servers only.
+- `/mcp approve|deny|reconnect` rebuilds tools via the same helper and must
+  re-`setTools` + refresh `toolCatalog` identity for TUI/Headless consumers.
+- Project trust (`/trust`) does **not** approve MCP; MCP approval is separate.
+
 ## bootstrap 拆分契约（prepareGatewayEnv + createHarnessForSession）
 
 `bootstrap()` 原本一次性完成「env/credentials/settings/models/tools/resources 准备 + session/harness 创建」。多渠道网关任务将其拆成两层，支持 per-sessionKey 懒创建多个 harness，同时保持 TUI/print/json 路径的 `BootstrapResult` 契约不变。

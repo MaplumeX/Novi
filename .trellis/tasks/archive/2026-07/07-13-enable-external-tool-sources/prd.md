@@ -61,15 +61,15 @@ Parent 负责跨 child 契约、集成验收与最终一致性复核，不直接
 
 ## Acceptance Criteria
 
-- [ ] AC1: 配置 user/project MCP 后，仅 user servers 与已批准 project servers 可连接并暴露 tools。
-- [ ] AC2: 未批准 project server 不 spawn/connect，也不出现在模型 active tool set。
-- [ ] AC3: stdio 与 Streamable HTTP 各至少一条成功路径，工具调用进入现有 permission/budget/events 管线。
-- [ ] AC4: 单个 MCP server 初始化失败只影响该 source；builtin 与其他 source 仍可用。
-- [ ] AC5: bootstrap / resume / `/reload` / gateway session create 共用同一装配路径，catalog 一致。
-- [ ] AC6: `/mcp approve|deny|reconnect` 可更新当前 session 工具集，且 approval 状态跨重启保留。
-- [ ] AC7: MCP 工具默认触发 ask；headless 无 `--yes` 时 fail-closed；显式 allow 规则可放行。
-- [ ] AC8: `/tools` 与 Headless `tools_update` 展示 external source、availability 与诊断。
-- [ ] AC9: 全量 typecheck/lint/test/build 通过；三个 child 各自验收，parent 完成集成复核。
+- [x] AC1: 配置 user/project MCP 后，仅 user servers 与已批准 project servers 可连接并暴露 tools。
+- [x] AC2: 未批准 project server 不 spawn/connect，也不出现在模型 active tool set。
+- [x] AC3: stdio 与 Streamable HTTP 各至少一条成功路径，工具调用进入现有 permission/budget/events 管线。
+- [x] AC4: 单个 MCP server 初始化失败只影响该 source；builtin 与其他 source 仍可用。
+- [x] AC5: bootstrap / resume / `/reload` / gateway session create 共用同一装配路径，catalog 一致。
+- [x] AC6: `/mcp approve|deny|reconnect` 可更新当前 session 工具集，且 approval 状态跨重启保留。
+- [x] AC7: MCP 工具默认触发 ask；headless 无 `--yes` 时 fail-closed；显式 allow 规则可放行。
+- [x] AC8: `/tools` 与 Headless `tools_update` 展示 external source、availability 与诊断。
+- [x] AC9: 全量 typecheck/lint/test/build 通过；三个 child 各自验收，parent 完成集成复核。
 
 ## Out of Scope
 

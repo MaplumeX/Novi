@@ -1426,3 +1426,36 @@ Parent integration review: 3/3 children complete; assembleSessionTools + /mcp wi
 ### Next Steps
 
 - None - task complete
+
+
+## Session 43: Analyze Novi agent tool system
+
+**Date**: 2026-07-13
+**Task**: Analyze Novi agent tool system
+**Branch**: `main`
+
+### Summary
+
+Analyzed the full tool stack (descriptor/registry/assembly/runtime/permission/events/MCP) and wrote docs/tool-system.md covering architecture, active-set rules, budgets, gate lifecycle, and session wiring. Lightweight docs-only task; no code-spec change needed because tool-runtime-contracts already exists.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `78608f8` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

@@ -59,6 +59,12 @@ src/
 │   ├── errors.ts           # NOVI_ERROR codec + shared result decoder
 │   ├── tui-approver.ts     # Queued TUI Approver (once/session/deny)
 │   └── index.ts            # Public barrel exports
+├── mcp/                   # MCP config + approval domain (no live transport yet)
+│   ├── types.ts            # Server config, plan entry, approval types
+│   ├── config.ts           # Load/validate/merge user+project mcp.json + fingerprints
+│   ├── approval.ts         # User-local ~/.novi/mcp-approvals.json store
+│   ├── plan.ts             # resolveMcpPlan → connectable/pending/denied/invalid
+│   └── index.ts            # Public barrel exports
 ├── images/                # Multimodal image encode + clipboard adapters (TUI pending attachments)
 │   ├── encode.ts          # bytes/file → PendingImage (mime/size limits, appendPending)
 │   └── clipboard.ts       # platform clipboard image reader (darwin/linux)

@@ -119,6 +119,54 @@ parent dirs if missing. A `null`/`undefined` value removes the key.
 
 ---
 
+## MCP Config and Approval Store
+
+MCP server declarations are **not** stored in `settings.json`. They use
+independent files and an approval store separate from project trust
+(`src/mcp/`).
+
+```ts
+import { resolveMcpPlan, setMcpApproval } from "./mcp/index.js";
+
+const plan = await resolveMcpPlan(env, cwd);
+// plan.entries[].status: "connectable" | "pending" | "denied" | "invalid"
+await setMcpApproval(env, {
+  serverName: "filesystem",
+  fingerprint: plan.entries[0].fingerprint,
+  decision: "approved",
+  origin: "project",
+  projectRoot: cwd,
+});
+```
+
+- **User config**: `~/.novi/mcp.json` (`mcpServers` map). Always loadable.
+- **Project config**: prefer `<cwd>/.mcp.json`; secondary `<cwd>/.novi/mcp.json`.
+  If both exist, primary wins and the secondary path is ignored with a
+  diagnostic.
+- **Transports**: each server is either stdio (`command`/`args`/`env`/`cwd`)
+  or Streamable HTTP (`url`/`headers`). Mixing both is invalid.
+- **Merge**: project overlays user by server name; overlayed entries keep
+  `origin: "project"`.
+- **Fingerprint**: stable sha256 over canonical transport identity (sorted
+  keys; env/header **values are hashed**, not stored raw in the fingerprint
+  payload). Changing command/url/args/env values invalidates approval.
+- **Approval store**: `~/.novi/mcp-approvals.json`, pretty-printed, best-effort
+  `0600`. User servers are connectable without approval. Project servers
+  default to `pending`; matching approved/denied entries are keyed by
+  project root + name + fingerprint. Stale fingerprints return to `pending`.
+- **Project trust is independent**: a trusted project does **not** auto-approve
+  MCP servers.
+- **Fail-soft**: missing/corrupt config or approval files degrade to empty +
+  diagnostics; load paths do not throw. Approval writes may throw on hard IO
+  failure (same style as trust/credentials).
+- **Env placeholders**: `${VAR}` substitution is available via
+  `resolveEnvPlaceholders` / `resolveServerConfigPlaceholders`. Connect-time
+  missing-env enforcement belongs to the MCP client layer (not this store).
+- Live MCP transport/client and tool assembly are out of this module; they
+  consume `resolveMcpPlan` only for connectable entries.
+
+---
+
 ## Credentials Store
 
 API keys are **not** stored in `settings.json`. They live in a separate

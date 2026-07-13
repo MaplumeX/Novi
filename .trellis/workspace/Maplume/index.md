@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 39
+- **Total Sessions**: 40
 - **Last Active**: 2026-07-13
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1323 | Active |
+| `journal-1.md` | ~1358 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 40 | 2026-07-13 | MCP client transport and tool assembly | `720ea71`, `8728bb8`, `c4f5a28` | `main` |
 | 39 | 2026-07-13 | Enable external tool sources: plan + MCP config/approval | `215f32b`, `535dba9`, `337c0f0` | `main` |
 | 38 | 2026-07-13 | Harden Novi P0/P1 tool system | `290001e`, `6c36f3a`, `f78ffcb` | `main` |
 | 37 | 2026-07-13 | 统一重构 TUI 信息层级 | `23f48344283822072115364d20be76835ef13ae1` | `main` |

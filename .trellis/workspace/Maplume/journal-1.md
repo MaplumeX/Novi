@@ -1321,3 +1321,38 @@ Planned parent+3 children for MCP external tool sources. Implemented child1: src
 ### Next Steps
 
 - None - task complete
+
+
+## Session 40: MCP client transport and tool assembly
+
+**Date**: 2026-07-13
+**Task**: MCP client transport and tool assembly
+**Branch**: `main`
+
+### Summary
+
+Implemented MCP SDK client, stdio/HTTP transports, tool adapter, external.invoke capability, async createToolAssembly with shared runtime; 692 tests green; specs updated.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `720ea71` | (see git log) |
+| `8728bb8` | (see git log) |
+| `c4f5a28` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

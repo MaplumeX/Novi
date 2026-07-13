@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getTool, setupEnv } from "./helpers.js";
+import { envelopeData, getTool, setupEnv } from "./helpers.js";
 import { createBuiltinToolAssembly } from "../index.js";
 import { guardedRequest, providerJsonRequest } from "../web/network.js";
 
@@ -35,11 +35,11 @@ describe("web_search batch contract", () => {
       expect((first.content[0] as { text: string }).text).toContain(
         "[Alpha](https://example.com/a)",
       );
-      expect(first.details).toMatchObject({
+      expect(envelopeData(first)).toMatchObject({
         provider: "duckduckgo",
         outcomes: [{ ok: true, cache: "miss" }],
       });
-      expect(second.details).toMatchObject({ outcomes: [{ ok: true, cache: "hit" }] });
+      expect(envelopeData(second)).toMatchObject({ outcomes: [{ ok: true, cache: "hit" }] });
       expect(mockedGuardedRequest).toHaveBeenCalledTimes(1);
       expect(mockedGuardedRequest).toHaveBeenCalledWith(
         expect.any(String),
@@ -67,7 +67,7 @@ describe("web_search batch contract", () => {
       const result = await tool.execute("1", {
         queries: [{ query: "scoped", include_domains: ["example.com"] }, { query: "plain" }],
       });
-      expect(result.details).toMatchObject({
+      expect(envelopeData(result)).toMatchObject({
         outcomes: [
           { ok: false, error: { code: "UNSUPPORTED_FILTER" } },
           { ok: true, results: [] },
@@ -117,7 +117,7 @@ describe("web_search batch contract", () => {
         queries: [{ query: "x", language: "EN", country: "us" }],
         force_refresh: true,
       });
-      expect(result.details).toMatchObject({
+      expect(envelopeData(result)).toMatchObject({
         provider: "brave",
         outcomes: [
           { ok: true, cache: "bypass", results: [{ title: "Brave result", position: 1 }] },
@@ -151,7 +151,7 @@ describe("web_search batch contract", () => {
         cacheRoot,
       });
       const result = await tool.execute("1", { queries: [{ query: "x", country: "US" }] });
-      expect(result.details).toMatchObject({
+      expect(envelopeData(result)).toMatchObject({
         provider: "tavily",
         outcomes: [{ ok: true, results: [{ title: "Tavily result", snippet: "Snippet" }] }],
       });

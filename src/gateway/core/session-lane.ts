@@ -133,16 +133,10 @@ async function runTurn(
     onReasoningDelta: async (delta: string) => {
       await channel.sendEvent?.(chatId, { type: "reasoning-delta", delta });
     },
-    onToolCall: async (
-      toolName: string,
-      status?: string,
-      error?: { code: string; message: string },
-    ) => {
+    onToolEvent: async (event: import("../../tools/events.js").NoviToolEvent) => {
       await channel.sendEvent?.(chatId, {
-        type: "tool-call",
-        toolName,
-        status,
-        ...(error ? { error } : {}),
+        type: "tool-event",
+        event,
       });
     },
     onTyping: async () => {

@@ -33,6 +33,10 @@ describe("toolAction", () => {
 
   it("humanizes unknown tool names", () => {
     expect(toolAction("custom_agent", {})).toEqual({ action: "Custom agent", target: "" });
+    expect(toolAction("custom_agent", {}, "Delegate Research")).toEqual({
+      action: "Delegate Research",
+      target: "",
+    });
   });
 });
 
@@ -52,11 +56,24 @@ describe("toolResultSummary", () => {
     expect(
       toolResultSummary({
         name: "edit_file",
-        args: { oldText: "one", newText: "one\ntwo" },
+        args: { edits: [{ oldText: "one", newText: "one\ntwo" }] },
         status: "done",
         resultText: "",
       }),
     ).toBe("Updated +1 -0");
+    expect(
+      toolResultSummary({
+        name: "edit_file",
+        args: {
+          edits: [
+            { oldText: "one", newText: "one\ntwo" },
+            { oldText: "three", newText: "four" },
+          ],
+        },
+        status: "done",
+        resultText: "",
+      }),
+    ).toBe("Updated +2 -1");
     expect(
       toolResultSummary({
         name: "write_file",

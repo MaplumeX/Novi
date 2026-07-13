@@ -331,9 +331,11 @@ if (opts.reloadResources) {
 
 ### useHarnessState 依赖
 
-`useHarnessState(handle.harness, handle.session, compactionSettings)` 的 `useEffect` 依赖数组为 `[harness, session, compactionSettings]`。
+`useHarnessState(handle.harness, handle.session, compactionSettings, handle.toolCatalog)` 的 `useEffect` 依赖数组为 `[harness, session, compactionSettings, toolCatalog]`。
 当 `handle.replace` 调 `setHandle` 时，`handle.harness` identity 变化 → effect cleanup
 （`unsubscribe()`）自动执行 → 新 effect 以新 harness 重订阅 + `reloadMessages()`。
+
+`toolCatalog` 为共享 `ToolEventDecoder` 提供 descriptor metadata；reload/new/resume 替换 catalog identity 时必须一并重订阅，避免新 harness 的工具事件使用旧 label/source/risk。
 
 `compactionSettings` 由 `App.tsx` 经 `useMemo(() => resolveCompactionSettings(settings), [settings])`
 计算后传入。effect 开始时调 `compactor.setSettings(compactionSettings)` 同步注入 ——

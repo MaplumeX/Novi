@@ -1,25 +1,25 @@
 # Tool Event Implementation Plan
 
-- [ ] Add `ToolResultEnvelope`, Novi tool-event union, JSON-safety validator,
+- [x] Add `ToolResultEnvelope`, Novi tool-event union, JSON-safety validator,
   decoder, and lifecycle reducer in the tool contract owner modules.
-- [ ] Decode stable `NOVI_ERROR:<code>:<message>` gate failures into final
+- [x] Decode stable `NOVI_ERROR:<code>:<message>` gate failures into final
   envelopes while preserving bounded readable text and resume behavior.
-- [ ] Update the execution runtime to emit sequence-numbered deltas and final
+- [x] Update the execution runtime to emit sequence-numbered deltas and final
   envelopes that the decoder can validate directly.
-- [ ] Replace Headless tool event projection with `tool.start`, `tool.delta`,
+- [x] Replace Headless tool event projection with `tool.start`, `tool.delta`,
   and `tool.end`; delete legacy field branches and update JSON tests.
-- [ ] Refactor `useHarnessState` tool projections to call the shared reducer;
+- [x] Refactor `useHarnessState` tool projections to call the shared reducer;
   keep it as the only TUI subscriber.
-- [ ] Update `ToolCallView`, `MessageList`, and `ToolCallBlock` to consume the
+- [x] Update `ToolCallView`, `MessageList`, and `ToolCallBlock` to consume the
   final envelope and bounded accumulated delta.
-- [ ] Rewrite `tool-presentation.ts` specialized edit handling for canonical
+- [x] Rewrite `tool-presentation.ts` specialized edit handling for canonical
   `edits[]`, including multi-edit summary and detail hunks.
-- [ ] Route Gateway event-bridge tool observation through the shared decoder;
+- [x] Route Gateway event-bridge tool observation through the shared decoder;
   keep channel-specific rendering outside the contract owner.
-- [ ] Ensure persisted/resumed ToolResultMessage projection reconstructs the
+- [x] Ensure persisted/resumed ToolResultMessage projection reconstructs the
   same final view from envelope details.
-- [ ] Remove old compatibility tests, casts, and duplicate raw payload parsing.
-- [ ] Update README and architecture documentation with the new JSONL examples.
+- [x] Remove old compatibility tests, casts, and duplicate raw payload parsing.
+- [x] Update README and architecture documentation with the new JSONL examples.
 
 ## Required Tests
 

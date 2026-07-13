@@ -17,113 +17,12 @@ import {
   ZERO_USAGE,
   type UsageSummary,
 } from "./usage.js";
+import type { ToolCatalogSnapshot } from "../tools/contracts.js";
+import { ToolEventDecoder, reduceToolCallState, type ToolCallView } from "../tools/events.js";
+
+export type { ToolCallView } from "../tools/events.js";
 
 export type Phase = "idle" | "turn" | "compaction";
-
-/** Lightweight view of an in-flight tool call, for streaming display. */
-export interface ToolCallView {
-  id: string;
-  name: string;
-  args: Record<string, unknown>;
-  status: "running" | "done" | "error";
-  partialText?: string;
-  resultText?: string;
-}
-
-/** Normalize dependency-owned `any` tool arguments at the event boundary. */
-export function normalizeToolArgs(value: unknown): Record<string, unknown> {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) return {};
-  return { ...(value as Record<string, unknown>) };
-}
-
-/** Extract display-safe text from a final or partial AgentToolResult-like value. */
-export function normalizeToolResultText(value: unknown): string {
-  if (typeof value === "string") return value;
-  if (value === null || typeof value !== "object") return "";
-  const content = (value as Record<string, unknown>).content;
-  if (!Array.isArray(content)) return "";
-  return content
-    .flatMap((part) => {
-      if (part === null || typeof part !== "object") return [];
-      const record = part as Record<string, unknown>;
-      return record.type === "text" && typeof record.text === "string" ? [record.text] : [];
-    })
-    .join("\n");
-}
-
-/** Upsert a running call so duplicate start events cannot duplicate transcript rows. */
-export function projectToolCallStart(
-  calls: ToolCallView[],
-  id: string,
-  name: string,
-  args: unknown,
-): ToolCallView[] {
-  const next: ToolCallView = {
-    id,
-    name,
-    args: normalizeToolArgs(args),
-    status: "running",
-  };
-  const index = calls.findIndex((call) => call.id === id);
-  if (index < 0) return [...calls, next];
-  return calls.map((call, i) => (i === index ? next : call));
-}
-
-/** Attach a streaming partial result without exposing raw event payloads to components. */
-export function projectToolCallUpdate(
-  calls: ToolCallView[],
-  id: string,
-  name: string,
-  args: unknown,
-  partialResult: unknown,
-): ToolCallView[] {
-  const partialText = normalizeToolResultText(partialResult);
-  const index = calls.findIndex((call) => call.id === id);
-  if (index < 0) {
-    return [
-      ...calls,
-      {
-        id,
-        name,
-        args: normalizeToolArgs(args),
-        status: "running",
-        ...(partialText ? { partialText } : {}),
-      },
-    ];
-  }
-  return calls.map((call, i) =>
-    i === index
-      ? {
-          ...call,
-          name,
-          args: normalizeToolArgs(args),
-          ...(partialText ? { partialText } : {}),
-        }
-      : call,
-  );
-}
-
-/** Freeze a call's result while the matching persisted ToolResultMessage arrives. */
-export function projectToolCallEnd(
-  calls: ToolCallView[],
-  id: string,
-  name: string,
-  result: unknown,
-  isError: boolean,
-): ToolCallView[] {
-  const resultText = normalizeToolResultText(result);
-  const index = calls.findIndex((call) => call.id === id);
-  const finish = (call: ToolCallView): ToolCallView => ({
-    ...call,
-    name,
-    status: isError ? "error" : "done",
-    ...(resultText ? { resultText } : {}),
-  });
-  if (index < 0) {
-    return [finish({ id, name, args: {}, status: "running" })];
-  }
-  return calls.map((call, i) => (i === index ? finish(call) : call));
-}
 
 /**
  * Queued messages surfaced from `queue_update` events.
@@ -179,6 +78,7 @@ export function useHarnessState(
   harness: AgentHarness,
   session?: Session<JsonlSessionMetadata>,
   compactionSettings?: CompactionSettings,
+  toolCatalog?: ToolCatalogSnapshot,
 ): HarnessState {
   // Dependency array below is [harness, session]; callers passing
   // handle.harness / handle.session get re-subscription on replace().
@@ -251,7 +151,16 @@ export function useHarnessState(
     // rather than reaching into storage internals.
     void reloadMessages();
 
+    const toolDecoder = new ToolEventDecoder(toolCatalog);
     const unsubscribe = harness.subscribe((event) => {
+      const toolEvent = toolDecoder.decode(event);
+      if (toolEvent) {
+        setState((prev) => ({
+          ...prev,
+          streamingToolCalls: reduceToolCallState(prev.streamingToolCalls, toolEvent),
+        }));
+        return;
+      }
       switch (event.type) {
         case "turn_start":
           setState((prev) => ({ ...prev, phase: "turn", streamingToolCalls: [] }));
@@ -322,41 +231,6 @@ export function useHarnessState(
             }));
           }
           break;
-        case "tool_execution_start":
-          setState((prev) => ({
-            ...prev,
-            streamingToolCalls: projectToolCallStart(
-              prev.streamingToolCalls,
-              event.toolCallId,
-              event.toolName,
-              event.args,
-            ),
-          }));
-          break;
-        case "tool_execution_update":
-          setState((prev) => ({
-            ...prev,
-            streamingToolCalls: projectToolCallUpdate(
-              prev.streamingToolCalls,
-              event.toolCallId,
-              event.toolName,
-              event.args,
-              event.partialResult,
-            ),
-          }));
-          break;
-        case "tool_execution_end":
-          setState((prev) => ({
-            ...prev,
-            streamingToolCalls: projectToolCallEnd(
-              prev.streamingToolCalls,
-              event.toolCallId,
-              event.toolName,
-              event.result,
-              event.isError,
-            ),
-          }));
-          break;
         case "model_update":
           setState((prev) => ({ ...prev, model: event.model }));
           break;
@@ -425,7 +299,7 @@ export function useHarnessState(
       cancelled = true;
       unsubscribe();
     };
-  }, [harness, session, compactionSettings]);
+  }, [harness, session, compactionSettings, toolCatalog]);
 
   return state;
 }

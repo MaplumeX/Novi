@@ -110,8 +110,9 @@ Hook denials use only the public reason string:
 NOVI_ERROR:<code>:<single-line bounded message>
 ```
 
-`findPermissionError()` is the sole shared decoder for Headless/Gateway
-projections. Initial codes: `PERMISSION_DENIED`,
+`ToolEventDecoder` is the sole cross-surface decoder for these failures; it
+maps the stable text into `ToolResultEnvelope.error`. Initial codes are
+`PERMISSION_DENIED`,
 `PERMISSION_INTERACTION_REQUIRED`, `WORKSPACE_EXTERNAL_WRITE_DENIED`,
 `TOOL_DISABLED`, and `PERMISSION_INTENT_INVALID`.
 
@@ -134,7 +135,7 @@ projections. Initial codes: `PERMISSION_DENIED`,
 ### 5. Good / Base / Bad Cases
 
 - Good: a global subtree deny leaves `read_file` active but blocks only the
-  matching canonical subtree; Headless emits `errorCode`.
+  matching canonical subtree; Headless emits `tool.end.result.error.code`.
 - Base: workspace-internal `read_file`/`write_file` follow descriptor/rule
   policy and require no boundary exception.
 - Bad: an internal lexical path traverses a symlink to an unlisted external
@@ -239,10 +240,11 @@ CLI values are repeatable: `--tool-budget <field>=<positive-safe-integer>`.
 - Streaming tools emit true text deltas with monotonically increasing
   `details.sequence`; each delta is at most `partialBytes`, pending delta memory
   is bounded, and delivery is at most `partialUpdatesPerSecond`.
-- Governed results set `details.resourceGoverned: true` and
-  `details.resource` with total/output bytes and lines, truncation reasons,
-  partial counts, dropped backpressure bytes, and optional artifact path/size.
-  Complete stdout/stderr/content must not be duplicated in details or errors.
+- Internal captures first produce resource metrics. The runtime then replaces
+  final public details with `{ envelope: ToolResultEnvelope }`; domain details
+  move into bounded `envelope.data`, and resource metrics move into
+  `metrics`/`truncation`/`artifacts`. Complete stdout/stderr/content must not be
+  duplicated in details or errors.
 - Overflow persistence is incremental under
   `~/.novi/artifacts/<session>/<call>/{output.log,metadata.json}`. Directories
   are `0700`; files are `0600`. Active temp files are never cleanup candidates.
@@ -320,4 +322,136 @@ const files = await recursiveCollectEverything(root);
 await capture.append(chunk); // bounded tail + incremental artifact
 deltas.push(chunk, "stdout"); // bounded true delta + sequence
 await visitFiles(env, root, budget, onFile, signal); // deterministic early stop
+```
+
+## Scenario: Emit and consume unified tool events
+
+### 1. Scope / Trigger
+
+Use this contract when changing tool execution results, harness tool events,
+Headless JSONL, Gateway tool callbacks, TUI tool state, or persisted tool
+replay. `src/tools/events.ts` is the contract owner; consumers must not parse
+dependency-owned tool payloads independently.
+
+### 2. Signatures
+
+```ts
+interface ToolResultEnvelope {
+  version: 1;
+  status: "success" | "error" | "cancelled";
+  data?: JsonValue;
+  preview: string;
+  error?: { code: string; message: string; retryable: boolean };
+  metrics: {
+    startedAt: number;
+    durationMs: number;
+    inputItems?: number;
+    outputBytes: number;
+    outputLines: number;
+  };
+  truncation: {
+    truncated: boolean;
+    reasons: string[];
+    shownBytes: number;
+    shownLines: number;
+  };
+  artifacts: Array<{
+    kind: "full-output" | "document";
+    path: string;
+    bytes: number;
+  }>;
+}
+
+type NoviToolEvent =
+  | { type: "tool.start"; toolCallId: string; tool: ToolRef; input: JsonValue; at: number }
+  | { type: "tool.delta"; toolCallId: string; sequence: number; delta: string; at: number }
+  | { type: "tool.end"; toolCallId: string; result: ToolResultEnvelope; at: number };
+
+class ToolEventDecoder {
+  decode(event: AgentHarnessEvent, at?: number): NoviToolEvent | undefined;
+}
+
+function reduceToolCallState(calls: ToolCallView[], event: NoviToolEvent): ToolCallView[];
+```
+
+### 3. Contracts
+
+- Runtime partial updates always carry a positive monotonic `details.sequence`.
+  `tool.delta` contains a bounded true delta, never a cumulative snapshot.
+- Successful wrapped tools persist exactly one validated final envelope at
+  `result.details.envelope`. Error results thrown by tools are reconstructed
+  from bounded `NOVI_ERROR:<code>:<message>` content.
+- The decoder reuses a valid persisted envelope verbatim. A malformed or
+  missing envelope is rebuilt from bounded content/details; a malformed result
+  shape fails closed with `TOOL_RESULT_INVALID`.
+- `assertJsonSafe` rejects functions, symbols, non-finite numbers, cycles,
+  excessive depth/size, and secret-bearing public fields. Decoder inputs are
+  bounded and omit Authorization/API-key/token/password/cookie/environment/
+  stack fields.
+- Headless suppresses hook-level `tool_call`/`tool_result` duplicates and emits
+  only `tool.start`, `tool.delta`, and `tool.end`. This is a breaking protocol;
+  no legacy field aliases or dual writes exist.
+- TUI live state and persisted resume both use the shared reducer/envelope.
+  Gateway forwards the same `NoviToolEvent`; channel rendering may ignore
+  deltas but may not define another payload decoder.
+- `edit_file` accepts only `{ path, edits: [{ oldText, newText }] }`. TUI diff
+  summaries aggregate every canonical edit; top-level legacy replacements and
+  JSON-string `edits` are invalid.
+
+### 4. Validation & Error Matrix
+
+| Condition                       | Result                                                       |
+| ------------------------------- | ------------------------------------------------------------ |
+| ordered delta                   | append and advance `lastSequence`                            |
+| duplicate or out-of-order delta | do not append; add reducer diagnostic                        |
+| sequence gap                    | append newest delta; record missing range diagnostic         |
+| update/end before start         | create a minimal unknown-tool view; do not drop              |
+| valid persisted envelope        | reuse it exactly                                             |
+| malformed final result          | error envelope with `TOOL_RESULT_INVALID`                    |
+| `TOOL_ABORTED` stable error     | `status: "cancelled"`                                        |
+| other stable/generic failure    | `status: "error"` with machine-readable error                |
+| output exceeds model budget     | bounded preview + truncation + optional artifact             |
+| secret/cyclic/unsupported input | redact or bounded placeholder; emitted event stays JSON-safe |
+
+### 5. Good / Base / Bad Cases
+
+- Good: `tool.start` → sequences 1 and 2 → `tool.end`; replay reconstructs
+  the same single row and exact persisted envelope.
+- Base: a small non-streaming tool emits start/end with no artifact and
+  `truncated: false`.
+- Bad: Headless emits raw `tool_execution_end`, a component casts
+  `partialResult`, Gateway converts errors separately, or runtime preserves a
+  second full output copy next to the envelope.
+
+### 6. Tests Required
+
+- Decoder/reducer: ordered reconstruction, duplicate/gap/out-of-order,
+  end-before-start, unknown tool fallback.
+- Envelope: success/error/cancelled, retryability, malformed result,
+  truncation/artifacts, strict JSON safety, secret exclusion.
+- Runtime: every partial has monotonic sequence; successful final details own
+  one valid envelope.
+- Headless: exact breaking schema, `toolCallId` on every event, no legacy
+  fields or hook duplicates.
+- TUI: live/persisted deduplication, exact envelope resume, single/multi-edit
+  summary and detail hunks.
+- Gateway: same decoded event union without changing final assistant delivery.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```ts
+case "tool_execution_end":
+  callbacks.onToolCall(event.toolName, event.isError ? "error" : "done");
+```
+
+#### Correct
+
+```ts
+const toolEvent = decoder.decode(event);
+if (toolEvent) {
+  state = reduceToolCallState(state, toolEvent);
+  callbacks.onToolEvent?.(toolEvent);
+}
 ```

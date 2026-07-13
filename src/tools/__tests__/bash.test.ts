@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { getTool, setupEnv } from "./helpers.js";
+import { envelopeData, getTool, setupEnv, toolEnvelope } from "./helpers.js";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -12,8 +12,8 @@ describe("bash tool", () => {
       const tool = getTool(env, "bash");
       const res = await tool.execute("t", { command: "echo hello" });
       expect((res.content[0] as { text: string }).text).toContain("hello");
-      expect(res.details).toMatchObject({ exitCode: 0, resourceGoverned: true });
-      expect(res.details).not.toHaveProperty("stdout");
+      expect(envelopeData(res)).toMatchObject({ exitCode: 0 });
+      expect(envelopeData(res)).not.toHaveProperty("stdout");
     } finally {
       await cleanup();
     }
@@ -43,8 +43,7 @@ describe("bash tool", () => {
       expect(text).toContain("[Output truncated:");
       // Tail truncation: the last output line (3000) should be preserved.
       expect(text).toContain("3000");
-      const resource = (res.details as { resource: { truncated: boolean } }).resource;
-      expect(resource.truncated).toBe(true);
+      expect(toolEnvelope(res).truncation.truncated).toBe(true);
     } finally {
       await cleanup();
     }
@@ -63,8 +62,7 @@ describe("bash tool", () => {
       const text = (res.content[0] as { text: string }).text;
       expect(text).toContain("[Output truncated:");
       expect(Buffer.byteLength(text, "utf8")).toBeLessThanOrEqual(60000);
-      const resource = (res.details as { resource: { truncationReasons: string[] } }).resource;
-      expect(resource.truncationReasons).toContain("bytes");
+      expect(toolEnvelope(res).truncation.reasons).toContain("bytes");
     } finally {
       await cleanup();
     }
@@ -108,7 +106,7 @@ describe("bash tool", () => {
     try {
       const tool = getTool(env, "bash");
       const result = await tool.execute("t", { command: "echo hello" }, undefined);
-      expect(result.details).toMatchObject({ timeoutMs: 120_000 });
+      expect(envelopeData(result)).toMatchObject({ timeoutMs: 120_000 });
     } finally {
       await cleanup();
     }
@@ -119,7 +117,7 @@ describe("bash tool", () => {
     try {
       const tool = getTool(env, "bash");
       const result = await tool.execute("t", { command: "echo hello", timeout: 500 }, undefined);
-      expect(result.details).toMatchObject({ timeoutMs: 500 });
+      expect(envelopeData(result)).toMatchObject({ timeoutMs: 500 });
     } finally {
       await cleanup();
     }
@@ -139,11 +137,11 @@ describe("bash tool", () => {
       const text = (res.content[0] as { text: string }).text;
       expect(text).toContain("out");
       expect(text).toContain("err");
-      expect(res.details).toMatchObject({ exitCode: 0, resourceGoverned: true });
-      expect(res.details).not.toHaveProperty("stdout");
-      expect(res.details).not.toHaveProperty("stderr");
+      expect(envelopeData(res)).toMatchObject({ exitCode: 0 });
+      expect(envelopeData(res)).not.toHaveProperty("stdout");
+      expect(envelopeData(res)).not.toHaveProperty("stderr");
       // Final details should not have streaming flag.
-      expect((res.details as { streaming?: boolean }).streaming).toBeUndefined();
+      expect(res.details).not.toHaveProperty("streaming");
     } finally {
       await cleanup();
     }
@@ -173,12 +171,10 @@ describe("bash tool", () => {
         undefined,
         (update) => updates.push(update as (typeof updates)[number]),
       );
-      const details = res.details as {
-        resource: { artifactPath: string; totalBytes: number; outputBytes: number };
-      };
-      expect(details.resource.totalBytes).toBe(2 * 1024 * 1024);
-      expect(details.resource.outputBytes).toBeLessThanOrEqual(1024);
-      expect((await readFile(details.resource.artifactPath)).byteLength).toBe(2 * 1024 * 1024);
+      const envelope = toolEnvelope(res);
+      expect(envelope.metrics.outputBytes).toBe(2 * 1024 * 1024);
+      expect(envelope.truncation.shownBytes).toBeLessThanOrEqual(1024);
+      expect((await readFile(envelope.artifacts[0]!.path)).byteLength).toBe(2 * 1024 * 1024);
       expect(
         updates.every((update) => Buffer.byteLength(update.content[0]?.text ?? "") <= 1024),
       ).toBe(true);

@@ -59,12 +59,7 @@ export type ChannelEvent =
   | { type: "typing" }
   | { type: "text-delta"; delta: string }
   | { type: "reasoning-delta"; delta: string }
-  | {
-      type: "tool-call";
-      toolName: string;
-      status?: string;
-      error?: { code: string; message: string };
-    }
+  | { type: "tool-event"; event: import("../../tools/events.js").NoviToolEvent }
   | { type: "error"; message: string };
 
 /**
@@ -105,11 +100,7 @@ export interface ChannelAdapter {
 export interface AgentProtocolTurnCallbacks {
   onTextDelta?(delta: string): Promise<void>;
   onReasoningDelta?(delta: string): Promise<void>;
-  onToolCall?(
-    toolName: string,
-    status?: string,
-    error?: { code: string; message: string },
-  ): Promise<void>;
+  onToolEvent?(event: import("../../tools/events.js").NoviToolEvent): Promise<void>;
   onTyping?(): Promise<void>;
   onTurnEnd?(text: string): Promise<void>;
 }

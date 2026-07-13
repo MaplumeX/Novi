@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getTool, setupEnv, writeFixture } from "./helpers.js";
+import { envelopeData, getTool, setupEnv, toolEnvelope, writeFixture } from "./helpers.js";
 
 describe("read_file tool", () => {
   it("reads a file and returns its text", async () => {
@@ -9,7 +9,7 @@ describe("read_file tool", () => {
       const tool = getTool(env, "read_file");
       const res = await tool.execute("t", { path: file });
       expect(res.content[0]).toEqual({ type: "text", text: "hello\nworld\n" });
-      expect(res.details).toMatchObject({ path: file });
+      expect(envelopeData(res)).toMatchObject({ path: file });
     } finally {
       await cleanup();
     }
@@ -51,11 +51,8 @@ describe("read_file tool", () => {
       expect(text).toContain("[Output truncated:");
       // Head truncation: first line preserved.
       expect(outputLines[0]).toBe("line0");
-      const resource = (
-        res.details as { resource: { truncated: boolean; truncationReasons: string[] } }
-      ).resource;
-      expect(resource.truncated).toBe(true);
-      expect(resource.truncationReasons).toContain("lines");
+      expect(toolEnvelope(res).truncation.truncated).toBe(true);
+      expect(toolEnvelope(res).truncation.reasons).toContain("lines");
     } finally {
       await cleanup();
     }
@@ -70,8 +67,7 @@ describe("read_file tool", () => {
       const res = await tool.execute("t", { path: file, limit: 10 });
       const text = (res.content[0] as { text: string }).text;
       expect(text).not.toContain("[Output truncated:");
-      const resource = (res.details as { resource: { truncated: boolean } }).resource;
-      expect(resource.truncated).toBe(false);
+      expect(toolEnvelope(res).truncation.truncated).toBe(false);
     } finally {
       await cleanup();
     }

@@ -1,7 +1,9 @@
 import { Box, Text } from "ink";
-import type { AgentMessage, AgentToolCall } from "@earendil-works/pi-agent-core/node";
+import type { AgentMessage } from "@earendil-works/pi-agent-core/node";
 import type { ToolResultMessage } from "@earendil-works/pi-ai";
 import type { HarnessState, Phase, ToolCallView } from "./useHarnessState.js";
+import type { ToolCatalogSnapshot } from "../tools/contracts.js";
+import { persistedToolCallView } from "../tools/events.js";
 import { Markdown } from "./Markdown.js";
 import { ThinkingBlock } from "./ThinkingBlock.js";
 import { ToolCallBlock } from "./ToolCallBlock.js";
@@ -17,6 +19,7 @@ interface MessageListProps {
   streamingThinking: string;
   streamingThinkingActive: boolean;
   streamingToolCalls: HarnessState["streamingToolCalls"];
+  toolCatalog: ToolCatalogSnapshot;
   detailed: boolean;
 }
 
@@ -75,6 +78,7 @@ function renderAssistantMessage(
   message: Extract<AgentMessage, { role: "assistant" }>,
   messages: AgentMessage[],
   liveById: ReadonlyMap<string, ToolCallView>,
+  toolCatalog: ToolCatalogSnapshot,
   detailed: boolean,
   index: number,
 ): React.ReactElement {
@@ -107,15 +111,12 @@ function renderAssistantMessage(
         break;
       case "toolCall":
         flushText(`text-${partIndex}`);
-        parts.push(
-          <ToolCallBlock
-            key={part.id}
-            call={part}
-            result={findToolResult(messages, part.id)}
-            live={liveById.get(part.id)}
-            detailed={detailed}
-          />,
-        );
+        {
+          const result = findToolResult(messages, part.id);
+          const persisted = persistedToolCallView(part, result, toolCatalog);
+          const view = result ? persisted : (liveById.get(part.id) ?? persisted);
+          parts.push(<ToolCallBlock key={part.id} view={view} detailed={detailed} />);
+        }
         break;
     }
   });
@@ -132,6 +133,7 @@ function renderMessage(
   message: AgentMessage,
   messages: AgentMessage[],
   liveById: ReadonlyMap<string, ToolCallView>,
+  toolCatalog: ToolCatalogSnapshot,
   detailed: boolean,
   index: number,
 ): React.ReactNode {
@@ -158,7 +160,7 @@ function renderMessage(
       );
     }
     case "assistant":
-      return renderAssistantMessage(message, messages, liveById, detailed, index);
+      return renderAssistantMessage(message, messages, liveById, toolCatalog, detailed, index);
     case "toolResult":
       return null;
     default:
@@ -174,6 +176,7 @@ export function MessageList({
   streamingThinking,
   streamingThinkingActive,
   streamingToolCalls,
+  toolCatalog,
   detailed,
 }: MessageListProps): React.ReactElement {
   const liveById = new Map(streamingToolCalls.map((call) => [call.id, call]));
@@ -188,18 +191,12 @@ export function MessageList({
   return (
     <Box flexDirection="column">
       {messages.map((message, index) =>
-        renderMessage(message, messages, liveById, detailed, index),
+        renderMessage(message, messages, liveById, toolCatalog, detailed, index),
       )}
       {unmatched.length > 0 ? (
         <Box flexDirection="column" marginTop={1} paddingLeft={2}>
           {unmatched.map((live) => {
-            const call: AgentToolCall = {
-              type: "toolCall",
-              id: live.id,
-              name: live.name,
-              arguments: live.args,
-            };
-            return <ToolCallBlock key={live.id} call={call} live={live} detailed={detailed} />;
+            return <ToolCallBlock key={live.id} view={live} detailed={detailed} />;
           })}
         </Box>
       ) : null}

@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getTool, setupEnv } from "./helpers.js";
+import { envelopeData, getTool, setupEnv } from "./helpers.js";
 import { createBuiltinToolAssembly } from "../index.js";
 import { guardedRequest, providerJsonRequest } from "../web/network.js";
 
@@ -42,7 +42,7 @@ describe("fetch_content batch contract", () => {
           "https://example.com/data.json",
         ],
       });
-      expect(result.details).toMatchObject({
+      expect(envelopeData(result)).toMatchObject({
         outcomes: [
           { ok: true, mediaType: "text", content: "plain text" },
           { ok: false, error: { code: "PRIVATE_ADDRESS" } },
@@ -77,7 +77,7 @@ describe("fetch_content batch contract", () => {
         urls: ["https://example.com/article"],
         max_chars_per_item: 2000,
       });
-      const details = result.details as {
+      const details = envelopeData(result) as {
         outcomes: Array<{ ok: true; truncated: boolean; cachePath: string; content: string }>;
       };
       expect(details.outcomes[0].truncated).toBe(true);
@@ -104,8 +104,8 @@ describe("fetch_content batch contract", () => {
         urls: ["https://example.com/a"],
         force_refresh: true,
       });
-      expect(hit.details).toMatchObject({ outcomes: [{ cache: "hit" }] });
-      expect(bypass.details).toMatchObject({ outcomes: [{ cache: "bypass" }] });
+      expect(envelopeData(hit)).toMatchObject({ outcomes: [{ cache: "hit" }] });
+      expect(envelopeData(bypass)).toMatchObject({ outcomes: [{ cache: "bypass" }] });
       expect(mockedGuardedRequest).toHaveBeenCalledTimes(2);
     } finally {
       await cleanup();
@@ -130,7 +130,7 @@ describe("fetch_content batch contract", () => {
         env: { TAVILY_API_KEY: "secret" },
       });
       const result = await tool.execute("1", { urls: ["https://example.com/blocked"] });
-      expect(result.details).toMatchObject({
+      expect(envelopeData(result)).toMatchObject({
         outcomes: [{ ok: true, extractor: "tavily", content: "Remote article" }],
       });
       expect(mockedProviderJsonRequest).toHaveBeenCalledTimes(1);

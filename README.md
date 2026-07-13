@@ -84,6 +84,25 @@ hard timeout, and never copies complete stdout/stderr into result details.
 `glob` and `grep` skip symlinks and heavy default directories, honor the root
 `.gitignore`, and stop deterministically at file/depth/result ceilings.
 
+## Tool event protocol
+
+`novi --mode json` exposes one breaking, JSON-safe tool lifecycle. Raw harness
+and hook tool events are not emitted, so each call has one start, zero or more
+ordered deltas, and one final envelope:
+
+```jsonl
+{"type":"tool.start","toolCallId":"call-1","tool":{"name":"bash","label":"Bash","source":{"kind":"builtin","id":"native"},"capabilities":["shell.execute"],"risk":"execute"},"input":{"command":"pwd"},"at":1770000000000}
+{"type":"tool.delta","toolCallId":"call-1","sequence":1,"delta":"/workspace\n","at":1770000000010}
+{"type":"tool.end","toolCallId":"call-1","result":{"version":1,"status":"success","preview":"/workspace\n","metrics":{"startedAt":1770000000000,"durationMs":20,"outputBytes":11,"outputLines":1},"truncation":{"truncated":false,"reasons":[],"shownBytes":11,"shownLines":1},"artifacts":[]},"at":1770000000020}
+```
+
+Final status is `success`, `error`, or `cancelled`. Errors include a stable
+`code`, bounded message, and `retryable` flag. Truncated output reports its
+original metrics and optional `full-output` artifact without embedding a
+second full copy. Inputs and structured data are bounded and omit credential,
+environment, cookie, and stack fields. `edit_file` accepts only the canonical
+`{"path":"...","edits":[{"oldText":"...","newText":"..."}]}` shape.
+
 ## Web tools
 
 Novi exposes two batch-only web tools:

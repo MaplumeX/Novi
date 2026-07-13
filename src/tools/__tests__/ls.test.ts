@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getTool, setupEnv, writeFixture } from "./helpers.js";
+import { getTool, setupEnv, toolEnvelope, writeFixture } from "./helpers.js";
 
 describe("ls tool", () => {
   it("lists direct children with kind markers", async () => {
@@ -55,9 +55,8 @@ describe("ls tool", () => {
       expect(text).toContain("[Output truncated:");
       const outputLines = text.split("\n");
       expect(outputLines.length).toBeLessThanOrEqual(2001);
-      const resource = (res.details as { resource: { truncated: boolean; truncationReasons: string[] } }).resource;
-      expect(resource.truncated).toBe(true);
-      expect(resource.truncationReasons).toContain("lines");
+      expect(toolEnvelope(res).truncation.truncated).toBe(true);
+      expect(toolEnvelope(res).truncation.reasons).toContain("lines");
     } finally {
       await cleanup();
     }

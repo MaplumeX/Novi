@@ -22,6 +22,7 @@ export function useHarnessState(
   harness: AgentHarness,
   session?: Session<JsonlSessionMetadata>,
   compactionSettings?: CompactionSettings,
+  toolCatalog?: ToolCatalogSnapshot,
 ): HarnessState {
   const [state, setState] = useState<HarnessState>(() => ({ … }));
   // …
@@ -35,7 +36,7 @@ export function useHarnessState(
       }
     });
     return () => { cancelled = true; unsubscribe(); };
-  }, [harness, session, compactionSettings]);
+  }, [harness, session, compactionSettings, toolCatalog]);
 
   return state;
 }
@@ -47,9 +48,10 @@ Key conventions enforced here:
   components consume `HarnessState`, never raw events.
 - **Cleanup on unmount.** The `useEffect` returns an unsubscribe + `cancelled`
   flag so async reloads after unmount are ignored.
-- **Dependencies.** `[harness, session, compactionSettings]` — re-subscribes if
-  any identity changes. In practice these come from `handle.harness` /
-  `handle.session` / `App`'s `useMemo(resolveCompactionSettings(settings))`,
+- **Dependencies.** `[harness, session, compactionSettings, toolCatalog]` —
+  re-subscribes if any identity changes. In practice these come from
+  `handle.harness` / `handle.session` / `handle.toolCatalog` / `App`'s
+  `useMemo(resolveCompactionSettings(settings))`,
   so `handle.replace()` (which sets a new handle with a new harness) triggers
   re-subscription automatically. `/reload` updating `settings` recomputes
   `compactionSettings`, which also re-runs the effect and syncs
@@ -81,6 +83,7 @@ const [state, setState] = useState<HarnessState>(() => ({
 When a helper class must survive re-subscribes, store it with `useState`.
 The `AutoCompactor` is seeded with initial compaction settings and updated
 via `setSettings` on every effect run:
+
 ```ts
 const [compactor] = useState(() => new AutoCompactor(compactionSettings));
 // in the subscribe effect:
@@ -91,6 +94,7 @@ if (compactionSettings) compactor.setSettings(compactionSettings);
 
 When an async operation (compaction) won't emit an immediate event, flip the
 phase optimistically and reset on the eventual event:
+
 ```ts
 void compactor.maybeCompact(harness, …, () => setState((prev) => ({ …prev, phase: "compaction" })))
   .catch(() => setState((prev) => prev.phase === "compaction" ? { …prev, phase: "idle" } : prev));
@@ -112,71 +116,85 @@ void compactor.maybeCompact(harness, …, () => setState((prev) => ({ …prev, p
 
 ### 1. Scope / Trigger
 
-Apply this contract when changing `tool_execution_start`,
-`tool_execution_update`, or `tool_execution_end` handling for the TUI. The
-dependency exposes generic tool payloads as `any`; components must never inherit
-that untyped boundary.
+Apply this contract when changing tool execution handling, replay, or tool
+transcript presentation. The dependency exposes generic payloads; only the
+shared `ToolEventDecoder` may interpret them.
 
 ### 2. Signatures
 
 ```ts
 interface ToolCallView {
   id: string;
+  tool: ToolRef;
   name: string;
-  args: Record<string, unknown>;
-  status: "running" | "done" | "error";
+  args: Record<string, JsonValue>;
+  status: "running" | "done" | "error" | "cancelled";
   partialText?: string;
   resultText?: string;
+  result?: ToolResultEnvelope;
+  lastSequence: number;
+  diagnostics: string[];
 }
 
-normalizeToolArgs(value: unknown): Record<string, unknown>
-normalizeToolResultText(value: unknown): string
+const toolEvent = decoder.decode(event);
+reduceToolCallState(calls, toolEvent): ToolCallView[];
+persistedToolCallView(call, result, catalog): ToolCallView;
 ```
 
 ### 3. Contracts
 
-- `tool_execution_start` upserts one view by `toolCallId`, with normalized
-  arguments and `running` status.
-- `tool_execution_update` updates the same id and projects text content into
-  `partialText`; non-text/image-only parts are ignored for terminal summaries.
-- `tool_execution_end` preserves args/partial output, freezes `resultText`, and
-  sets `done` or `error` from `isError`.
-- `MessageList` joins this view to the persisted assistant tool call by `id`.
-  The later `ToolResultMessage` is authoritative for resumed history.
+- `useHarnessState` remains the sole TUI harness subscriber, but delegates all
+  tool events to `ToolEventDecoder` and `reduceToolCallState`.
+- Ordered deltas append to bounded `partialText`. Duplicate/out-of-order deltas
+  do not append; gaps and invalid order remain visible in diagnostics.
+- Final status and `resultText` come from the envelope, not raw `isError` or a
+  component-owned content parser.
+- `MessageList` uses `persistedToolCallView` for assistant/result history, then
+  joins live state by id. A persisted envelope is authoritative and reused
+  exactly on resume.
+- `ToolCallBlock` receives one `view` prop for both live and persisted rows.
+  Descriptor labels handle unknown/external tools; built-in presentation may
+  specialize already-normalized inputs.
+- `edit_file` presentation reads only canonical `edits[]` and aggregates all
+  hunks.
 
 ### 4. Validation & Error Matrix
 
-| Input | Projection |
-|---|---|
-| args is a plain object | shallow `Record<string, unknown>` copy |
-| args is null/array/primitive | `{}` |
-| result has text content | text parts joined with newlines |
-| result is string | string retained |
-| result has no text | empty string; status still updates |
-| update/end arrives before start | resilient upsert; do not drop the event |
+| Input                           | Projection                                            |
+| ------------------------------- | ----------------------------------------------------- |
+| descriptor exists               | preserve label/source/capabilities/risk in `ToolRef`  |
+| descriptor is unknown           | bounded generic `ToolRef`; transcript remains safe    |
+| ordered sequence                | append bounded delta and advance cursor               |
+| duplicate/out-of-order sequence | retain prior text and add diagnostic                  |
+| update/end arrives before start | resilient minimal view; do not drop the event         |
+| persisted valid envelope        | exact final view, including cancellation/error        |
+| canonical multiple edits        | aggregate summary and render each hunk in detail mode |
 
 ### 5. Good/Base/Bad Cases
 
-- Good: start → multiple updates → end keeps one row and the latest text.
-- Base: start → end with no printable result still becomes `done`.
-- Bad: malformed args or image-only output never causes a component cast or
-  crashes the transcript.
+- Good: start → sequences 1/2 → end keeps one row, accumulated output, and the
+  same envelope after resume.
+- Base: start → end with no printable result still freezes the envelope status.
+- Bad: a component reads `partialResult`, casts `ToolResultMessage.details`, or
+  renders a second live-only row.
 
 ### 6. Tests Required
 
-- Pure projection tests assert one stable id across start/update/end.
-- Assert out-of-order update/end still produces a view with the correct status.
+- Shared reducer tests assert one stable id across ordered deltas and end.
+- Assert duplicate/gap/out-of-order and update/end-before-start behavior.
+- Assert persisted envelope replay equals the live final envelope.
 - Transcript tests assert a live id already present in assistant history is not
   rendered a second time.
-- Ink rendering tests assert compact mode hides raw args and detail mode reveals
-  complete output.
+- Presentation tests cover single/multiple canonical edit diffs and descriptor
+  fallback labels.
 
 ### 7. Wrong vs Correct
 
 ```tsx
-// Wrong: a second live-only renderer leaks the event contract and duplicates rows.
-streamingToolCalls.map((call) => <Text>{call.name} running</Text>)
+// Wrong: component-owned decoding creates another event contract.
+const resultText = rawResult.content.map((part) => part.text).join("\n");
 
-// Correct: attach the typed projection to the persisted toolCall by id.
-<ToolCallBlock call={part} live={liveById.get(part.id)} result={result} />
+// Correct: live and replay both produce the same typed view.
+const view = persistedToolCallView(part, result, toolCatalog);
+<ToolCallBlock view={liveById.get(part.id) ?? view} />;
 ```

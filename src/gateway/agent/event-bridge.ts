@@ -4,7 +4,8 @@ import type {
   AgentMessage,
 } from "@earendil-works/pi-agent-core/node";
 import { extractText } from "../../headless/events.js";
-import { findPermissionError } from "../../permissions/errors.js";
+import type { ToolCatalogSnapshot } from "../../tools/contracts.js";
+import { ToolEventDecoder } from "../../tools/events.js";
 import type { AgentProtocolTurnCallbacks } from "../core/types.js";
 
 /**
@@ -19,8 +20,7 @@ import type { AgentProtocolTurnCallbacks } from "../core/types.js";
  * - `turn_start` → `onTyping()`
  * - `message_update` `text_delta` → `onTextDelta(delta)`
  * - `message_update` `thinking_delta` → `onReasoningDelta(delta)`
- * - `tool_execution_start` → `onToolCall(toolName, "running")`
- * - `tool_execution_end` → `onToolCall(toolName, isError ? "error" : "done")`
+ * - tool execution lifecycle → shared Novi `onToolEvent(event)` projection
  * - `message_end` (assistant) → buffer the latest assistant text
  * - `agent_end` → `onTurnEnd(buffered final assistant text)`
  *
@@ -36,10 +36,17 @@ import type { AgentProtocolTurnCallbacks } from "../core/types.js";
 export function createEventBridge(
   harness: AgentHarness,
   callbacks: AgentProtocolTurnCallbacks,
+  toolCatalog?: ToolCatalogSnapshot,
 ): () => void {
   let lastAssistantText = "";
+  const toolDecoder = new ToolEventDecoder(toolCatalog);
 
   return harness.subscribe((event: AgentHarnessEvent) => {
+    const toolEvent = toolDecoder.decode(event);
+    if (toolEvent) {
+      void callbacks.onToolEvent?.(toolEvent);
+      return;
+    }
     switch (event.type) {
       case "turn_start":
         callbacks.onTyping?.();
@@ -51,20 +58,6 @@ export function createEventBridge(
           callbacks.onTextDelta?.(ame.delta);
         } else if (ame.type === "thinking_delta") {
           callbacks.onReasoningDelta?.(ame.delta);
-        }
-        break;
-      }
-
-      case "tool_execution_start":
-        callbacks.onToolCall?.(event.toolName, "running");
-        break;
-
-      case "tool_execution_end": {
-        const permissionError = findPermissionError(event.result);
-        if (permissionError) {
-          callbacks.onToolCall?.(event.toolName, event.isError ? "error" : "done", permissionError);
-        } else {
-          callbacks.onToolCall?.(event.toolName, event.isError ? "error" : "done");
         }
         break;
       }

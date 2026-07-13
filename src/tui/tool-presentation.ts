@@ -1,7 +1,6 @@
-import type { ToolResultMessage } from "@earendil-works/pi-ai";
 import { layout } from "./theme.js";
 
-export type ToolStatus = "running" | "done" | "error";
+export type ToolStatus = "running" | "done" | "error" | "cancelled";
 
 export interface ToolDetailLine {
   kind: "normal" | "muted" | "add" | "delete" | "error";
@@ -17,6 +16,23 @@ interface ToolPresentationInput {
 
 function stringArg(args: Record<string, unknown>, key: string): string {
   return typeof args[key] === "string" ? args[key] : "";
+}
+
+interface CanonicalEdit {
+  oldText: string;
+  newText: string;
+}
+
+function canonicalEdits(args: Record<string, unknown>): CanonicalEdit[] {
+  return Array.isArray(args.edits)
+    ? args.edits.flatMap((value) => {
+        if (value === null || typeof value !== "object" || Array.isArray(value)) return [];
+        const edit = value as Record<string, unknown>;
+        return typeof edit.oldText === "string" && typeof edit.newText === "string"
+          ? [{ oldText: edit.oldText, newText: edit.newText }]
+          : [];
+      })
+    : [];
 }
 
 /** Compact arbitrary text to one terminal-friendly line. */
@@ -45,15 +61,6 @@ export function firstMeaningfulLine(text: string): string {
   );
 }
 
-export function toolResultMessageText(result?: ToolResultMessage): string {
-  return result
-    ? result.content
-        .filter((part): part is { type: "text"; text: string } => part.type === "text")
-        .map((part) => part.text)
-        .join("\n")
-    : "";
-}
-
 function querySummary(args: Record<string, unknown>): string {
   const queries = args.queries;
   if (!Array.isArray(queries)) return "";
@@ -78,6 +85,7 @@ function urlSummary(args: Record<string, unknown>): string {
 export function toolAction(
   name: string,
   args: Record<string, unknown>,
+  label?: string,
 ): { action: string; target: string } {
   const path = stringArg(args, "path");
   const pattern = stringArg(args, "pattern");
@@ -115,7 +123,7 @@ export function toolAction(
     }
     default:
       return {
-        action: name.replace(/[_-]+/g, " ").replace(/^./, (char) => char.toUpperCase()),
+        action: label || name.replace(/[_-]+/g, " ").replace(/^./, (char) => char.toUpperCase()),
         target: path || pattern,
       };
   }
@@ -163,7 +171,7 @@ export function simpleDiff(oldText: string, newText: string): DiffLine[] {
 }
 
 function diffStat(args: Record<string, unknown>): string {
-  const lines = simpleDiff(stringArg(args, "oldText"), stringArg(args, "newText"));
+  const lines = canonicalEdits(args).flatMap((edit) => simpleDiff(edit.oldText, edit.newText));
   const additions = lines.filter((line) => line.kind === "add").length;
   const deletions = lines.filter((line) => line.kind === "delete").length;
   return `+${additions} -${deletions}`;
@@ -179,7 +187,7 @@ export function toolResultSummary({
   if (status === "running") {
     return compactLine(lastMeaningfulLine(resultText));
   }
-  if (status === "error") {
+  if (status === "error" || status === "cancelled") {
     return compactLine(firstMeaningfulLine(resultText) || "Tool failed");
   }
   switch (name) {
@@ -215,10 +223,21 @@ export function toolDetailLines({
   resultText,
 }: ToolPresentationInput): ToolDetailLine[] {
   if (name === "edit_file") {
-    return simpleDiff(stringArg(args, "oldText"), stringArg(args, "newText")).map((line) => ({
-      kind: line.kind === "add" ? "add" : line.kind === "delete" ? "delete" : "muted",
-      text: `${line.kind === "add" ? "+ " : line.kind === "delete" ? "- " : "  "}${line.text}`,
-    }));
+    const edits = canonicalEdits(args);
+    return edits.flatMap((edit, index) => [
+      ...(edits.length > 1
+        ? [{ kind: "muted" as const, text: `@@ edit ${index + 1}/${edits.length} @@` }]
+        : []),
+      ...simpleDiff(edit.oldText, edit.newText).map((line) => ({
+        kind:
+          line.kind === "add"
+            ? ("add" as const)
+            : line.kind === "delete"
+              ? ("delete" as const)
+              : ("muted" as const),
+        text: `${line.kind === "add" ? "+ " : line.kind === "delete" ? "- " : "  "}${line.text}`,
+      })),
+    ]);
   }
 
   const lines: ToolDetailLine[] = [];

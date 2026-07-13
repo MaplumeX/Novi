@@ -29,6 +29,7 @@ src/
 ├── *.test.ts               # Co-located tests alongside their source
 ├── tools/                  # Built-in tool set, one file per tool
 │   ├── contracts.ts        # Descriptor/catalog/capability/availability contracts
+│   ├── events.ts           # JSON-safe tool envelope/event decoder + replay reducer
 │   ├── index.ts            # createBuiltinToolAssembly + built-in descriptors
 │   ├── registry.ts         # ToolRegistry: validated descriptor assembly
 │   ├── shared.ts           # Shared helpers (unwrap / textResult / sliceLines …)
@@ -63,7 +64,7 @@ src/
 │   └── clipboard.ts       # platform clipboard image reader (darwin/linux)
 ├── headless/              # Headless run modes (print / json JSONL stream)
 │   ├── run.ts              # runPrint / runJson entry points
-│   ├── events.ts           # extractText + projectEvent — single raw-event → plain-object decoder
+│   ├── events.ts           # non-tool projection + stateful HeadlessEventProjector
 │   └── stdin.ts            # readStdinIfPiped + mergePrompt
 ├── gateway/               # IM multi-channel gateway (`novi --gateway`)
 │   ├── run.ts              # runGateway(options) — cli.ts --gateway dispatch
@@ -118,8 +119,8 @@ src/
   boundary: MVP's `NoviAgentAdapter` is the in-process implementation; a
   future `novi --serve` RPC mode swaps in a `RemoteAgentAdapter` with zero
   change to `GatewayApp`. `event-bridge.ts` is the gateway-side single
-  harness-event projection point (the IM analogue of TUI's `useHarnessState`
-  and headless's `events.ts` — N2 single event boundary).
+  harness subscription point. All three surfaces delegate tool payloads to
+  `tools/events.ts`; only non-tool message/channel projection stays local.
 - **Gateway authorization order.** Normalize and deduplicate an inbound update
   before authorization. `GatewayApp` owns DM pairing, DM/group policies,
   group mention/reply gates, and command bypass; only already-authorized,

@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { AgentHarnessEvent } from "@earendil-works/pi-agent-core/node";
-import { projectEvent, extractText, projectToolCatalog } from "./events.js";
+import { HeadlessEventProjector, extractText, projectToolCatalog } from "./events.js";
+import type { ToolCatalogSnapshot } from "../tools/contracts.js";
+
+function projectEvent(
+  event: AgentHarnessEvent,
+  catalog?: ToolCatalogSnapshot,
+): Record<string, unknown> {
+  return new HeadlessEventProjector(catalog).project(event) as Record<string, unknown>;
+}
 
 /** Assert a value survives `JSON.stringify` (no functions / circular refs). */
 function assertJsonSafe(value: unknown): void {
@@ -82,7 +90,13 @@ describe("projectEvent", () => {
     for (const event of events) {
       const projected = projectEvent(event);
       assertJsonSafe(projected);
-      expect(projected.type).toBe(event.type);
+      expect(projected.type).toBe(
+        event.type === "tool_execution_start"
+          ? "tool.start"
+          : event.type === "tool_execution_end"
+            ? "tool.end"
+            : event.type,
+      );
     }
   });
 
@@ -246,62 +260,49 @@ describe("projectEvent", () => {
     });
   });
 
-  it("projects tool_call with input", () => {
-    const event = {
-      type: "tool_call",
+  it("emits the exact breaking tool schema and suppresses hook duplicates", () => {
+    const projector = new HeadlessEventProjector();
+    const start = projector.project({
+      type: "tool_execution_start",
       toolCallId: "tc1",
       toolName: "bash",
-      input: { cmd: "ls -la" },
-    } as unknown as AgentHarnessEvent;
-    expect(projectEvent(event)).toEqual({
-      type: "tool_call",
+      args: { command: "pwd" },
+    } as AgentHarnessEvent);
+    const delta = projector.project({
+      type: "tool_execution_update",
       toolCallId: "tc1",
       toolName: "bash",
-      input: { cmd: "ls -la" },
-    });
-  });
-
-  it("projects tool_result with contentCount + isError", () => {
-    const event = {
-      type: "tool_result",
+      args: { command: "pwd" },
+      partialResult: {
+        content: [{ type: "text", text: "/repo" }],
+        details: { sequence: 1 },
+      },
+    } as AgentHarnessEvent);
+    const end = projector.project({
+      type: "tool_execution_end",
       toolCallId: "tc1",
       toolName: "bash",
-      input: { cmd: "ls" },
-      content: [
-        { type: "text", text: "a" },
-        { type: "text", text: "b" },
-      ],
-      details: {},
+      result: { content: [{ type: "text", text: "/repo" }], details: {} },
       isError: false,
-    } as unknown as AgentHarnessEvent;
-    expect(projectEvent(event)).toEqual({
-      type: "tool_result",
-      toolCallId: "tc1",
-      toolName: "bash",
-      isError: false,
-      contentCount: 2,
-    });
-  });
+    } as AgentHarnessEvent);
 
-  it("projects a machine-readable permission denial", () => {
-    const event = {
-      type: "tool_result",
-      toolCallId: "tc2",
-      toolName: "bash",
-      input: { command: "pwd" },
-      content: [
-        {
-          type: "text",
-          text: "NOVI_ERROR:PERMISSION_INTERACTION_REQUIRED:approval required",
-        },
-      ],
-      details: {},
-      isError: true,
-    } as unknown as AgentHarnessEvent;
-    expect(projectEvent(event)).toMatchObject({
-      errorCode: "PERMISSION_INTERACTION_REQUIRED",
-      errorMessage: "approval required",
+    expect(start).toMatchObject({ type: "tool.start", toolCallId: "tc1" });
+    expect(delta).toEqual({
+      type: "tool.delta",
+      toolCallId: "tc1",
+      sequence: 1,
+      delta: "/repo",
+      at: expect.any(Number),
     });
+    expect(end).toMatchObject({
+      type: "tool.end",
+      toolCallId: "tc1",
+      result: { version: 1, status: "success", preview: "/repo" },
+    });
+    expect(JSON.stringify([start, delta, end])).not.toContain("toolName");
+    expect(
+      projector.project({ type: "tool_call", toolCallId: "tc1" } as AgentHarnessEvent),
+    ).toBeUndefined();
   });
 
   it("projects session_compact from compactionEntry", () => {

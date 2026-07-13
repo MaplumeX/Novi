@@ -108,7 +108,12 @@ function App({
   const [settings, setSettings] = useState(resolvedSettings);
   const compactionSettings = useMemo(() => resolveCompactionSettings(settings), [settings]);
 
-  const state = useHarnessState(handle.harness, handle.session, compactionSettings);
+  const state = useHarnessState(
+    handle.harness,
+    handle.session,
+    compactionSettings,
+    handle.toolCatalog,
+  );
   const { exit } = useApp();
   const [notice, setNotice] = useState<string[]>([]);
   const [overlay, setOverlay] = useState<Overlay>(null);
@@ -372,6 +377,7 @@ function App({
         streamingThinking={state.streamingThinking}
         streamingThinkingActive={state.streamingThinkingActive}
         streamingToolCalls={state.streamingToolCalls}
+        toolCatalog={handle.toolCatalog}
         detailed={detailMode}
       />
       {notice.length > 0 ? (

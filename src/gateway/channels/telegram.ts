@@ -113,9 +113,11 @@ export class TelegramChannel extends AbstractChannel {
       case "text-delta":
         await this.handleStreamDelta(chatId, event.delta);
         break;
-      case "tool-call":
-        // MVP: keep tool status minimal — send a short notice.
-        await this.sendOrRetry(chatId, `🔧 ${event.toolName}…`).catch(() => {});
+      case "tool-event":
+        // Keep channel rendering minimal while retaining the shared contract.
+        if (event.event.type === "tool.start") {
+          await this.sendOrRetry(chatId, `🔧 ${event.event.tool.label}…`).catch(() => {});
+        }
         break;
       case "reasoning-delta":
         // Reasoning is not surfaced to the channel in MVP.

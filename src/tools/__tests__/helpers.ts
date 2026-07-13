@@ -6,6 +6,7 @@ import { createBuiltinToolAssembly } from "../index.js";
 import type { AgentTool } from "@earendil-works/pi-agent-core/node";
 import { __resetTodoStoreForTests } from "../todo.js";
 import type { CreateBuiltinToolAssemblyOptions } from "../index.js";
+import { isToolResultEnvelope, type ToolResultEnvelope } from "../events.js";
 
 export async function setupEnv(): Promise<{
   env: NodeExecutionEnv;
@@ -47,4 +48,19 @@ export async function writeFixture(dir: string, rel: string, content: string): P
 /** Reset shared module-level state between tests (todo store). */
 export function resetSharedState(): void {
   __resetTodoStoreForTests();
+}
+
+/** Read the production final-result contract from a wrapped tool result. */
+export function toolEnvelope(result: { details?: unknown }): ToolResultEnvelope {
+  const details =
+    result.details !== null && typeof result.details === "object"
+      ? (result.details as Record<string, unknown>)
+      : {};
+  if (!isToolResultEnvelope(details.envelope)) throw new Error("missing tool result envelope");
+  return details.envelope;
+}
+
+export function envelopeData(result: { details?: unknown }): Record<string, unknown> {
+  const data = toolEnvelope(result).data;
+  return data !== null && typeof data === "object" && !Array.isArray(data) ? data : {};
 }

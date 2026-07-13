@@ -88,8 +88,10 @@ switch (event.type) {
   (`BootstrapOptions`, `BootstrapResult` in `bootstrap.ts`;
   `LoadedResources` in `resources.ts`).
 - **Component props** declared as `interface XxxProps` in the same file.
-- **State shapes** (`HarnessState`, `Phase`, `ToolCallView`, `QueueState`)
-  live alongside the hook that produces them (`useHarnessState.ts`).
+- TUI-only state shapes (`HarnessState`, `Phase`, `QueueState`) live alongside
+  `useHarnessState.ts`. Cross-surface tool shapes (`ToolCallView`,
+  `ToolResultEnvelope`, `NoviToolEvent`) live in their contract owner,
+  `src/tools/events.ts`, and may be type-re-exported by the hook.
 - Shared types coming from dependencies are re-imported where needed; there
   is no central `types/` directory. Do not create one without an explicit task.
 

@@ -1,13 +1,26 @@
 import type { AgentHarnessEvent } from "@earendil-works/pi-agent-core/node";
 import type { ToolCatalogSnapshot } from "../tools/contracts.js";
-import { findPermissionError } from "../permissions/errors.js";
+import { ToolEventDecoder, type NoviToolEvent } from "../tools/events.js";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
+
+type PrivateToolHarnessEvent = Extract<
+  AgentHarnessEvent,
+  {
+    type:
+      | "tool_execution_start"
+      | "tool_execution_update"
+      | "tool_execution_end"
+      | "tool_call"
+      | "tool_result";
+  }
+>;
+type PublicNonToolHarnessEvent = Exclude<AgentHarnessEvent, PrivateToolHarnessEvent>;
 
 /**
  * Extract a plain-text view from any agent message content shape.
  *
  * Headless mode owner of the `AgentMessage.content` → string projection so
- * `projectEvent` / `runPrint` share a single decoder (see
+ * Headless JSON projection and `runPrint` share a single decoder (see
  * cross-layer-thinking-guide.md, "Every Consumer Parses The Same Payload").
  */
 export function extractText(content: string | readonly unknown[]): string {
@@ -75,8 +88,8 @@ export function projectToolCatalog(
   };
 }
 
-export function projectEvent(
-  event: AgentHarnessEvent,
+function projectHarnessEvent(
+  event: PublicNonToolHarnessEvent,
   toolCatalog?: ToolCatalogSnapshot,
 ): Record<string, unknown> {
   const base: Record<string, unknown> = { type: event.type };
@@ -102,31 +115,6 @@ export function projectEvent(
         text: extractText((event.message as { content?: string | unknown[] }).content ?? ""),
         usage: projectUsage(event.message),
       };
-    case "tool_execution_start":
-      return {
-        ...base,
-        toolCallId: event.toolCallId,
-        toolName: event.toolName,
-        args: event.args,
-      };
-    case "tool_execution_update":
-      return {
-        ...base,
-        toolCallId: event.toolCallId,
-        toolName: event.toolName,
-      };
-    case "tool_execution_end": {
-      const executionError = findPermissionError(event.result);
-      return {
-        ...base,
-        toolCallId: event.toolCallId,
-        toolName: event.toolName,
-        isError: event.isError,
-        ...(executionError
-          ? { errorCode: executionError.code, errorMessage: executionError.message }
-          : {}),
-      };
-    }
     case "queue_update":
       return {
         ...base,
@@ -163,26 +151,6 @@ export function projectEvent(
       return { ...base, provider: event.model?.provider, modelId: event.model?.id };
     case "after_provider_response":
       return { ...base, status: event.status, headers: event.headers };
-    case "tool_call":
-      return {
-        ...base,
-        toolCallId: event.toolCallId,
-        toolName: event.toolName,
-        input: event.input,
-      };
-    case "tool_result": {
-      const permissionError = findPermissionError(event.content);
-      return {
-        ...base,
-        toolCallId: event.toolCallId,
-        toolName: event.toolName,
-        isError: event.isError,
-        contentCount: Array.isArray(event.content) ? event.content.length : 0,
-        ...(permissionError
-          ? { errorCode: permissionError.code, errorMessage: permissionError.message }
-          : {}),
-      };
-    }
     case "session_compact":
       return {
         ...base,
@@ -229,5 +197,30 @@ export function projectEvent(
       return { ...base, _raw: "hook" };
     default:
       return { ...base, _raw: "unknown" };
+  }
+}
+
+/** Stateful Headless boundary. One instance must be retained for a JSON run. */
+export class HeadlessEventProjector {
+  private readonly toolDecoder: ToolEventDecoder;
+
+  constructor(private readonly toolCatalog?: ToolCatalogSnapshot) {
+    this.toolDecoder = new ToolEventDecoder(toolCatalog);
+  }
+
+  project(event: AgentHarnessEvent): Record<string, unknown> | NoviToolEvent | undefined {
+    switch (event.type) {
+      case "tool_execution_start":
+      case "tool_execution_update":
+      case "tool_execution_end":
+        return this.toolDecoder.decode(event);
+      // Hook-level tool_call/tool_result duplicate the execution lifecycle. The
+      // public stream has one canonical record per actual lifecycle transition.
+      case "tool_call":
+      case "tool_result":
+        return undefined;
+      default:
+        return projectHarnessEvent(event, this.toolCatalog);
+    }
   }
 }

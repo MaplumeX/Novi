@@ -8,6 +8,7 @@ import { getNoviDir } from "../../config.js";
 import { ArtifactStore, isArtifactFailure } from "./artifacts.js";
 import type { ToolExecutionBudget } from "./budget.js";
 import { BoundedTextCapture, boundText, type ToolOutputMetrics } from "./output.js";
+import { createToolResultEnvelope } from "../events.js";
 
 export interface ToolRuntimeOptions {
   sessionId: string;
@@ -76,7 +77,21 @@ export class ToolExecutionRuntime {
               );
             }),
           ]);
-          return await this.boundFinalResult(toolCallId, tool.name, result, Date.now() - started);
+          const endedAt = Date.now();
+          const bounded = await this.boundFinalResult(
+            toolCallId,
+            tool.name,
+            result,
+            endedAt - started,
+          );
+          const envelope = createToolResultEnvelope({
+            result: bounded,
+            isError: false,
+            startedAt: started,
+            at: endedAt,
+            input: params,
+          });
+          return { ...bounded, details: { envelope } };
         } catch (error) {
           if (timedOut)
             throw runtimeError("TOOL_TIMEOUT", `${tool.name} exceeded ${this.budget.timeoutMs}ms`);
@@ -126,7 +141,14 @@ export class ToolExecutionRuntime {
     onUpdate: AgentToolUpdateCallback | undefined,
   ): AgentToolUpdateCallback | undefined {
     if (!onUpdate) return undefined;
+    let sequence = 0;
     return (partial) => {
+      const details = asRecord(partial.details);
+      const supplied = details.sequence;
+      sequence =
+        typeof supplied === "number" && Number.isInteger(supplied) && supplied > sequence
+          ? supplied
+          : sequence + 1;
       const content = partial.content.map((item) => {
         if (item.type !== "text") return item;
         return { ...item, text: boundText(item.text, this.budget, "tail").text };
@@ -134,7 +156,10 @@ export class ToolExecutionRuntime {
       onUpdate({
         ...partial,
         content,
-        details: boundDetails(partial.details, this.budget.memoryBytes),
+        details: {
+          ...boundDetails(partial.details, this.budget.memoryBytes),
+          sequence,
+        },
       });
     };
   }

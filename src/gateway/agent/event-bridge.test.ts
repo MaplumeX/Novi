@@ -74,54 +74,48 @@ describe("createEventBridge", () => {
     unsub();
   });
 
-  it("maps tool_execution_start → onToolCall(name, 'running')", () => {
+  it("maps the full tool lifecycle through the shared Novi event contract", () => {
     const { harness, emit } = makeHarnessMock();
-    const onToolCall = vi.fn();
-    const unsub = createEventBridge(harness as never, { onToolCall });
+    const onToolEvent = vi.fn();
+    const unsub = createEventBridge(harness as never, { onToolEvent });
     emit({
       type: "tool_execution_start",
       toolCallId: "tc1",
       toolName: "bash",
-      args: {},
+      args: { command: "pwd" },
     } as AgentHarnessEvent);
-    expect(onToolCall).toHaveBeenCalledWith("bash", "running");
-    unsub();
-  });
-
-  it("maps tool_execution_end (success) → onToolCall(name, 'done')", () => {
-    const { harness, emit } = makeHarnessMock();
-    const onToolCall = vi.fn();
-    const unsub = createEventBridge(harness as never, { onToolCall });
+    emit({
+      type: "tool_execution_update",
+      toolCallId: "tc1",
+      toolName: "bash",
+      args: { command: "pwd" },
+      partialResult: { content: [{ type: "text", text: "/repo" }], details: { sequence: 1 } },
+    } as AgentHarnessEvent);
     emit({
       type: "tool_execution_end",
       toolCallId: "tc1",
       toolName: "bash",
-      result: {},
+      result: { content: [{ type: "text", text: "/repo" }] },
       isError: false,
     } as AgentHarnessEvent);
-    expect(onToolCall).toHaveBeenCalledWith("bash", "done");
-    unsub();
-  });
-
-  it("maps tool_execution_end (error) → onToolCall(name, 'error')", () => {
-    const { harness, emit } = makeHarnessMock();
-    const onToolCall = vi.fn();
-    const unsub = createEventBridge(harness as never, { onToolCall });
-    emit({
-      type: "tool_execution_end",
-      toolCallId: "tc1",
-      toolName: "bash",
-      result: {},
-      isError: true,
-    } as AgentHarnessEvent);
-    expect(onToolCall).toHaveBeenCalledWith("bash", "error");
+    expect(onToolEvent.mock.calls.map(([event]) => event.type)).toEqual([
+      "tool.start",
+      "tool.delta",
+      "tool.end",
+    ]);
+    expect(onToolEvent).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        type: "tool.end",
+        result: expect.objectContaining({ status: "success", preview: "/repo" }),
+      }),
+    );
     unsub();
   });
 
   it("decodes structured permission failures for gateway callbacks", () => {
     const { harness, emit } = makeHarnessMock();
-    const onToolCall = vi.fn();
-    const unsub = createEventBridge(harness as never, { onToolCall });
+    const onToolEvent = vi.fn();
+    const unsub = createEventBridge(harness as never, { onToolEvent });
     emit({
       type: "tool_execution_end",
       toolCallId: "tc2",
@@ -136,10 +130,19 @@ describe("createEventBridge", () => {
       },
       isError: true,
     } as AgentHarnessEvent);
-    expect(onToolCall).toHaveBeenCalledWith("bash", "error", {
-      code: "PERMISSION_INTERACTION_REQUIRED",
-      message: "approval required",
-    });
+    expect(onToolEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "tool.end",
+        result: expect.objectContaining({
+          status: "error",
+          error: {
+            code: "PERMISSION_INTERACTION_REQUIRED",
+            message: "approval required",
+            retryable: false,
+          },
+        }),
+      }),
+    );
     unsub();
   });
 
@@ -223,7 +226,7 @@ describe("createEventBridge", () => {
       onTyping: vi.fn(),
       onTextDelta: vi.fn(),
       onReasoningDelta: vi.fn(),
-      onToolCall: vi.fn(),
+      onToolEvent: vi.fn(),
       onTurnEnd: vi.fn(),
     };
     const unsub = createEventBridge(harness as never, callbacks);
@@ -237,7 +240,7 @@ describe("createEventBridge", () => {
     expect(callbacks.onTyping).not.toHaveBeenCalled();
     expect(callbacks.onTextDelta).not.toHaveBeenCalled();
     expect(callbacks.onReasoningDelta).not.toHaveBeenCalled();
-    expect(callbacks.onToolCall).not.toHaveBeenCalled();
+    expect(callbacks.onToolEvent).not.toHaveBeenCalled();
     expect(callbacks.onTurnEnd).not.toHaveBeenCalled();
     // agent_end with no buffered assistant text fires onTurnEnd("").
     emit({ type: "agent_end", messages: [] } as AgentHarnessEvent);

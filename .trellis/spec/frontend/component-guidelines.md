@@ -10,7 +10,8 @@ Novi components are **Ink** components (React 19). They render terminal UI
 from `HarnessState` props or local `useState`. The guiding rule:
 
 > Display components consume `HarnessState`, never raw events.
-> Only `useHarnessState` interprets `AgentHarnessEvent`s.
+> Only `useHarnessState` subscribes to `AgentHarnessEvent`s; tool payloads are
+> interpreted by the shared `src/tools/events.ts` decoder.
 
 (See `guides/cross-layer-thinking-guide.md`, "Every Consumer Parses The Same
 Payload" anti-pattern.)
@@ -224,8 +225,10 @@ import { theme } from "../theme.js";
   thinking and tool arguments/output/diffs together; do not add independent
   global expansion state for each content type.
 - `MessageList` associates live tool state, assistant `toolCall` parts, and
-  persisted `ToolResultMessage`s by `toolCallId`. A tool must not use a separate
-  live-only component that changes shape when it completes.
+  persisted `ToolResultMessage`s by `toolCallId`, using
+  `persistedToolCallView()` for replay. `ToolCallBlock` always receives one
+  `ToolCallView`; a tool must not use a separate live-only component that
+  changes shape when it completes.
 - Tool-facing labels come from `tool-presentation.ts`. Default rows describe
   user actions (`Read`, `Update`, `Run`, `Search web`), not raw JSON or internal
   snake_case names.

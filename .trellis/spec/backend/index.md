@@ -21,7 +21,7 @@ This directory contains guidelines for backend development. Fill in each file wi
 | [Logging Guidelines](./logging-guidelines.md)         | Diagnostic output (stderr warnings, startup errors)                                                         | ✅ Filled |
 | [pi-agent-core API 契约](./pi-agent-core-api.md)      | 已验证的 pi-agent-core / pi-ai 公开 API（Node 入口、session、models、harness 事件、hook 注册）              | ✅ Filled |
 | [Web Tool Contracts](./web-tools.md)                  | Batch search/fetch contracts, providers, guarded network, cache, and continuation                           | ✅ Filled |
-| [Tool Runtime Contracts](./tool-runtime-contracts.md) | Descriptor assembly, scoped permissions, workspace boundary, resource budgets, artifacts, and stable errors | ✅ Filled |
+| [Tool Runtime Contracts](./tool-runtime-contracts.md) | Descriptor assembly, permissions, resource budgets, artifacts, and unified tool result/event contracts | ✅ Filled |
 
 ---
 

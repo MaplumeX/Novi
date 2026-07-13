@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getTool, setupEnv, writeFixture } from "./helpers.js";
+import { envelopeData, getTool, setupEnv, toolEnvelope, writeFixture } from "./helpers.js";
 import { mkdir, symlink } from "node:fs/promises";
 import path from "node:path";
 import { DEFAULT_TOOL_EXECUTION_BUDGET } from "../runtime/budget.js";
@@ -13,7 +13,7 @@ describe("glob tool", () => {
       await writeFixture(cwd, "src/c.ts", "z");
       const tool = getTool(env, "glob");
       const res = await tool.execute("t", { pattern: "**/*.ts" });
-      const matches = (res.details as { matches: string[] }).matches.sort();
+      const matches = (envelopeData(res).matches as string[]).sort();
       expect(matches).toEqual(["a.ts", "src/c.ts"]);
     } finally {
       await cleanup();
@@ -27,7 +27,7 @@ describe("glob tool", () => {
       const tool = getTool(env, "glob");
       const res = await tool.execute("t", { pattern: "**/*.nope" });
       expect((res.content[0] as { text: string }).text).toBe("(no matches)");
-      expect((res.details as { count: number }).count).toBe(0);
+      expect(envelopeData(res).count).toBe(0);
     } finally {
       await cleanup();
     }
@@ -46,11 +46,8 @@ describe("glob tool", () => {
       expect(text).toContain("[Output truncated:");
       const outputLines = text.split("\n");
       expect(outputLines.length).toBeLessThanOrEqual(2001);
-      const resource = (
-        res.details as { resource: { truncated: boolean; truncationReasons: string[] } }
-      ).resource;
-      expect(resource.truncated).toBe(true);
-      expect(resource.truncationReasons).toContain("lines");
+      expect(toolEnvelope(res).truncation.truncated).toBe(true);
+      expect(toolEnvelope(res).truncation.reasons).toContain("lines");
     } finally {
       await cleanup();
     }
@@ -71,10 +68,8 @@ describe("glob tool", () => {
         budget: { ...DEFAULT_TOOL_EXECUTION_BUDGET, resultCount: 2 },
       });
       const res = await tool.execute("t", { pattern: "**/*.txt" });
-      expect((res.details as { matches: string[] }).matches).toEqual(["a.txt", "b.txt"]);
-      expect((res.details as { traversal: { reason: string } }).traversal.reason).toBe(
-        "result_limit",
-      );
+      expect(envelopeData(res).matches).toEqual(["a.txt", "b.txt"]);
+      expect((envelopeData(res).traversal as { reason: string }).reason).toBe("result_limit");
     } finally {
       await cleanup();
     }

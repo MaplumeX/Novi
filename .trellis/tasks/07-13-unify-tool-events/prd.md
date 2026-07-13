@@ -19,14 +19,14 @@
 
 ## Acceptance Criteria
 
-- [ ] JSON 客户端能仅凭事件流重建工具调用状态与最终结果。
-- [ ] partial update 包含有界增量或快照，不再只报告工具名。
-- [ ] 同一调用的 partial sequence 单调递增，final result 有界且可独立消费。
-- [ ] 错误码、retryable、权限拒绝和截断信息可机器读取。
-- [ ] 规范 `edit_file.edits[]` 在 TUI 中显示正确 diff。
-- [ ] 所有事件均可 JSON.stringify，敏感字段不泄漏。
-- [ ] TUI、Headless 和持久化恢复测试通过。
-- [ ] 仓库内不残留旧工具事件字段的兼容分支或双重解析。
+- [x] JSON 客户端能仅凭事件流重建工具调用状态与最终结果。
+- [x] partial update 包含有界增量或快照，不再只报告工具名。
+- [x] 同一调用的 partial sequence 单调递增，final result 有界且可独立消费。
+- [x] 错误码、retryable、权限拒绝和截断信息可机器读取。
+- [x] 规范 `edit_file.edits[]` 在 TUI 中显示正确 diff。
+- [x] 所有事件均可 JSON.stringify，敏感字段不泄漏。
+- [x] TUI、Headless 和持久化恢复测试通过。
+- [x] 仓库内不残留旧工具事件字段的兼容分支或双重解析。
 
 ## Decisions
 

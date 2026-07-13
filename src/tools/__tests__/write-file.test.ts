@@ -1,7 +1,7 @@
 import { readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { getTool, setupEnv } from "./helpers.js";
+import { envelopeData, getTool, setupEnv } from "./helpers.js";
 import { resolvePermissionsFromSettings } from "../../permissions/policy.js";
 
 describe("write_file tool", () => {
@@ -10,7 +10,7 @@ describe("write_file tool", () => {
     try {
       const tool = getTool(env, "write_file");
       const res = await tool.execute("t", { path: "nested/dir/out.txt", content: "payload" });
-      expect(res.details).toMatchObject({ bytes: 7 });
+      expect(envelopeData(res)).toMatchObject({ bytes: 7 });
       const written = await readFile(`${cwd}/nested/dir/out.txt`, "utf8");
       expect(written).toBe("payload");
     } finally {

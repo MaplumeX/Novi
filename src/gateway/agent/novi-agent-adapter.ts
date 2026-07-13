@@ -11,12 +11,14 @@ import type {
   AgentProtocolTurnInput,
   AgentProtocolTurnResult,
 } from "../core/types.js";
+import type { ToolCatalogSnapshot } from "../../tools/contracts.js";
 
 /** Cached harness + session for one session key. */
 interface SessionEntry {
   harness: AgentHarness;
   session: Session<JsonlSessionMetadata>;
   sessionPath: string;
+  toolCatalog: ToolCatalogSnapshot;
 }
 
 /**
@@ -49,6 +51,7 @@ export class NoviAgentAdapter implements AgentProtocolAdapter {
       harness: created.harness,
       session: created.session,
       sessionPath: created.sessionPath,
+      toolCatalog: created.toolCatalog,
     };
     this.sessions.set(sessionKey, entry);
     return entry;
@@ -72,7 +75,7 @@ export class NoviAgentAdapter implements AgentProtocolAdapter {
       : undefined;
 
     const unsubscribe = callbacks
-      ? createEventBridge(harness, bridgedCallbacks!)
+      ? createEventBridge(harness, bridgedCallbacks!, entry.toolCatalog)
       : null;
 
     try {

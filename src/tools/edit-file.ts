@@ -1,5 +1,4 @@
 import * as Type from "typebox";
-import type { Static } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core/node";
 import type { ExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import type { WorkspaceScopeGuard } from "../permissions/scope.js";
@@ -18,39 +17,6 @@ const Parameters = Type.Object({
 });
 
 type EditSpec = { oldText: string; newText: string };
-type PreparedArgs = Static<typeof Parameters>;
-
-/**
- * Legacy / model compat shim. Converts a single-edit call
- * `{ path, oldText, newText }` into the canonical `{ path, edits: [...] }`
- * form and parses `edits` when sent as a JSON string.
- */
-function prepareEditArguments(input: unknown): PreparedArgs {
-  if (!input || typeof input !== "object") return input as PreparedArgs;
-  const args = input as Record<string, unknown>;
-
-  // Some models send edits as a JSON string.
-  if (typeof args.edits === "string") {
-    try {
-      const parsed = JSON.parse(args.edits);
-      if (Array.isArray(parsed)) args.edits = parsed;
-    } catch {
-      // leave as-is; validation will reject
-    }
-  }
-
-  // Legacy: top-level oldText + newText → convert to edits[]
-  if (typeof args.oldText === "string" && typeof args.newText === "string") {
-    const edits: EditSpec[] = Array.isArray(args.edits) ? [...(args.edits as EditSpec[])] : [];
-    edits.push({ oldText: args.oldText, newText: args.newText });
-    const rest: Record<string, unknown> = { ...args };
-    delete rest.oldText;
-    delete rest.newText;
-    return { ...(rest as PreparedArgs), edits };
-  }
-
-  return args as PreparedArgs;
-}
 
 /**
  * Build an error whose message references `edits[i]` only when multiple edits
@@ -86,7 +52,6 @@ export function createEditFileTool(
     description:
       "Replace text in a file. Pass `edits: [{oldText, newText}]` for one or more replacements.",
     parameters: Parameters,
-    prepareArguments: prepareEditArguments,
     execute: async (toolCallId, params, signal) => {
       await scopeGuard?.assertNativeFileAccess(
         toolCallId,

@@ -1,5 +1,5 @@
 import type { BootstrapResult } from "../bootstrap.js";
-import { extractText, projectEvent, projectToolCatalog } from "./events.js";
+import { extractText, HeadlessEventProjector, projectToolCatalog } from "./events.js";
 import { mergePrompt, readStdinIfPiped } from "./stdin.js";
 
 /** Write to stderr and exit non-zero (mirrors `cli.fail` for headless paths). */
@@ -71,7 +71,7 @@ export async function runPrint(opts: RunOptions): Promise<void> {
 /**
  * JSON mode: stream every harness event as a JSONL record to stdout, exit 0.
  *
- * Each event is projected via {@link projectEvent} (white-listed, no Model /
+ * Each event is projected via {@link HeadlessEventProjector} (white-listed, no Model /
  * function / AbortSignal fields) before serialization. On harness error: emit
  * an `error` JSON record, then stderr + exit 1.
  */
@@ -87,9 +87,10 @@ export async function runJson(opts: RunOptions): Promise<void> {
     JSON.stringify(projectToolCatalog(opts.result.toolCatalog, "bootstrap")) + "\n",
   );
 
+  const projector = new HeadlessEventProjector(opts.result.toolCatalog);
   const unsub = harness.subscribe((event) => {
-    const projected = projectEvent(event, opts.result.toolCatalog);
-    process.stdout.write(JSON.stringify(projected) + "\n");
+    const projected = projector.project(event);
+    if (projected) process.stdout.write(JSON.stringify(projected) + "\n");
   });
 
   try {

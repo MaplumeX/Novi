@@ -9,6 +9,8 @@ import {
 } from "@earendil-works/pi-ai/providers/faux";
 import { MessageList } from "./MessageList.js";
 
+const toolCatalog = { descriptors: [], activeToolNames: [], availability: [], diagnostics: [] };
+
 const mounted: Array<{ unmount: () => void }> = [];
 
 afterEach(() => {
@@ -31,6 +33,7 @@ async function renderTranscript(messages: AgentMessage[], detailed = false): Pro
       streamingThinking=""
       streamingThinkingActive={false}
       streamingToolCalls={[]}
+      toolCatalog={toolCatalog}
       detailed={detailed}
     />,
     { stdout: stdout as unknown as NodeJS.WriteStream, exitOnCtrlC: false },
@@ -46,8 +49,7 @@ describe("TUI transcript hierarchy", () => {
       "edit_file",
       {
         path: "src/a.ts",
-        oldText: "one",
-        newText: "one\ntwo",
+        edits: [{ oldText: "one", newText: "one\ntwo" }],
       },
       { id: "call-1" },
     );

@@ -49,7 +49,13 @@ describe("tool execution runtime", () => {
     };
     const result = await runtime.wrap(tool).execute("call", {});
     expect(Buffer.byteLength((result.content[0] as { text: string }).text)).toBeLessThanOrEqual(64);
-    expect(result.details).toMatchObject({ detailsTruncated: true, resourceGoverned: true });
+    expect(result.details).toMatchObject({
+      envelope: {
+        version: 1,
+        status: "success",
+        truncation: { truncated: true },
+      },
+    });
   });
 
   it("bounds concurrent tool executions per session runtime", async () => {
@@ -76,5 +82,29 @@ describe("tool execution runtime", () => {
     const wrapped = runtime.wrap(tool);
     await Promise.all([wrapped.execute("a", {}), wrapped.execute("b", {})]);
     expect(peak).toBe(1);
+  });
+
+  it("adds a monotonically increasing sequence to every partial update", async () => {
+    const runtime = new ToolExecutionRuntime({
+      sessionId: "updates",
+      budget: DEFAULT_TOOL_EXECUTION_BUDGET,
+      artifactsEnabled: false,
+    });
+    const tool: AgentTool<typeof Parameters> = {
+      name: "streaming",
+      label: "Streaming",
+      description: "streaming",
+      parameters: Parameters,
+      execute: async (_id, _params, _signal, onUpdate) => {
+        onUpdate?.({ content: [{ type: "text", text: "a" }], details: { sequence: 7 } });
+        onUpdate?.({ content: [{ type: "text", text: "b" }], details: {} });
+        return { content: [{ type: "text", text: "ab" }], details: {} };
+      },
+    };
+    const sequences: unknown[] = [];
+    await runtime.wrap(tool).execute("call", {}, undefined, (partial) => {
+      sequences.push((partial.details as Record<string, unknown>).sequence);
+    });
+    expect(sequences).toEqual([7, 8]);
   });
 });

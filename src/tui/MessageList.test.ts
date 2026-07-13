@@ -2,6 +2,25 @@ import { describe, expect, it } from "vitest";
 import type { AgentMessage } from "@earendil-works/pi-agent-core/node";
 import { countImages, unmatchedLiveToolCalls } from "./MessageList.js";
 import { thinkingPreview } from "./ThinkingBlock.js";
+import type { ToolCallView } from "../tools/events.js";
+
+function liveCall(id: string, name: string): ToolCallView {
+  return {
+    id,
+    name,
+    tool: {
+      name,
+      label: name,
+      source: { kind: "builtin", id: "native" },
+      capabilities: [],
+      risk: "read",
+    },
+    args: {},
+    status: "running",
+    lastSequence: 0,
+    diagnostics: [],
+  };
+}
 
 describe("countImages", () => {
   it("returns 0 for string content", () => {
@@ -31,10 +50,7 @@ describe("unmatchedLiveToolCalls", () => {
         content: [{ type: "toolCall", id: "known", name: "bash", arguments: {} }],
       },
     ] as AgentMessage[];
-    const live = [
-      { id: "known", name: "bash", args: {}, status: "running" as const },
-      { id: "early", name: "grep", args: {}, status: "running" as const },
-    ];
+    const live = [liveCall("known", "bash"), liveCall("early", "grep")];
 
     expect(unmatchedLiveToolCalls(messages, live)).toEqual([live[1]]);
   });

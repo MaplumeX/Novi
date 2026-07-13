@@ -8,9 +8,9 @@
 
 The frontend is a terminal UI built with **React 19 + Ink 7**. All TUI code
 lives under `src/tui/`. It consumes `AgentHarness` events and renders them;
-it does **not** contain business logic. The boundary between backend and
-frontend is precisely `useHarnessState.ts` — the only module that interprets
-raw harness events.
+it does **not** contain business logic. `useHarnessState.ts` is the only TUI
+harness subscriber; raw tool payload interpretation belongs to the shared
+`src/tools/events.ts` decoder.
 
 ---
 
@@ -19,7 +19,7 @@ raw harness events.
 ```
 src/tui/
 ├── App.tsx                # Root component: wires hooks + child components + overlay
-├── useHarnessState.ts     # The event boundary: subscribes to harness, projects to state
+├── useHarnessState.ts     # Sole TUI subscriber; delegates tool events to shared reducer
 ├── harness-handle.ts      # HarnessHandle wrapper: replace() rebuilds harness + session
 ├── MessageList.tsx        # Renders conversation history + streaming text/tool calls
 ├── ThinkingBlock.tsx      # Compact/default + detailed thinking presentation

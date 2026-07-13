@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getTool, setupEnv, writeFixture } from "./helpers.js";
+import { envelopeData, getTool, setupEnv, toolEnvelope, writeFixture } from "./helpers.js";
 
 describe("grep tool", () => {
   it("finds matching lines via ripgrep path", async () => {
@@ -9,8 +9,11 @@ describe("grep tool", () => {
       await writeFixture(cwd, "sub/b.txt", "banana\n");
       const tool = getTool(env, "grep");
       const res = await tool.execute("t", { pattern: "ba[rz]" });
-      const matches = (res.details as { matches: { file: string; line: number; text: string }[] })
-        .matches;
+      const matches = (
+        envelopeData(res) as {
+          matches: { file: string; line: number; text: string }[];
+        }
+      ).matches;
       // ripgrep should be available in this env; either engine returns these.
       expect(matches.length).toBe(2);
       expect(matches.some((m) => m.line === 2 && m.text === "bar")).toBe(true);
@@ -27,7 +30,7 @@ describe("grep tool", () => {
       await writeFixture(cwd, "b.md", "needle\n");
       const tool = getTool(env, "grep");
       const res = await tool.execute("t", { pattern: "needle", glob: "*.md" });
-      const matches = (res.details as { matches: { file: string }[] }).matches;
+      const matches = (envelopeData(res) as { matches: { file: string }[] }).matches;
       expect(matches.every((m) => m.file.endsWith(".md"))).toBe(true);
       expect(matches.length).toBe(1);
     } finally {
@@ -61,7 +64,8 @@ describe("grep tool", () => {
       try {
         const fallbackTool = getTool(fallbackEnv, "grep");
         const res = await fallbackTool.execute("t", { pattern: "bar" });
-        const matches = (res.details as { matches: { line: number; text: string }[] }).matches;
+        const matches = (envelopeData(res) as { matches: { line: number; text: string }[] })
+          .matches;
         expect(matches.length).toBe(1);
         expect(matches[0]).toMatchObject({ line: 2, text: "bar" });
       } finally {
@@ -104,8 +108,7 @@ describe("grep tool", () => {
       const outputLines = text.split("\n");
       // At most 2000 lines + footer.
       expect(outputLines.length).toBeLessThanOrEqual(2001);
-      const resource = (res.details as { resource: { truncated: boolean } }).resource;
-      expect(resource.truncated).toBe(true);
+      expect(toolEnvelope(res).truncation.truncated).toBe(true);
     } finally {
       await cleanup();
     }
@@ -120,9 +123,12 @@ describe("grep tool", () => {
       await writeFixture(cwd, "test:dir/file.txt", "foo\nbar\nbaz\n");
       const tool = getTool(env, "grep");
       const res = await tool.execute("t", { pattern: "ba[rz]" });
-      const engine = (res.details as { engine: string }).engine;
-      const matches = (res.details as { matches: { file: string; line: number; text: string }[] })
-        .matches;
+      const engine = envelopeData(res).engine;
+      const matches = (
+        envelopeData(res) as {
+          matches: { file: string; line: number; text: string }[];
+        }
+      ).matches;
       // This test only validates the ripgrep path; if fallback ran, skip the
       // colon-specific assertion (fallback uses env.listDir which is unaffected).
       if (engine === "ripgrep") {
@@ -155,7 +161,7 @@ describe("grep tool", () => {
       try {
         const fallbackTool = getTool(fallbackEnv, "grep");
         const res = await fallbackTool.execute("t", { pattern: "needle", glob: "src/**/*.ts" });
-        const matches = (res.details as { matches: { file: string }[] }).matches;
+        const matches = (envelopeData(res) as { matches: { file: string }[] }).matches;
         expect(matches.length).toBe(2);
         expect(matches.every((m) => m.file.includes("src/"))).toBe(true);
         expect(matches.some((m) => m.file.includes("nested/deep.ts"))).toBe(true);
@@ -177,7 +183,7 @@ describe("grep tool", () => {
       await writeFixture(cwd, "a.txt", "NEEDLE\nneedle\nNeedle\n");
       const tool = getTool(env, "grep");
       const res = await tool.execute("t", { pattern: "needle", ignoreCase: true });
-      const matches = (res.details as { matches: { line: number; text: string }[] }).matches;
+      const matches = (envelopeData(res) as { matches: { line: number; text: string }[] }).matches;
       expect(matches.length).toBe(3);
       expect(matches.some((m) => m.text === "NEEDLE")).toBe(true);
       expect(matches.some((m) => m.text === "needle")).toBe(true);
@@ -200,7 +206,8 @@ describe("grep tool", () => {
       try {
         const fallbackTool = getTool(fallbackEnv, "grep");
         const res = await fallbackTool.execute("t", { pattern: "needle", ignoreCase: true });
-        const matches = (res.details as { matches: { line: number; text: string }[] }).matches;
+        const matches = (envelopeData(res) as { matches: { line: number; text: string }[] })
+          .matches;
         expect(matches.length).toBe(3);
         expect(matches.some((m) => m.text === "NEEDLE")).toBe(true);
         expect(matches.some((m) => m.text === "needle")).toBe(true);
@@ -219,7 +226,7 @@ describe("grep tool", () => {
       await writeFixture(cwd, "a.txt", "const array[0] = 1;\nconst array1 = 2;\n");
       const tool = getTool(env, "grep");
       const res = await tool.execute("t", { pattern: "array[0]", literal: true });
-      const matches = (res.details as { matches: { line: number; text: string }[] }).matches;
+      const matches = (envelopeData(res) as { matches: { line: number; text: string }[] }).matches;
       expect(matches.length).toBe(1);
       expect(matches[0].line).toBe(1);
       expect(matches[0].text).toContain("array[0]");
@@ -241,7 +248,8 @@ describe("grep tool", () => {
       try {
         const fallbackTool = getTool(fallbackEnv, "grep");
         const res = await fallbackTool.execute("t", { pattern: "array[0]", literal: true });
-        const matches = (res.details as { matches: { line: number; text: string }[] }).matches;
+        const matches = (envelopeData(res) as { matches: { line: number; text: string }[] })
+          .matches;
         expect(matches.length).toBe(1);
         expect(matches[0].line).toBe(1);
         expect(matches[0].text).toContain("array[0]");
@@ -259,7 +267,7 @@ describe("grep tool", () => {
       await writeFixture(cwd, "a.txt", "line1\nline2\nmatch\nline4\nline5\n");
       const tool = getTool(env, "grep");
       const res = await tool.execute("t", { pattern: "match", context: 1 });
-      const matches = (res.details as { matches: { line: number; text: string }[] }).matches;
+      const matches = (envelopeData(res) as { matches: { line: number; text: string }[] }).matches;
       // Should include line 2 (context before), line 3 (match), line 4 (context after).
       expect(matches.length).toBe(3);
       const lines = matches.map((m) => m.line);
@@ -284,7 +292,8 @@ describe("grep tool", () => {
       try {
         const fallbackTool = getTool(fallbackEnv, "grep");
         const res = await fallbackTool.execute("t", { pattern: "match", context: 1 });
-        const matches = (res.details as { matches: { line: number; text: string }[] }).matches;
+        const matches = (envelopeData(res) as { matches: { line: number; text: string }[] })
+          .matches;
         expect(matches.length).toBe(3);
         const lines = matches.map((m) => m.line);
         expect(lines).toContain(2);
@@ -312,7 +321,8 @@ describe("grep tool", () => {
       try {
         const fallbackTool = getTool(fallbackEnv, "grep");
         const res = await fallbackTool.execute("t", { pattern: "match", context: 1 });
-        const matches = (res.details as { matches: { line: number; text: string }[] }).matches;
+        const matches = (envelopeData(res) as { matches: { line: number; text: string }[] })
+          .matches;
         // Lines: 1(ctx), 2(match), 3(match), 4(ctx) → 4 unique lines, no dupes.
         expect(matches.length).toBe(4);
         const lines = matches.map((m) => m.line).sort((a, b) => a - b);

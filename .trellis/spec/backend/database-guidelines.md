@@ -162,8 +162,10 @@ await setMcpApproval(env, {
 - **Env placeholders**: `${VAR}` substitution is available via
   `resolveEnvPlaceholders` / `resolveServerConfigPlaceholders`. Connect-time
   missing-env enforcement belongs to the MCP client layer (not this store).
-- Live MCP transport/client and tool assembly are out of this module; they
-  consume `resolveMcpPlan` only for connectable entries.
+- Live MCP client lives beside this store (`transport.ts`, `client-manager.ts`,
+  `tool-adapter.ts`) and consumes `resolveMcpPlan` connectable entries only.
+  Unified tool merge is `src/tools/assembly.ts` (`createToolAssembly`).
+  Bootstrap/TUI `/mcp` wiring is a separate session-layer concern.
 
 ---
 

@@ -37,6 +37,12 @@ function createBuiltinToolAssembly(
   options?: CreateBuiltinToolAssemblyOptions,
 ): ToolAssembly;
 
+async function createToolAssembly(
+  env: ExecutionEnv,
+  sessionId: string,
+  options?: CreateToolAssemblyOptions,
+): Promise<ToolAssembly & { mcp?: McpRuntimeHandle }>;
+
 class PermissionGate {
   onToolCall(event: ToolCallEvent): Promise<{ block: true; reason: string } | undefined>;
   setPermissions(next: ResolvedPermissions): void;
@@ -44,8 +50,11 @@ class PermissionGate {
 }
 ```
 
-Every harness construction or rebuild calls the same assembly function and
-passes both `assembly.tools` and `assembly.activeToolNames` to `setTools`.
+Every harness construction or rebuild must pass both `assembly.tools` and
+`assembly.activeToolNames` to `setTools`. Builtin-only callers may keep using
+the sync `createBuiltinToolAssembly`. Sessions that load MCP must use async
+`createToolAssembly` (or equivalent merge helpers) so external descriptors share
+the same registry, `ToolExecutionRuntime`, and `WorkspaceScopeGuard` as builtins.
 
 ### 3. Contracts
 
@@ -79,11 +88,20 @@ Settings schema:
 - A rule requires `effect` and at least one of `tool` or `capability`.
 - `target` and `scope` must appear together. File targets are normalized
   against the startup workspace; domain targets are lowercase.
+- Capability vocabulary includes builtin domains plus `external.invoke`, the
+  conservative fallback for MCP/external tools without a tighter map.
+  `WorkspaceScopeGuard.canonicalize` accepts `external.invoke` (session-scoped
+  target) so PermissionGate can evaluate default-`ask` MCP tools instead of
+  failing closed as `PERMISSION_INTENT_INVALID`.
 - Global rules may allow/ask/deny. Project rules may only add ask/deny.
 - `externalWriteAllowlist` is global-only; project values are ignored with a
   diagnostic.
 - Decision precedence is deny, ask, allow, then descriptor default. Only
   whole rules (no target/scope) affect descriptor availability.
+- MCP/external tools use `source.kind="external"`, `source.id="mcp:<server>"`,
+  stable unique names (`mcp_<server>_<tool>`, collision suffix `_2`…),
+  `defaultPermission="ask"`, and `optional=true`. Server connect failures are
+  fail-soft (source unavailable diagnostics) and must not remove builtins.
 - Session grants use capability + scope + canonical target. File grants also
   retain lexical/effective paths; subtree grants match descendants only when
   both paths remain contained.

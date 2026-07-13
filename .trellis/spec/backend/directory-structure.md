@@ -31,6 +31,7 @@ src/
 │   ├── contracts.ts        # Descriptor/catalog/capability/availability contracts
 │   ├── events.ts           # JSON-safe tool envelope/event decoder + replay reducer
 │   ├── index.ts            # createBuiltinToolAssembly + built-in descriptors
+│   ├── assembly.ts         # async createToolAssembly (builtin + MCP external merge)
 │   ├── registry.ts         # ToolRegistry: validated descriptor assembly
 │   ├── shared.ts           # Shared helpers (unwrap / textResult / sliceLines …)
 │   ├── bash.ts             # Each tool: createXxxTool(env): AgentTool
@@ -59,11 +60,14 @@ src/
 │   ├── errors.ts           # NOVI_ERROR codec + shared result decoder
 │   ├── tui-approver.ts     # Queued TUI Approver (once/session/deny)
 │   └── index.ts            # Public barrel exports
-├── mcp/                   # MCP config + approval domain (no live transport yet)
+├── mcp/                   # MCP config/approval + client transport (bootstrap wiring later)
 │   ├── types.ts            # Server config, plan entry, approval types
 │   ├── config.ts           # Load/validate/merge user+project mcp.json + fingerprints
 │   ├── approval.ts         # User-local ~/.novi/mcp-approvals.json store
 │   ├── plan.ts             # resolveMcpPlan → connectable/pending/denied/invalid
+│   ├── transport.ts        # stdio + Streamable HTTP transport factory
+│   ├── client-manager.ts   # Connect/list/call/close per connectable plan entry
+│   ├── tool-adapter.ts     # MCP tool → ToolDescriptor/AgentTool (ask, external)
 │   └── index.ts            # Public barrel exports
 ├── images/                # Multimodal image encode + clipboard adapters (TUI pending attachments)
 │   ├── encode.ts          # bytes/file → PendingImage (mime/size limits, appendPending)

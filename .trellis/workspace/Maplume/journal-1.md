@@ -1391,3 +1391,38 @@ Wired MCP into bootstrap/reload/gateway/TUI via assembleSessionTools; /mcp list|
 ### Next Steps
 
 - None - task complete
+
+
+## Session 42: Enable external tool sources parent integration
+
+**Date**: 2026-07-13
+**Task**: Enable external tool sources parent integration
+**Branch**: `main`
+
+### Summary
+
+Parent integration review: 3/3 children complete; assembleSessionTools + /mcp wired; typecheck/lint/700 tests/build green; archived enable-external-tool-sources.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3996c3a` | (see git log) |
+| `71ad4ee` | (see git log) |
+| `41afd8f` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

@@ -37,14 +37,14 @@
 
 ## Acceptance Criteria
 
-- [ ] AC1: stdio fake server 可 list + call 并出现在 active set。
-- [ ] AC2: HTTP fake/transport test 可 list + call。
-- [ ] AC3: 失败 server 不影响 builtin tools。
-- [ ] AC4: MCP tool 默认 ask metadata 正确；permission intents 可被 gate 消费。
-- [ ] AC5: 禁用 source/tool 后不进入 active set。
-- [ ] AC6: 工具名冲突得到确定性处理（拒绝/重命名策略固定且测试覆盖）。
-- [ ] AC7: 统一 assembly 被单元/集成测试覆盖。
-- [ ] AC8: typecheck/lint/test/build 通过。
+- [x] AC1: stdio fake server 可 list + call 并出现在 active set。
+- [x] AC2: HTTP fake/transport test 可 list + call。
+- [x] AC3: 失败 server 不影响 builtin tools。
+- [x] AC4: MCP tool 默认 ask metadata 正确；permission intents 可被 gate 消费。
+- [x] AC5: 禁用 source/tool 后不进入 active set。
+- [x] AC6: 工具名冲突得到确定性处理（拒绝/重命名策略固定且测试覆盖）。
+- [x] AC7: 统一 assembly 被单元/集成测试覆盖。
+- [x] AC8: typecheck/lint/test/build 通过。
 
 ## Out of Scope
 

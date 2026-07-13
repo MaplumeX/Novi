@@ -1286,3 +1286,38 @@ Completed descriptor-based tool registration and scoped permissions, unified exe
 ### Next Steps
 
 - None - task complete
+
+
+## Session 39: Enable external tool sources: plan + MCP config/approval
+
+**Date**: 2026-07-13
+**Task**: Enable external tool sources: plan + MCP config/approval
+**Branch**: `main`
+
+### Summary
+
+Planned parent+3 children for MCP external tool sources. Implemented child1: src/mcp config loader, fingerprint, approval store, resolveMcpPlan; 33 tests; documented specs.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `215f32b` | (see git log) |
+| `535dba9` | (see git log) |
+| `337c0f0` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

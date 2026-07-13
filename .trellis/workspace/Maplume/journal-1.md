@@ -1356,3 +1356,38 @@ Implemented MCP SDK client, stdio/HTTP transports, tool adapter, external.invoke
 ### Next Steps
 
 - None - task complete
+
+
+## Session 41: MCP session wiring and /mcp management
+
+**Date**: 2026-07-13
+**Task**: MCP session wiring and /mcp management
+**Branch**: `main`
+
+### Summary
+
+Wired MCP into bootstrap/reload/gateway/TUI via assembleSessionTools; /mcp list|approve|deny|reconnect; PermissionGate external descriptors; mcp.close on exit; 700 tests green.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3996c3a` | (see git log) |
+| `71ad4ee` | (see git log) |
+| `41afd8f` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

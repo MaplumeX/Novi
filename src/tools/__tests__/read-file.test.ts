@@ -21,7 +21,7 @@ describe("read_file tool", () => {
       const file = await writeFixture(cwd, "lines.txt", "one\ntwo\nthree\nfour\nfive\n");
       const tool = getTool(env, "read_file");
       const res = await tool.execute("t", { path: file, offset: 2, limit: 2 });
-      expect((res.content[0] as { text: string }).text).toBe("two\nthree");
+      expect((res.content[0] as { text: string }).text).toBe("two\nthree\n");
     } finally {
       await cleanup();
     }
@@ -51,9 +51,11 @@ describe("read_file tool", () => {
       expect(text).toContain("[Output truncated:");
       // Head truncation: first line preserved.
       expect(outputLines[0]).toBe("line0");
-      const truncation = (res.details as { truncation: { truncated: boolean; truncatedBy: string } }).truncation;
-      expect(truncation.truncated).toBe(true);
-      expect(truncation.truncatedBy).toBe("lines");
+      const resource = (
+        res.details as { resource: { truncated: boolean; truncationReasons: string[] } }
+      ).resource;
+      expect(resource.truncated).toBe(true);
+      expect(resource.truncationReasons).toContain("lines");
     } finally {
       await cleanup();
     }
@@ -68,8 +70,8 @@ describe("read_file tool", () => {
       const res = await tool.execute("t", { path: file, limit: 10 });
       const text = (res.content[0] as { text: string }).text;
       expect(text).not.toContain("[Output truncated:");
-      const truncation = (res.details as { truncation: { truncated: boolean } }).truncation;
-      expect(truncation.truncated).toBe(false);
+      const resource = (res.details as { resource: { truncated: boolean } }).resource;
+      expect(resource.truncated).toBe(false);
     } finally {
       await cleanup();
     }

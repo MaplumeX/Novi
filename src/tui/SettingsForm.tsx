@@ -2,19 +2,19 @@ import { useEffect, useState } from "react";
 import { Text, Box, useInput } from "ink";
 import path from "node:path";
 import type { ExecutionEnv } from "@earendil-works/pi-agent-core/node";
-import type { ThinkingLevel } from "@earendil-works/pi-agent-core/node";
 import type { ResolvedSettings } from "../settings.js";
 import { writeSettings, loadSettings, resolveSettings } from "../settings.js";
 import { loadCredentials, getCredentialsPath } from "../credentials.js";
 import { getNoviDir } from "../config.js";
 import { Panel } from "./components/Panel.js";
 import { icons, theme } from "./theme.js";
+import type { BootstrapResult } from "../bootstrap.js";
 
 interface SettingsFormProps {
   settings: ResolvedSettings;
   env: ExecutionEnv;
   cwd: string;
-  cliOverrides: { provider?: string; model?: string; thinkingLevel?: ThinkingLevel };
+  cliOverrides: BootstrapResult["cliOverrides"];
   onSaved: (updated: ResolvedSettings) => void;
   onExit: () => void;
   onReload: () => void;
@@ -64,6 +64,28 @@ const FIELDS: readonly FieldDef[] = [
     label: "permissions.externalWriteAllowlist (global JSON only)",
     type: "readonly",
   },
+  { key: "artifacts.enabled", label: "artifacts.enabled (JSON policy)", type: "readonly" },
+  ...[
+    "modelBytes",
+    "modelLines",
+    "memoryBytes",
+    "partialBytes",
+    "partialUpdatesPerSecond",
+    "timeoutMs",
+    "maxConcurrentCalls",
+    "traversalFiles",
+    "traversalDepth",
+    "resultCount",
+    "artifactSessionBytes",
+    "artifactGlobalBytes",
+    "artifactMaxAgeMs",
+    "webCacheBytes",
+    "webCacheMaxAgeMs",
+  ].map((name) => ({
+    key: `toolBudgets.${name}`,
+    label: `toolBudgets.${name} (JSON/CLI)`,
+    type: "readonly" as const,
+  })),
   { key: "compaction.enabled", label: "compaction.enabled", type: "toggle" },
   { key: "compaction.reserveTokens", label: "compaction.reserveTokens", type: "number" },
   { key: "compaction.keepRecentTokens", label: "compaction.keepRecentTokens", type: "number" },

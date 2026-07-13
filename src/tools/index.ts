@@ -20,6 +20,11 @@ import { createTodoTool } from "./todo.js";
 import { createWebSearchTool } from "./web-search.js";
 import type { WebToolOptions } from "./web/types.js";
 import { createWriteFileTool } from "./write-file.js";
+import {
+  DEFAULT_TOOL_EXECUTION_BUDGET,
+  ToolExecutionRuntime,
+  type ToolExecutionBudget,
+} from "./runtime/index.js";
 
 const BUILTIN_SOURCE = { kind: "builtin", id: "builtin" } as const;
 const ALL_MODES = ["tui", "print", "json", "gateway"] as const;
@@ -57,7 +62,7 @@ const descriptors: readonly ToolDescriptor[] = [
     defaultEnabled: true,
     streaming: "none",
     modes: ALL_MODES,
-    factory: ({ env, scopeGuard }) => createReadFileTool(env, scopeGuard),
+    factory: ({ env, scopeGuard, runtime }) => createReadFileTool(env, scopeGuard, runtime!),
     resolvePermissionIntents: pathIntent("filesystem.read", "file"),
   },
   {
@@ -83,7 +88,7 @@ const descriptors: readonly ToolDescriptor[] = [
     defaultEnabled: true,
     streaming: "none",
     modes: ALL_MODES,
-    factory: ({ env, scopeGuard }) => createEditFileTool(env, scopeGuard),
+    factory: ({ env, scopeGuard, runtime }) => createEditFileTool(env, scopeGuard, runtime!.budget),
     resolvePermissionIntents: pathIntent("filesystem.write", "file"),
   },
   {
@@ -96,7 +101,7 @@ const descriptors: readonly ToolDescriptor[] = [
     defaultEnabled: true,
     streaming: "delta",
     modes: ALL_MODES,
-    factory: ({ env }) => createBashTool(env),
+    factory: ({ env, runtime }) => createBashTool(env, runtime!),
     resolvePermissionIntents: (input) => {
       const target = stringField(input, "command");
       return [
@@ -119,7 +124,7 @@ const descriptors: readonly ToolDescriptor[] = [
     defaultEnabled: true,
     streaming: "none",
     modes: ALL_MODES,
-    factory: ({ env, scopeGuard }) => createLsTool(env, scopeGuard),
+    factory: ({ env, scopeGuard, runtime }) => createLsTool(env, scopeGuard, runtime),
     resolvePermissionIntents: pathIntent("filesystem.read", "directory"),
   },
   {
@@ -132,7 +137,7 @@ const descriptors: readonly ToolDescriptor[] = [
     defaultEnabled: true,
     streaming: "none",
     modes: ALL_MODES,
-    factory: ({ env, scopeGuard }) => createGlobTool(env, scopeGuard),
+    factory: ({ env, scopeGuard, runtime }) => createGlobTool(env, scopeGuard, runtime),
     resolvePermissionIntents: pathIntent("filesystem.read", "subtree"),
   },
   {
@@ -145,7 +150,7 @@ const descriptors: readonly ToolDescriptor[] = [
     defaultEnabled: true,
     streaming: "none",
     modes: ALL_MODES,
-    factory: ({ env, scopeGuard }) => createGrepTool(env, scopeGuard),
+    factory: ({ env, scopeGuard, runtime }) => createGrepTool(env, scopeGuard, runtime),
     resolvePermissionIntents: pathIntent("filesystem.read", "subtree"),
   },
   {
@@ -236,6 +241,9 @@ export interface CreateBuiltinToolAssemblyOptions extends WebToolOptions {
   };
   permissions?: ResolvedPermissions;
   workspace?: string;
+  budget?: ToolExecutionBudget;
+  artifactsEnabled?: boolean;
+  artifactRoot?: string;
 }
 
 /** Build the validated built-in catalog and its explicit model-visible set. */
@@ -245,6 +253,12 @@ export function createBuiltinToolAssembly(
   options: CreateBuiltinToolAssemblyOptions = {},
 ): ToolAssembly {
   const permissions = options.permissions;
+  const runtime = new ToolExecutionRuntime({
+    sessionId,
+    budget: options.budget ?? { ...DEFAULT_TOOL_EXECUTION_BUDGET },
+    artifactsEnabled: options.artifactsEnabled ?? false,
+    artifactRoot: options.artifactRoot,
+  });
   const scopeGuard = new WorkspaceScopeGuard({
     env,
     workspace: options.workspace ?? env.cwd,
@@ -271,14 +285,19 @@ export function createBuiltinToolAssembly(
         webSearch: options.webSearch,
         fetchContent: options.fetchContent,
         cacheRoot: options.cacheRoot,
+        cacheRetention: {
+          maxBytes: runtime.budget.webCacheBytes,
+          maxAgeMs: runtime.budget.webCacheMaxAgeMs,
+        },
         env: options.env,
       },
       mode: options.mode ?? "tui",
       scopeGuard,
+      runtime,
     },
     policy,
   );
-  return { ...assembly, scopeGuard };
+  return { ...assembly, tools: assembly.tools.map((tool) => runtime.wrap(tool)), scopeGuard };
 }
 
 /** Serializable descriptor lookup used by permission and presentation layers. */

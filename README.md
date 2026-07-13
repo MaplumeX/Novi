@@ -36,6 +36,54 @@ and an approved shell command or child process can access paths outside the
 workspace. Headless and Gateway modes cannot show approval UI, so `ask`
 decisions fail closed unless `--yes` is explicitly used.
 
+## Tool resource budgets
+
+Every runtime surface resolves one `ToolExecutionBudget` and reuses it for
+fresh sessions, resume, TUI rebuilds, print/JSON, and Gateway sessions. The
+precedence is built-in defaults → global settings (loosen or tighten) → trusted
+project settings (tighten only) → repeatable CLI overrides:
+
+```bash
+novi --tool-budget modelBytes=65536 --tool-budget timeoutMs=300000
+```
+
+```json
+{
+  "toolBudgets": {
+    "modelBytes": 51200,
+    "modelLines": 2000,
+    "memoryBytes": 262144,
+    "partialBytes": 16384,
+    "partialUpdatesPerSecond": 10,
+    "timeoutMs": 120000,
+    "maxConcurrentCalls": 4,
+    "traversalFiles": 50000,
+    "traversalDepth": 64,
+    "resultCount": 10000,
+    "artifactSessionBytes": 268435456,
+    "artifactGlobalBytes": 1073741824,
+    "artifactMaxAgeMs": 604800000,
+    "webCacheBytes": 536870912,
+    "webCacheMaxAgeMs": 2592000000
+  },
+  "artifacts": { "enabled": true }
+}
+```
+
+Large output is represented by a bounded model-visible preview and structured
+resource metrics. When artifacts are enabled, overflow is written
+incrementally with mode `0600` under
+`~/.novi/artifacts/<sessionId>/<toolCallId>/`; per-session/global quotas and
+age cleanup apply. Global settings may disable artifacts and project settings
+may additionally disable or tighten them, but a project cannot force-enable
+or raise a ceiling. Permission denials are resolved before tool execution and
+are never persisted as artifacts.
+
+`bash` streams ordered bounded deltas instead of cumulative snapshots, uses a
+hard timeout, and never copies complete stdout/stderr into result details.
+`glob` and `grep` skip symlinks and heavy default directories, honor the root
+`.gitignore`, and stop deterministically at file/depth/result ceilings.
+
 ## Web tools
 
 Novi exposes two batch-only web tools:
@@ -90,8 +138,9 @@ JSON, and text-layer PDF documents. It performs local extraction first and
 never invokes an LLM. Scanned PDFs return `OCR_UNSUPPORTED`; browser automation
 and authenticated-page access remain separate capabilities.
 
-Both tools use a 15-minute persistent cache under `~/.novi/cache/web/` by
-default. Oversized documents remain available at the returned continuation
+Both tools use a 15-minute freshness TTL under `~/.novi/cache/web/` by
+default. Cache retention is additionally capped at 512 MiB and 30 days.
+Oversized documents remain available at the returned continuation
 path for exact reading with `read_file`. Fetching validates DNS and every
 redirect, rejects private/internal targets, pins validated DNS answers, and
 applies time, redirect, and response-size limits.

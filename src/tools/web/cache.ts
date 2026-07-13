@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 interface CacheEnvelope<T> {
@@ -7,6 +7,25 @@ interface CacheEnvelope<T> {
   key: string;
   createdAt: number;
   value: T;
+}
+
+export interface WebCacheRetention {
+  maxBytes: number;
+  maxAgeMs: number;
+}
+
+interface CacheFile {
+  path: string;
+  size: number;
+  mtimeMs: number;
+}
+
+const retentionByRoot = new Map<string, WebCacheRetention>();
+const cleanupFlights = new Map<string, Promise<{ bytes: number; removed: number }>>();
+const activePaths = new Set<string>();
+
+export function configureWebCacheRetention(root: string, retention: WebCacheRetention): void {
+  retentionByRoot.set(path.resolve(root), { ...retention });
 }
 
 function canonical(value: unknown): string {
@@ -34,7 +53,9 @@ export async function readCache<T>(
   ttlMs: number,
 ): Promise<T | null> {
   try {
-    const text = await readFile(path.join(root, scope, `${key}.json`), "utf8");
+    const target = path.join(root, scope, `${key}.json`);
+    activePaths.add(target);
+    const text = await readFile(target, "utf8");
     const parsed = JSON.parse(text) as CacheEnvelope<T>;
     if (
       parsed.version !== 1 ||
@@ -47,6 +68,8 @@ export async function readCache<T>(
     return parsed.value;
   } catch {
     return null;
+  } finally {
+    activePaths.delete(path.join(root, scope, `${key}.json`));
   }
 }
 
@@ -66,6 +89,7 @@ export async function writeCache<T>(
     { encoding: "utf8", mode: 0o600 },
   );
   await rename(temp, target);
+  scheduleRetention(root);
   return target;
 }
 
@@ -81,5 +105,74 @@ export async function writeDocument(
   await mkdir(dir, { recursive: true });
   await writeFile(temp, content, { encoding: "utf8", mode: 0o600 });
   await rename(temp, target);
+  scheduleRetention(root);
   return target;
+}
+
+function scheduleRetention(root: string): void {
+  const retention = retentionByRoot.get(path.resolve(root));
+  if (!retention) return;
+  void enforceWebCacheRetention(root, retention).catch(() => undefined);
+}
+
+/** Single-flight age/size retention. It never follows symlinks. */
+export async function enforceWebCacheRetention(
+  root: string,
+  retention: WebCacheRetention,
+  now = Date.now(),
+): Promise<{ bytes: number; removed: number }> {
+  const key = path.resolve(root);
+  const existing = cleanupFlights.get(key);
+  if (existing) return existing;
+  const flight = (async () => {
+    const files = await scanCacheFiles(key);
+    let removed = 0;
+    const kept: CacheFile[] = [];
+    for (const file of files.sort(
+      (a, b) => a.mtimeMs - b.mtimeMs || a.path.localeCompare(b.path),
+    )) {
+      if (now - file.mtimeMs > retention.maxAgeMs && !activePaths.has(file.path)) {
+        await rm(file.path, { force: true }).catch(() => undefined);
+        removed += 1;
+      } else {
+        kept.push(file);
+      }
+    }
+    let bytes = kept.reduce((sum, file) => sum + file.size, 0);
+    while (bytes > retention.maxBytes && kept.length > 0) {
+      const file = kept.shift()!;
+      if (activePaths.has(file.path)) {
+        kept.push(file);
+        break;
+      }
+      await rm(file.path, { force: true }).catch(() => undefined);
+      bytes -= file.size;
+      removed += 1;
+    }
+    return { bytes, removed };
+  })().finally(() => cleanupFlights.delete(key));
+  cleanupFlights.set(key, flight);
+  return flight;
+}
+
+async function scanCacheFiles(root: string): Promise<CacheFile[]> {
+  const out: CacheFile[] = [];
+  const stack = [root];
+  while (stack.length > 0) {
+    const directory = stack.pop()!;
+    const directoryInfo = await lstat(directory).catch(() => undefined);
+    if (!directoryInfo?.isDirectory() || directoryInfo.isSymbolicLink()) continue;
+    const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      if (entry.isSymbolicLink()) continue;
+      const target = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(target);
+      } else if (entry.isFile() && !entry.name.endsWith(".tmp")) {
+        const info = await stat(target).catch(() => undefined);
+        if (info?.isFile()) out.push({ path: target, size: info.size, mtimeMs: info.mtimeMs });
+      }
+    }
+  }
+  return out;
 }

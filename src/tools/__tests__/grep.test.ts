@@ -9,7 +9,8 @@ describe("grep tool", () => {
       await writeFixture(cwd, "sub/b.txt", "banana\n");
       const tool = getTool(env, "grep");
       const res = await tool.execute("t", { pattern: "ba[rz]" });
-      const matches = (res.details as { matches: { file: string; line: number; text: string }[] }).matches;
+      const matches = (res.details as { matches: { file: string; line: number; text: string }[] })
+        .matches;
       // ripgrep should be available in this env; either engine returns these.
       expect(matches.length).toBe(2);
       expect(matches.some((m) => m.line === 2 && m.text === "bar")).toBe(true);
@@ -51,7 +52,9 @@ describe("grep tool", () => {
     try {
       await writeFixture(cwd, "a.txt", "foo\nbar\n");
       // Force the fallback path by giving an invalid PATH so `rg` can't spawn.
-      const fallbackEnv = new (env.constructor as typeof import("@earendil-works/pi-agent-core/node").NodeExecutionEnv)({
+      const fallbackEnv = new (
+        env.constructor as typeof import("@earendil-works/pi-agent-core/node").NodeExecutionEnv
+      )({
         cwd,
         shellEnv: { ...process.env, PATH: "/nonexistent" },
       });
@@ -101,8 +104,8 @@ describe("grep tool", () => {
       const outputLines = text.split("\n");
       // At most 2000 lines + footer.
       expect(outputLines.length).toBeLessThanOrEqual(2001);
-      const truncation = (res.details as { truncation: { truncated: boolean; truncatedBy: string } }).truncation;
-      expect(truncation.truncated).toBe(true);
+      const resource = (res.details as { resource: { truncated: boolean } }).resource;
+      expect(resource.truncated).toBe(true);
     } finally {
       await cleanup();
     }
@@ -118,7 +121,8 @@ describe("grep tool", () => {
       const tool = getTool(env, "grep");
       const res = await tool.execute("t", { pattern: "ba[rz]" });
       const engine = (res.details as { engine: string }).engine;
-      const matches = (res.details as { matches: { file: string; line: number; text: string }[] }).matches;
+      const matches = (res.details as { matches: { file: string; line: number; text: string }[] })
+        .matches;
       // This test only validates the ripgrep path; if fallback ran, skip the
       // colon-specific assertion (fallback uses env.listDir which is unaffected).
       if (engine === "ripgrep") {
@@ -142,7 +146,9 @@ describe("grep tool", () => {
       await writeFixture(cwd, "src/top.ts", "needle\n");
       await writeFixture(cwd, "other.ts", "needle\n");
       // Force fallback by making rg unavailable.
-      const fallbackEnv = new (env.constructor as typeof import("@earendil-works/pi-agent-core/node").NodeExecutionEnv)({
+      const fallbackEnv = new (
+        env.constructor as typeof import("@earendil-works/pi-agent-core/node").NodeExecutionEnv
+      )({
         cwd,
         shellEnv: { ...process.env, PATH: "/nonexistent" },
       });
@@ -154,7 +160,9 @@ describe("grep tool", () => {
         expect(matches.every((m) => m.file.includes("src/"))).toBe(true);
         expect(matches.some((m) => m.file.includes("nested/deep.ts"))).toBe(true);
         expect(matches.some((m) => m.file.includes("top.ts"))).toBe(true);
-        expect(matches.every((m) => !m.file.endsWith("other.ts") || m.file.includes("src/"))).toBe(true);
+        expect(matches.every((m) => !m.file.endsWith("other.ts") || m.file.includes("src/"))).toBe(
+          true,
+        );
       } finally {
         await fallbackEnv.cleanup();
       }
@@ -183,7 +191,9 @@ describe("grep tool", () => {
     const { env, cwd, cleanup } = await setupEnv();
     try {
       await writeFixture(cwd, "a.txt", "NEEDLE\nneedle\nNeedle\n");
-      const fallbackEnv = new (env.constructor as typeof import("@earendil-works/pi-agent-core/node").NodeExecutionEnv)({
+      const fallbackEnv = new (
+        env.constructor as typeof import("@earendil-works/pi-agent-core/node").NodeExecutionEnv
+      )({
         cwd,
         shellEnv: { ...process.env, PATH: "/nonexistent" },
       });
@@ -222,7 +232,9 @@ describe("grep tool", () => {
     const { env, cwd, cleanup } = await setupEnv();
     try {
       await writeFixture(cwd, "a.txt", "const array[0] = 1;\nconst array1 = 2;\n");
-      const fallbackEnv = new (env.constructor as typeof import("@earendil-works/pi-agent-core/node").NodeExecutionEnv)({
+      const fallbackEnv = new (
+        env.constructor as typeof import("@earendil-works/pi-agent-core/node").NodeExecutionEnv
+      )({
         cwd,
         shellEnv: { ...process.env, PATH: "/nonexistent" },
       });
@@ -263,7 +275,9 @@ describe("grep tool", () => {
     const { env, cwd, cleanup } = await setupEnv();
     try {
       await writeFixture(cwd, "a.txt", "line1\nline2\nmatch\nline4\nline5\n");
-      const fallbackEnv = new (env.constructor as typeof import("@earendil-works/pi-agent-core/node").NodeExecutionEnv)({
+      const fallbackEnv = new (
+        env.constructor as typeof import("@earendil-works/pi-agent-core/node").NodeExecutionEnv
+      )({
         cwd,
         shellEnv: { ...process.env, PATH: "/nonexistent" },
       });
@@ -289,7 +303,9 @@ describe("grep tool", () => {
     try {
       // Two matches 1 line apart with context=1 → overlapping windows.
       await writeFixture(cwd, "a.txt", "line1\nmatch\nmatch\nline4\n");
-      const fallbackEnv = new (env.constructor as typeof import("@earendil-works/pi-agent-core/node").NodeExecutionEnv)({
+      const fallbackEnv = new (
+        env.constructor as typeof import("@earendil-works/pi-agent-core/node").NodeExecutionEnv
+      )({
         cwd,
         shellEnv: { ...process.env, PATH: "/nonexistent" },
       });

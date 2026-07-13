@@ -82,6 +82,7 @@ function App({
         permissionStore: initialHandle.permissionStore,
         toolCatalog: initialHandle.toolCatalog,
         toolMode: initialHandle.toolMode,
+        toolBudget: initialHandle.toolBudget,
       },
       {
         env,
@@ -96,6 +97,8 @@ function App({
         settingsLayers,
         resolvedSettings,
         toolMode: initialHandle.toolMode,
+        toolBudget: initialHandle.toolBudget,
+        toolBudgetOverrides: cliOverrides.toolBudgetOverrides,
       },
     ),
   );
@@ -549,6 +552,7 @@ export function renderApp(
       permissionStore: bootstrapResult.permissionStore,
       toolCatalog: bootstrapResult.toolCatalog,
       toolMode: bootstrapResult.toolMode,
+      toolBudget: bootstrapResult.toolBudget,
     },
     {
       env,
@@ -565,6 +569,8 @@ export function renderApp(
       settingsLayers: bootstrapResult.settingsLayers,
       resolvedSettings,
       toolMode: bootstrapResult.toolMode,
+      toolBudget: bootstrapResult.toolBudget,
+      toolBudgetOverrides: cliOverrides.toolBudgetOverrides,
     },
   );
 

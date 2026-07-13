@@ -2,6 +2,7 @@ import type { AgentTool, ExecutionEnv } from "@earendil-works/pi-agent-core/node
 import type { PermissionLevel } from "../permissions/types.js";
 import type { WorkspaceScopeGuard } from "../permissions/scope.js";
 import type { WebToolOptions } from "./web/types.js";
+import type { ToolExecutionRuntime } from "./runtime/runtime.js";
 
 /** Capabilities are stable policy vocabulary; tool names are presentation. */
 export const TOOL_CAPABILITIES = [
@@ -42,6 +43,7 @@ export interface ToolFactoryContext {
   options: WebToolOptions;
   mode: ToolRuntimeMode;
   scopeGuard: WorkspaceScopeGuard;
+  runtime?: ToolExecutionRuntime;
 }
 
 export type ToolFactory = (context: ToolFactoryContext) => AgentTool;

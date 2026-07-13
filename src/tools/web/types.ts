@@ -18,6 +18,7 @@ export interface WebToolOptions {
     maxRedirects?: number;
   };
   cacheRoot?: string;
+  cacheRetention?: { maxBytes: number; maxAgeMs: number };
   env?: NodeJS.ProcessEnv;
 }
 

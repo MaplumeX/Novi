@@ -49,6 +49,11 @@ import {
   type PermissionGate,
   type ResolvedPermissions,
 } from "./permissions/index.js";
+import {
+  resolveToolExecutionBudget,
+  type ResolvedToolExecutionBudget,
+  type ToolBudgetOverrides,
+} from "./tools/runtime/budget.js";
 
 /** Default provider used when `--provider` is not given. */
 export const DEFAULT_PROVIDER = "anthropic";
@@ -91,6 +96,8 @@ export interface BootstrapOptions {
   permissionStore?: SessionPermissionStore;
   /** Internal caller mode used by descriptor availability resolution. */
   toolMode?: ToolRuntimeMode;
+  /** Strict per-process CLI resource overrides. */
+  toolBudgetOverrides?: ToolBudgetOverrides;
 }
 
 export interface BootstrapResult {
@@ -108,7 +115,12 @@ export interface BootstrapResult {
   /** System-prompt provider (reused when rebuilding the harness on /reload). */
   systemPrompt: (ctx: { env: ExecutionEnv; resources: AgentHarnessResources }) => Promise<string>;
   /** Raw CLI overrides (provider/model/thinking) for /settings re-resolution. */
-  cliOverrides: { provider?: string; model?: string; thinkingLevel?: ThinkingLevel };
+  cliOverrides: {
+    provider?: string;
+    model?: string;
+    thinkingLevel?: ThinkingLevel;
+    toolBudgetOverrides?: ToolBudgetOverrides;
+  };
   /** Whether project-level resources were loaded (trust gate result). */
   trusted: boolean;
   /** Scoped-model patterns from settings (for Ctrl+P cycling). */
@@ -124,6 +136,7 @@ export interface BootstrapResult {
   /** Validated tool descriptors, availability, and active-set diagnostics. */
   toolCatalog: ToolCatalogSnapshot;
   toolMode: ToolRuntimeMode;
+  toolBudget: ResolvedToolExecutionBudget;
 }
 
 /**
@@ -170,6 +183,7 @@ export interface GatewayEnv {
   /** Preflight catalog used for diagnostics before any Gateway session exists. */
   toolCatalog: ToolCatalogSnapshot;
   toolMode: ToolRuntimeMode;
+  toolBudget: ResolvedToolExecutionBudget;
 }
 
 /**
@@ -326,7 +340,12 @@ export async function prepareGatewayEnv(options: BootstrapOptions = {}): Promise
     provider: options.provider,
     model: options.model,
     thinkingLevel: options.thinkingLevel,
+    toolBudgetOverrides: options.toolBudgetOverrides,
   });
+  const toolBudget = resolveToolExecutionBudget(loadResult.layers, options.toolBudgetOverrides);
+  for (const diagnostic of toolBudget.diagnostics) {
+    process.stderr.write(`warning: ${diagnostic}\n`);
+  }
 
   const yes = options.yes === true;
   const permissions = resolvePermissionsFromSettings(resolvedSettings, {
@@ -346,6 +365,8 @@ export async function prepareGatewayEnv(options: BootstrapOptions = {}): Promise
     exposure: resolvedSettings.tools,
     permissions,
     mode: toolMode,
+    budget: toolBudget.values,
+    artifactsEnabled: toolBudget.artifactsEnabled,
   });
   for (const diagnostic of toolPreflight.diagnostics) {
     process.stderr.write(`warning: ${diagnostic}\n`);
@@ -405,6 +426,7 @@ export async function prepareGatewayEnv(options: BootstrapOptions = {}): Promise
     approver,
     toolCatalog: snapshotToolAssembly(toolPreflight),
     toolMode,
+    toolBudget,
   };
 }
 
@@ -454,6 +476,8 @@ export async function createHarnessForSession(
     permissions: gatewayEnv.permissions,
     mode: gatewayEnv.toolMode,
     workspace: cwd,
+    budget: gatewayEnv.toolBudget.values,
+    artifactsEnabled: gatewayEnv.toolBudget.artifactsEnabled,
   });
   await harness.setTools(toolAssembly.tools, toolAssembly.activeToolNames);
 
@@ -573,6 +597,8 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
       permissions: gatewayEnv.permissions,
       mode: gatewayEnv.toolMode,
       workspace: gatewayEnv.cwd,
+      budget: gatewayEnv.toolBudget.values,
+      artifactsEnabled: gatewayEnv.toolBudget.artifactsEnabled,
     });
     await harness.setTools(toolAssembly.tools, toolAssembly.activeToolNames);
     toolCatalog = snapshotToolAssembly(toolAssembly);
@@ -621,6 +647,7 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
       provider: options.provider,
       model: options.model,
       thinkingLevel: options.thinkingLevel,
+      toolBudgetOverrides: options.toolBudgetOverrides,
     },
     trusted: gatewayEnv.trusted,
     scopedModels: gatewayEnv.resolvedSettings.scopedModels ?? [],
@@ -630,5 +657,6 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
     settingsLayers: gatewayEnv.settingsLayers,
     toolCatalog,
     toolMode: gatewayEnv.toolMode,
+    toolBudget: gatewayEnv.toolBudget,
   };
 }

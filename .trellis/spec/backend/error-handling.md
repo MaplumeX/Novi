@@ -12,7 +12,7 @@ Novi follows a **throw-on-failure, catch-at-boundary** model:
 - Boundaries (`cli.ts` top-level, TUI event handlers, tool `execute`)
   catch and surface errors to the user / model.
 - The `ExecutionEnv` API returns `Result<T, Error>` objects (`{ ok: true |
-  false }`); helper `unwrap` converts failed results into thrown errors.
+false }`); helper `unwrap` converts failed results into thrown errors.
 
 There are no custom error classes. All errors are `Error` instances with a
 clear message string.
@@ -52,12 +52,17 @@ Tools indicate failure to the model by **throwing**. The harness translates a
 thrown error into a tool result with `isError: true`. Do not return a
 `textResult("error: …")` for genuine failures — throw instead.
 
-```ts
-// src/tools/bash.ts
-if (exitCode !== 0) {
-  throw new Error(`bash exited with code ${exitCode}\nstdout: ${stdout}\nstderr: ${stderr}`);
-}
+Tool/runtime boundary failures use a stable, bounded single-line envelope:
+
+```text
+NOVI_ERROR:<code>:<message up to 500 characters>
 ```
+
+For example, Bash non-zero failures use `TOOL_EXIT_NONZERO` and include only a
+bounded tail; complete stdout/stderr belongs in the governed artifact, never in
+the thrown error or result details. Timeouts, cancellation, memory limits, and
+artifact failures use `TOOL_TIMEOUT`, `TOOL_ABORTED`, `TOOL_MEMORY_LIMIT`,
+`ARTIFACT_QUOTA_EXCEEDED`, and `ARTIFACT_WRITE_FAILED` respectively.
 
 For `edit_file`, an ambiguous match (0 or >1) throws rather than silently
 no-ops:
@@ -71,13 +76,13 @@ if (count > 1) throw new Error(`edit_file: oldText matches ${count} times, must 
 
 ## Boundary Handling
 
-| Boundary | Handler |
-|----------|---------|
-| `cli.ts` top-level `try/catch` | Formats `error.message` → `fail()` (writes stderr + `process.exit(1)`) |
-| `App.tsx` `handlePrompt` | `.catch` → `print("Prompt failed: …")` |
-| `App.tsx` `handleCommand` | `try/catch` → `print("Command failed: …")` |
-| `bootstrap.ts` `resolveModel` | Throws clear config errors (no models, not found, no API key) |
-| `resources.ts` loader | Never throws — collects `diagnostics[]`, caller writes to stderr as warnings |
+| Boundary                       | Handler                                                                      |
+| ------------------------------ | ---------------------------------------------------------------------------- |
+| `cli.ts` top-level `try/catch` | Formats `error.message` → `fail()` (writes stderr + `process.exit(1)`)       |
+| `App.tsx` `handlePrompt`       | `.catch` → `print("Prompt failed: …")`                                       |
+| `App.tsx` `handleCommand`      | `try/catch` → `print("Command failed: …")`                                   |
+| `bootstrap.ts` `resolveModel`  | Throws clear config errors (no models, not found, no API key)                |
+| `resources.ts` loader          | Never throws — collects `diagnostics[]`, caller writes to stderr as warnings |
 
 ---
 

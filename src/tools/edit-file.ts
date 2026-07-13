@@ -4,6 +4,8 @@ import type { AgentTool } from "@earendil-works/pi-agent-core/node";
 import type { ExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import type { WorkspaceScopeGuard } from "../permissions/scope.js";
 import { resolveAbsolutePath, textResult, unwrap } from "./shared.js";
+import type { ToolExecutionBudget } from "./runtime/budget.js";
+import { DEFAULT_TOOL_EXECUTION_BUDGET } from "./runtime/budget.js";
 
 const Parameters = Type.Object({
   path: Type.String(),
@@ -76,6 +78,7 @@ function singleOrMultiError(
 export function createEditFileTool(
   env: ExecutionEnv,
   scopeGuard?: WorkspaceScopeGuard,
+  budget: ToolExecutionBudget = { ...DEFAULT_TOOL_EXECUTION_BUDGET },
 ): AgentTool<typeof Parameters> {
   return {
     name: "edit_file",
@@ -95,6 +98,12 @@ export function createEditFileTool(
       );
       try {
         const abs = await resolveAbsolutePath(env, params.path);
+        const info = unwrap(await env.fileInfo(abs), `edit_file failed to stat "${params.path}"`);
+        if (info.size > budget.memoryBytes) {
+          throw new Error(
+            `NOVI_ERROR:TOOL_MEMORY_LIMIT:edit_file input is ${info.size} bytes (limit ${budget.memoryBytes})`,
+          );
+        }
         const readRes = await env.readTextFile(abs, signal);
         const text = unwrap(readRes, `edit_file failed to read "${params.path}"`);
 
@@ -144,6 +153,12 @@ export function createEditFileTool(
         for (let i = matches.length - 1; i >= 0; i--) {
           const m = matches[i];
           result = result.slice(0, m.index) + m.newText + result.slice(m.index + m.oldText.length);
+        }
+        const resultBytes = Buffer.byteLength(result, "utf8");
+        if (resultBytes > budget.memoryBytes) {
+          throw new Error(
+            `NOVI_ERROR:TOOL_MEMORY_LIMIT:edit_file result is ${resultBytes} bytes (limit ${budget.memoryBytes})`,
+          );
         }
 
         await scopeGuard?.assertNativeFileAccess(

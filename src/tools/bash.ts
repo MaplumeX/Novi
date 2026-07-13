@@ -1,86 +1,154 @@
+import { spawn } from "node:child_process";
 import * as Type from "typebox";
-import type { AgentTool } from "@earendil-works/pi-agent-core/node";
-import type { ExecutionEnv } from "@earendil-works/pi-agent-core/node";
-import { textResult, truncateWithFooter, unwrap } from "./shared.js";
-
-const DEFAULT_TIMEOUT_MS = 120_000; // 2 minutes
+import type { AgentTool, ExecutionEnv } from "@earendil-works/pi-agent-core/node";
+import type { ToolExecutionRuntime } from "./runtime/runtime.js";
+import { DeltaLimiter } from "./runtime/output.js";
 
 const Parameters = Type.Object({
   command: Type.String(),
   timeout: Type.Optional(
-    Type.Number({ description: "Timeout in ms. Defaults to 120000 (2 min)." }),
+    Type.Integer({
+      minimum: 1,
+      description: "Timeout in ms; may only tighten the runtime budget.",
+    }),
   ),
 });
 
 /**
- * Format the accumulated stdout/stderr into a single text body for a partial
- * (streaming) update. stdout first, then an `[stderr]` section if present.
+ * Execute Bash with bounded process-facing capture. This intentionally does
+ * not impose a filesystem sandbox; shell commands retain normal OS access.
  */
-function formatPartial(stdout: string, stderr: string): string {
-  let body = stdout;
-  if (stderr) body += `\n[stderr]\n${stderr}`;
-  return body;
-}
-
-/**
- * `bash`: run a shell command. Non-zero exit code throws (with stdout/stderr in
- * the message) so the harness surfaces `isError` to the model. The harness
- * abort signal is forwarded so Ctrl-C kills the child process.
- *
- * When an `onUpdate` callback is provided, stdout/stderr chunks are streamed as
- * partial results (`details: { exitCode: null, streaming: true }`) while the
- * command runs, so consumers (headless JSON mode) can observe progress. The
- * final resolved result carries the complete output with the real exit code.
- *
- * A default 120s timeout is applied when the caller omits `timeout`, so an
- * unbounded command cannot run indefinitely. The model can override by passing
- * a larger (or smaller) `timeout`.
- */
-export function createBashTool(env: ExecutionEnv): AgentTool<typeof Parameters> {
+export function createBashTool(
+  env: ExecutionEnv,
+  runtime: ToolExecutionRuntime,
+): AgentTool<typeof Parameters> {
   return {
     name: "bash",
     label: "Bash",
-    description: "Execute a shell command and return stdout/stderr. Throws on non-zero exit code.",
+    description: "Execute a shell command and return bounded stdout/stderr.",
     parameters: Parameters,
-    execute: async (_toolCallId, params, signal, onUpdate) => {
-      let stdoutBuf = "";
-      let stderrBuf = "";
+    execute: async (toolCallId, params, signal, onUpdate) => {
+      const timeoutMs = Math.min(
+        params.timeout ?? runtime.budget.timeoutMs,
+        runtime.budget.timeoutMs,
+      );
+      const capture = runtime.createCapture(toolCallId, "bash", "tail");
+      const deltas = new DeltaLimiter(runtime.budget, onUpdate);
+      let timedOut = false;
+      let aborted = false;
+      let writeChain = Promise.resolve();
 
-      const onStdout = (chunk: string) => {
-        stdoutBuf += chunk;
-        if (onUpdate) {
-          onUpdate({
-            content: [{ type: "text", text: formatPartial(stdoutBuf, stderrBuf) }],
-            details: { exitCode: null, streaming: true },
+      try {
+        const result = await new Promise<{ exitCode: number }>((resolve, reject) => {
+          const shell = process.platform === "win32" ? "bash" : "/bin/bash";
+          const child = spawn(shell, ["-lc", params.command], {
+            cwd: env.cwd,
+            env: process.env,
+            detached: process.platform !== "win32",
+            stdio: ["ignore", "pipe", "pipe"],
+            windowsHide: true,
           });
-        }
-      };
 
-      const onStderr = (chunk: string) => {
-        stderrBuf += chunk;
-        if (onUpdate) {
-          onUpdate({
-            content: [{ type: "text", text: formatPartial(stdoutBuf, stderrBuf) }],
-            details: { exitCode: null, streaming: true },
+          const kill = () => {
+            if (!child.pid) return;
+            try {
+              if (process.platform !== "win32") process.kill(-child.pid, "SIGKILL");
+              else child.kill("SIGKILL");
+            } catch {
+              try {
+                child.kill("SIGKILL");
+              } catch {
+                // Process already exited.
+              }
+            }
+          };
+
+          const timer = setTimeout(() => {
+            timedOut = true;
+            kill();
+          }, timeoutMs);
+          const onAbort = () => {
+            aborted = true;
+            kill();
+          };
+          if (signal?.aborted) onAbort();
+          else signal?.addEventListener("abort", onAbort, { once: true });
+
+          const consume = (
+            stream: NodeJS.ReadableStream,
+            chunk: Buffer,
+            kind: "stdout" | "stderr",
+          ) => {
+            stream.pause();
+            const raw = chunk.toString("utf8");
+            const stored = kind === "stderr" ? `\n[stderr]\n${raw}` : raw;
+            writeChain = writeChain
+              .then(async () => {
+                const clean = await capture.append(stored);
+                deltas.push(kind === "stderr" ? clean.replace(/^\n\[stderr\]\n/, "") : clean, kind);
+              })
+              .then(
+                () => {
+                  stream.resume();
+                },
+                (error) => {
+                  kill();
+                  reject(error);
+                },
+              );
+          };
+
+          child.stdout?.on("data", (chunk: Buffer) => consume(child.stdout!, chunk, "stdout"));
+          child.stderr?.on("data", (chunk: Buffer) => consume(child.stderr!, chunk, "stderr"));
+          child.once("error", (error) => {
+            clearTimeout(timer);
+            signal?.removeEventListener("abort", onAbort);
+            reject(error);
           });
-        }
-      };
+          child.once("close", (code) => {
+            clearTimeout(timer);
+            signal?.removeEventListener("abort", onAbort);
+            void writeChain.then(() => resolve({ exitCode: code ?? 0 }), reject);
+          });
+        });
 
-      const timeout = params.timeout ?? DEFAULT_TIMEOUT_MS;
-      const res = await env.exec(params.command, {
-        timeout,
-        abortSignal: signal,
-        onStdout,
-        onStderr,
-      });
-      // Spawn/shell failure → throw directly.
-      const { stdout, stderr, exitCode } = unwrap(res, `bash failed to spawn`);
-      if (exitCode !== 0) {
-        throw new Error(`bash exited with code ${exitCode}\nstdout: ${stdout}\nstderr: ${stderr}`);
+        await deltas.flush();
+        const captured = await capture.finalize(deltas.metrics());
+        if (timedOut) {
+          throw new Error(`NOVI_ERROR:TOOL_TIMEOUT:bash exceeded ${timeoutMs}ms`);
+        }
+        if (aborted || signal?.aborted) {
+          throw new Error("NOVI_ERROR:TOOL_ABORTED:bash was aborted");
+        }
+        if (result.exitCode !== 0) {
+          const tail = captured.text.replace(/[\r\n]+/g, " ").slice(-400);
+          throw new Error(
+            `NOVI_ERROR:TOOL_EXIT_NONZERO:bash exited with code ${result.exitCode}${tail ? `: ${tail}` : ""}`,
+          );
+        }
+        return {
+          content: [{ type: "text", text: captured.text }],
+          details: {
+            resourceGoverned: true,
+            exitCode: result.exitCode,
+            timeoutMs,
+            resource: captured.metrics,
+          },
+        };
+      } catch (error) {
+        await deltas.flush();
+        if (timedOut) {
+          try {
+            await writeChain;
+            await capture.finalize(deltas.metrics());
+          } catch {
+            await capture.abort();
+          }
+          throw new Error(`NOVI_ERROR:TOOL_TIMEOUT:bash exceeded ${timeoutMs}ms`);
+        }
+        await capture.abort();
+        throw error;
       }
-      const body = `exit ${exitCode}\n${stdout}${stderr ? `\n[stderr]\n${stderr}` : ""}`;
-      const { text, truncation } = truncateWithFooter(body, "tail");
-      return textResult(text, { exitCode, stdout, stderr, truncation });
     },
   };
 }

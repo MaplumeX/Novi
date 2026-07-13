@@ -13,11 +13,11 @@ LLM summarization are outside this subsystem.
 ### 2. Signatures
 
 ```ts
-createBuiltinTools(
+createBuiltinToolAssembly(
   env: ExecutionEnv,
   sessionId: string,
-  options?: WebToolOptions,
-): AgentTool[];
+  options?: CreateBuiltinToolAssemblyOptions,
+): ToolAssembly;
 
 interface WebSearchInput {
   queries: Array<{
@@ -69,7 +69,9 @@ settings are replayed from the old harness.
 - Cache root is `~/.novi/cache/web/{search,content,documents}`. Keys include
   version, provider/extractor configuration, every output-affecting filter,
   canonical URL, and format. `max_chars_per_item` affects preview rendering,
-  not full-document identity. Default TTL is 15 minutes.
+  not full-document identity. Default TTL is 15 minutes. Independent retention
+  defaults to 512 MiB / 30 days, runs single-flight after writes, skips active
+  paths and symlinks, and removes oldest files first.
 - Cache payloads contain public normalized data only. Never serialize API
   keys, Authorization headers, cookies, provider raw errors, or stacks.
 - Public fetches use `guardedRequest`, never unrestricted global `fetch`.
@@ -84,21 +86,21 @@ settings are replayed from the old harness.
 
 ### 4. Validation & Error Matrix
 
-| Condition | Outcome |
-| --- | --- |
-| empty/oversized batch, legacy scalar `query`/`url` | whole-tool schema/validation error |
-| empty query, invalid date/locale/domain, contradictory domains | whole-tool pre-network validation error |
-| requested unsupported Provider filter | per-query `UNSUPPORTED_FILTER` |
-| selected API Provider lacks its key | actionable whole-tool configuration error |
-| malformed/non-HTTP URL or URL credentials | per-URL `INVALID_URL` |
-| literal or DNS-resolved non-public address | per-URL `PRIVATE_ADDRESS` |
-| DNS failure | per-URL `DNS_FAILURE` |
-| timeout / byte cap / unsupported binary | `TIMEOUT` / `RESPONSE_TOO_LARGE` / `UNSUPPORTED_MEDIA_TYPE` |
-| malformed JSON / unextractable HTML | `EXTRACTION_FAILED` |
-| malformed PDF / no text layer | `PDF_INVALID` / `OCR_UNSUPPORTED` |
-| Provider auth/rate/server failure | `PROVIDER_AUTH` / `PROVIDER_RATE_LIMIT` / `PROVIDER_ERROR` |
-| malformed or unreachable configured proxy | per-item/provider network error; never silently retry direct |
-| caller AbortSignal | throw cancellation; do not normalize into an item error |
+| Condition                                                      | Outcome                                                      |
+| -------------------------------------------------------------- | ------------------------------------------------------------ |
+| empty/oversized batch, legacy scalar `query`/`url`             | whole-tool schema/validation error                           |
+| empty query, invalid date/locale/domain, contradictory domains | whole-tool pre-network validation error                      |
+| requested unsupported Provider filter                          | per-query `UNSUPPORTED_FILTER`                               |
+| selected API Provider lacks its key                            | actionable whole-tool configuration error                    |
+| malformed/non-HTTP URL or URL credentials                      | per-URL `INVALID_URL`                                        |
+| literal or DNS-resolved non-public address                     | per-URL `PRIVATE_ADDRESS`                                    |
+| DNS failure                                                    | per-URL `DNS_FAILURE`                                        |
+| timeout / byte cap / unsupported binary                        | `TIMEOUT` / `RESPONSE_TOO_LARGE` / `UNSUPPORTED_MEDIA_TYPE`  |
+| malformed JSON / unextractable HTML                            | `EXTRACTION_FAILED`                                          |
+| malformed PDF / no text layer                                  | `PDF_INVALID` / `OCR_UNSUPPORTED`                            |
+| Provider auth/rate/server failure                              | `PROVIDER_AUTH` / `PROVIDER_RATE_LIMIT` / `PROVIDER_ERROR`   |
+| malformed or unreachable configured proxy                      | per-item/provider network error; never silently retry direct |
+| caller AbortSignal                                             | throw cancellation; do not normalize into an item error      |
 
 All public item errors include `{ code, message, retryable }` and exclude
 credentials, raw authorization data, provider payloads, and internal stacks.
@@ -125,7 +127,8 @@ credentials, raw authorization data, provider payloads, and internal stacks.
   query parameters/status mapping, Tavily request flags, normalized results,
   missing keys, and unsupported capabilities.
 - Cache tests assert canonical keys, mixed hits, TTL, force refresh,
-  corrupt-entry recovery, exact document persistence, and no credentials.
+  corrupt-entry recovery, exact document persistence, age/size eviction,
+  active/symlink safety, and no credentials.
 - Network tests assert private IPv4/IPv6 ranges, mixed DNS answers, DNS timeout,
   pinned lookup, redirect revalidation/loops, byte limits, credentials, and
   abort behavior without public internet access. They also assert that guarded

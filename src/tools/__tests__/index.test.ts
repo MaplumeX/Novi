@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { IsObject } from "typebox";
 import { createBuiltinToolAssembly } from "../index.js";
 import { resolvePermissionsFromSettings } from "../../permissions/policy.js";
-import { setupEnv } from "./helpers.js";
+import { setupEnv, writeFixture } from "./helpers.js";
+import { DEFAULT_TOOL_EXECUTION_BUDGET } from "../runtime/budget.js";
 
 const EXPECTED = [
   "read_file",
@@ -101,6 +102,29 @@ describe("createBuiltinToolAssembly", () => {
         status: "unavailable",
         reasonCode: "INITIALIZATION_FAILED",
       });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("applies the same resolved budget in every runtime mode", async () => {
+    const { env, cwd, cleanup } = await setupEnv();
+    try {
+      const file = await writeFixture(cwd, "large.txt", "x".repeat(1000));
+      const outputs: string[] = [];
+      for (const mode of ["tui", "print", "json", "gateway"] as const) {
+        const assembly = createBuiltinToolAssembly(env, `session-${mode}`, {
+          mode,
+          artifactsEnabled: false,
+          budget: { ...DEFAULT_TOOL_EXECUTION_BUDGET, modelBytes: 64 },
+        });
+        const read = assembly.tools.find((tool) => tool.name === "read_file")!;
+        const result = await read.execute(`call-${mode}`, { path: file });
+        const output = (result.content[0] as { text: string }).text;
+        expect(Buffer.byteLength(output)).toBeLessThanOrEqual(64);
+        outputs.push(output);
+      }
+      expect(new Set(outputs).size).toBe(1);
     } finally {
       await cleanup();
     }

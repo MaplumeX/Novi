@@ -1,10 +1,10 @@
-import path from "node:path";
 import * as Type from "typebox";
 import { minimatch } from "minimatch";
 import type { AgentTool } from "@earendil-works/pi-agent-core/node";
 import type { ExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import type { WorkspaceScopeGuard } from "../permissions/scope.js";
-import { resolveAbsolutePath, textResult, truncateWithFooter, walkFiles } from "./shared.js";
+import { resolveAbsolutePath, visitFiles } from "./shared.js";
+import type { ToolExecutionRuntime } from "./runtime/runtime.js";
 
 const Parameters = Type.Object({
   pattern: Type.String(),
@@ -18,6 +18,7 @@ const Parameters = Type.Object({
 export function createGlobTool(
   env: ExecutionEnv,
   scopeGuard?: WorkspaceScopeGuard,
+  runtime?: ToolExecutionRuntime,
 ): AgentTool<typeof Parameters> {
   return {
     name: "glob",
@@ -32,23 +33,43 @@ export function createGlobTool(
         "subtree",
         signal,
       );
+      if (!runtime) throw new Error("glob: tool execution runtime is required");
+      const budget = runtime.budget;
       const base = await resolveAbsolutePath(env, params.path ?? ".");
-      const files = await walkFiles(env, base, signal);
-      const matched = files
-        .map((f) => path.relative(base, f.path))
-        .filter((rel) => minimatch(rel, params.pattern, { dot: true }))
-        .sort();
-      const { text, truncation } = truncateWithFooter(
-        matched.length ? matched.join("\n") : "(no matches)",
-        "head",
-      );
-      return textResult(text, {
-        path: base,
-        pattern: params.pattern,
-        count: matched.length,
-        matches: matched,
-        truncation,
-      });
+      const matched: string[] = [];
+      const capture = runtime.createCapture(toolCallId, "glob", "head");
+      try {
+        const traversal = await visitFiles(
+          env,
+          base,
+          budget,
+          async (file) => {
+            if (!minimatch(file.relativePath, params.pattern, { dot: true })) return;
+            if (matched.length >= budget.resultCount) return false;
+            matched.push(file.relativePath);
+            await capture.append(`${file.relativePath}\n`);
+          },
+          signal,
+        );
+        if (matched.length === 0) await capture.append("(no matches)");
+        const captured = await capture.finalize({ partialUpdates: 0, partialDroppedBytes: 0 });
+        return {
+          content: [{ type: "text", text: captured.text }],
+          details: {
+            resourceGoverned: true,
+            resourceDirection: "head",
+            path: base,
+            pattern: params.pattern,
+            count: matched.length,
+            matches: matched,
+            traversal,
+            resource: captured.metrics,
+          },
+        };
+      } catch (error) {
+        await capture.abort();
+        throw error;
+      }
     },
   };
 }

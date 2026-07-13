@@ -41,14 +41,14 @@
 
 ## Acceptance Criteria
 
-- [ ] 超大 bash 输出的进程内存和事件体保持在配置预算内。
-- [ ] 大型目录遍历达到上限后确定性停止并报告原因。
-- [ ] Web 缓存不会无限增长，清理行为有并发与损坏回归测试。
-- [ ] 超额工具输出返回 artifactPath、完整字节数和截断原因，且不会在 details/history 中保留无界副本。
-- [ ] artifact 权限、关闭开关、会话/全局配额与清理有测试覆盖。
-- [ ] 默认预算不破坏现有常规工具调用。
-- [ ] project settings 不能提高任何资源上限；global 与 CLI 的显式放宽有来源诊断和测试。
-- [ ] 压力/边界测试、lint、typecheck 通过。
+- [x] 超大 bash 输出的进程内存和事件体保持在配置预算内。
+- [x] 大型目录遍历达到上限后确定性停止并报告原因。
+- [x] Web 缓存不会无限增长，清理行为有并发与损坏回归测试。
+- [x] 超额工具输出返回 artifactPath、完整字节数和截断原因，且不会在 details/history 中保留无界副本。
+- [x] artifact 权限、关闭开关、会话/全局配额与清理有测试覆盖。
+- [x] 默认预算不破坏现有常规工具调用。
+- [x] project settings 不能提高任何资源上限；global 与 CLI 的显式放宽有来源诊断和测试。
+- [x] 压力/边界测试、lint、typecheck 通过。
 
 ## Decisions
 

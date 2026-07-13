@@ -3,6 +3,7 @@ import path from "node:path";
 import type { ExecutionEnv, ThinkingLevel } from "@earendil-works/pi-agent-core/node";
 import { getNoviDir } from "./config.js";
 import type { PermissionRule } from "./permissions/types.js";
+import { resolveToolExecutionBudget, type ToolBudgetOverrides } from "./tools/runtime/budget.js";
 
 /**
  * User-configurable Novi settings.
@@ -63,6 +64,12 @@ export interface NoviSettings {
     /** Global-only roots allowed for native writes outside the workspace. */
     externalWriteAllowlist?: string[];
   };
+  /** Unified resource ceilings for tool execution. Project values are tighten-only. */
+  toolBudgets?: ToolBudgetOverrides;
+  /** Artifact persistence policy. Project settings may only disable it. */
+  artifacts?: {
+    enabled?: boolean;
+  };
 }
 
 /** Which layer sourced a given setting leaf. */
@@ -98,6 +105,7 @@ export interface SettingsCliOverrides {
   steeringMode?: "one-at-a-time" | "all";
   followUpMode?: "one-at-a-time" | "all";
   scopedModels?: string[];
+  toolBudgetOverrides?: ToolBudgetOverrides;
 }
 
 /**
@@ -491,6 +499,18 @@ export function resolveSettings(
           : "default";
     _sources["permissions.externalWriteAllowlist"] =
       layers.global?.permissions?.externalWriteAllowlist !== undefined ? "global" : "default";
+  }
+
+  // Tool resources use the runtime resolver so the settings view cannot show
+  // a project-side loosening that execution would reject.
+  {
+    const budget = resolveToolExecutionBudget(layers, cli.toolBudgetOverrides);
+    settings.toolBudgets = { ...budget.values };
+    settings.artifacts = { enabled: budget.artifactsEnabled };
+    for (const field of Object.keys(budget.values) as Array<keyof typeof budget.values>) {
+      _sources[`toolBudgets.${field}`] = budget.sources[field];
+    }
+    _sources["artifacts.enabled"] = budget.artifactsEnabledSource;
   }
 
   return { ...settings, _sources };

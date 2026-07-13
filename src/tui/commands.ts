@@ -104,7 +104,7 @@ export interface CommandContext {
   /** System-prompt provider (reused by harness rebuild). */
   systemPrompt: BootstrapResult["systemPrompt"];
   /** CLI overrides for settings re-resolution. */
-  cliOverrides: { provider?: string; model?: string; thinkingLevel?: ThinkingLevel };
+  cliOverrides: BootstrapResult["cliOverrides"];
   /** Update the resolved-settings state (after a /settings save). */
   setSettings: (s: ResolvedSettings) => void;
   /** Current resolved settings (read-only view for commands like /trust). */

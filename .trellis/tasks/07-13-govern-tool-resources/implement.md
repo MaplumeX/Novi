@@ -1,29 +1,29 @@
 # Resource Governance Implementation Plan
 
-- [ ] Add runtime budget types/defaults/resolver, settings provenance, and
+- [x] Add runtime budget types/defaults/resolver, settings provenance, and
   repeatable strict `--tool-budget <name>=<value>` parsing.
-- [ ] Add bounded byte/line ring buffer and delta chunk/rate limiter with fake
+- [x] Add bounded byte/line ring buffer and delta chunk/rate limiter with fake
   clock tests.
-- [ ] Add artifact store with `0600`, incremental writes, atomic completion
+- [x] Add artifact store with `0600`, incremental writes, atomic completion
   metadata, per-session/global quota, age cleanup, and global disable switch.
-- [ ] Fail with stable artifact quota/write codes when persistence is enabled
+- [x] Fail with stable artifact quota/write codes when persistence is enabled
   and overflow cannot be stored; when globally disabled, return bounded
   success-with-truncation without an artifact path.
-- [ ] Add tool execution wrapper that produces one bounded envelope for
+- [x] Add tool execution wrapper that produces one bounded envelope for
   success, cancellation, timeout, and runtime failure.
-- [ ] Refactor `bash` to stop accumulating full stdout/stderr, emit true deltas,
+- [x] Refactor `bash` to stop accumulating full stdout/stderr, emit true deltas,
   bound non-zero error output, and use the shared artifact sink.
-- [ ] Replace recursive collect-all `walkFiles` with a bounded async walker;
+- [x] Replace recursive collect-all `walkFiles` with a bounded async walker;
   integrate ignore rules, depth/file/result caps, sorting, and abort.
-- [ ] Route `glob`, ripgrep `grep`, and fallback `grep` through common budgets
+- [x] Route `glob`, ripgrep `grep`, and fallback `grep` through common budgets
   without full arrays in details after truncation.
-- [ ] Apply bounded result/details rules to `ls`, `read_file`, Web outcomes,
+- [x] Apply bounded result/details rules to `ls`, `read_file`, Web outcomes,
   and any other tool retaining full duplicated data.
-- [ ] Add Web cache retention manager without changing cache identity or
+- [x] Add Web cache retention manager without changing cache identity or
   guarded-network behavior.
-- [ ] Wire one resolved budget into fresh/resume/reload/gateway assembly.
-- [ ] Add startup/runtime diagnostics for invalid or tightened budget fields.
-- [ ] Update README/architecture/settings UI with defaults and artifact privacy.
+- [x] Wire one resolved budget into fresh/resume/reload/gateway assembly.
+- [x] Add startup/runtime diagnostics for invalid or tightened budget fields.
+- [x] Update README/architecture/settings UI with defaults and artifact privacy.
 
 ## Required Tests
 

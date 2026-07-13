@@ -26,6 +26,8 @@ import {
   type PermissionGate,
   type SessionPermissionStore,
 } from "../permissions/index.js";
+import type { ResolvedToolExecutionBudget } from "../tools/runtime/budget.js";
+import { resolveToolExecutionBudget, type ToolBudgetOverrides } from "../tools/runtime/budget.js";
 
 /**
  * A replaceable harness holder. `<App>` holds one of these as React state;
@@ -48,6 +50,7 @@ export interface HarnessHandle {
   /** Current validated tool catalog used by /tools and rebuilds. */
   toolCatalog: ToolCatalogSnapshot;
   toolMode: ToolRuntimeMode;
+  toolBudget?: ResolvedToolExecutionBudget;
   /**
    * Rebuild the harness and update the holder state.
    *
@@ -102,6 +105,8 @@ export interface CreateHarnessHandleDeps {
   resolvedSettings?: ResolvedSettings;
   /** Runtime surface retained across harness rebuilds. */
   toolMode: ToolRuntimeMode;
+  toolBudget?: ResolvedToolExecutionBudget;
+  toolBudgetOverrides?: ToolBudgetOverrides;
 }
 
 /**
@@ -142,6 +147,7 @@ export async function replayHarnessState(
     permissionStore?: SessionPermissionStore;
     approver?: Approver;
     toolMode?: ToolRuntimeMode;
+    toolBudget?: ResolvedToolExecutionBudget;
   } = {},
 ): Promise<{
   diagnostics: string[];
@@ -178,6 +184,8 @@ export async function replayHarnessState(
     permissions,
     mode: opts.toolMode ?? "tui",
     workspace: cwd,
+    budget: opts.toolBudget?.values,
+    artifactsEnabled: opts.toolBudget?.artifactsEnabled,
   });
   await newHarness.setTools(toolAssembly.tools, toolAssembly.activeToolNames);
   diagnostics.push(...toolAssembly.diagnostics);
@@ -292,6 +300,7 @@ export function createHarnessHandle(
     permissionStore: SessionPermissionStore;
     toolCatalog: ToolCatalogSnapshot;
     toolMode: ToolRuntimeMode;
+    toolBudget?: ResolvedToolExecutionBudget;
   },
   deps: CreateHarnessHandleDeps,
 ): HarnessHandle {
@@ -299,6 +308,7 @@ export function createHarnessHandle(
   // settingsLayers can update on /reload via replace opts; keep latest in a ref-like box.
   let settingsLayers = deps.settingsLayers;
   let resolvedSettings = deps.resolvedSettings;
+  let toolBudget = deps.toolBudget;
 
   // `makeReplace` returns a `replace` closure bound to a specific (old) handle.
   function makeReplace(old: HarnessHandle): HarnessHandle["replace"] {
@@ -313,6 +323,7 @@ export function createHarnessHandle(
       const sessionMeta = await session.getMetadata();
       if (next.settingsLayers) {
         settingsLayers = next.settingsLayers;
+        toolBudget = resolveToolExecutionBudget(settingsLayers, deps.toolBudgetOverrides);
       }
       if (next.resolvedSettings) {
         resolvedSettings = next.resolvedSettings;
@@ -347,6 +358,7 @@ export function createHarnessHandle(
           permissionStore: old.permissionStore,
           approver,
           toolMode,
+          toolBudget,
         },
       );
       // 6. Build the new handle with its own replace closure, then publish.
@@ -359,6 +371,7 @@ export function createHarnessHandle(
         permissionStore: old.permissionStore,
         toolCatalog,
         toolMode: old.toolMode,
+        toolBudget,
         replace: async () => {
           // Placeholder overwritten immediately below (TDZ-safe fixup).
           return { diagnostics: [] };
@@ -379,6 +392,7 @@ export function createHarnessHandle(
     permissionStore: initial.permissionStore,
     toolCatalog: initial.toolCatalog,
     toolMode: initial.toolMode,
+    toolBudget: initial.toolBudget ?? deps.toolBudget,
     replace: async () => {
       // Placeholder overwritten immediately below.
       return { diagnostics: [] };

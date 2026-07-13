@@ -12,6 +12,7 @@ import { loadSettings, resolveSettings } from "./settings.js";
 import { renderTrustPrompt } from "./tui/TrustPrompt.js";
 import { builtinModels } from "@earendil-works/pi-ai/providers/all";
 import { loadCustomModels } from "./models-loader.js";
+import { parseToolBudgetOverrides } from "./tools/runtime/budget.js";
 
 function fail(message: string): never {
   process.stderr.write(`${message}\n`);
@@ -37,6 +38,7 @@ const { values, positionals } = parseArgs({
     "list-models": { type: "boolean", default: false },
     gateway: { type: "boolean", default: false },
     config: { type: "string" },
+    "tool-budget": { type: "string", multiple: true },
     help: { type: "boolean", short: "h", default: false },
   },
   allowPositionals: true,
@@ -77,6 +79,7 @@ if (values.help) {
       "  --list-models [s] List configured models (optional search filter), then exit",
       "  --gateway         Multi-channel gateway mode (IM bot server; no TUI)",
       "  --config <path>   Path to gateway.json (gateway mode; default ~/.novi/gateway.json)",
+      "  --tool-budget <name>=<n>  Override a tool resource budget (repeatable)",
       "  -h, --help        Show this help",
     ].join("\n") + "\n",
   );
@@ -110,6 +113,13 @@ const cliOverrides = {
     : undefined,
 };
 
+let toolBudgetOverrides;
+try {
+  toolBudgetOverrides = parseToolBudgetOverrides(values["tool-budget"] ?? []);
+} catch (error) {
+  fail(error instanceof Error ? error.message : String(error));
+}
+
 const bootstrapOptions = {
   cwd: values.cwd,
   ...cliOverrides,
@@ -122,6 +132,7 @@ const bootstrapOptions = {
       : values.mode === "json"
         ? "json"
         : "tui") as "tui" | "print" | "json" | "gateway",
+  toolBudgetOverrides,
 };
 
 // Pre-bootstrap credential probe. The check runs before bootstrap() so the

@@ -33,9 +33,10 @@ export function createWriteFileTool(
       const abs = await resolveAbsolutePath(env, params.path);
       const res = await env.writeFile(abs, params.content, signal);
       unwrap(res, `write_file failed for "${params.path}"`);
-      return textResult(`wrote ${params.content.length} bytes to ${params.path}`, {
+      const bytes = Buffer.byteLength(params.content, "utf8");
+      return textResult(`wrote ${bytes} bytes to ${params.path}`, {
         path: params.path,
-        bytes: params.content.length,
+        bytes,
       });
     },
   };

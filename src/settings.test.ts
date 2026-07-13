@@ -375,6 +375,22 @@ describe("resolveSettings", () => {
     const d = resolveSettings(null, { global: null, project: null }, {});
     expect(d._sources.scopedModels).toBe("default");
   });
+  it("projects resolved tool budgets and provenance into the settings view", () => {
+    const out = resolveSettings(
+      null,
+      {
+        global: { toolBudgets: { modelBytes: 80_000 }, artifacts: { enabled: true } },
+        project: { toolBudgets: { modelBytes: 70_000 }, artifacts: { enabled: false } },
+      },
+      { toolBudgetOverrides: { timeoutMs: 300_000 } },
+    );
+    expect(out.toolBudgets?.modelBytes).toBe(70_000);
+    expect(out._sources["toolBudgets.modelBytes"]).toBe("project");
+    expect(out.toolBudgets?.timeoutMs).toBe(300_000);
+    expect(out._sources["toolBudgets.timeoutMs"]).toBe("cli");
+    expect(out.artifacts?.enabled).toBe(false);
+    expect(out._sources["artifacts.enabled"]).toBe("project");
+  });
 });
 
 describe("applyPatch", () => {

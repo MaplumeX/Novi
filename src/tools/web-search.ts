@@ -3,7 +3,7 @@ import * as Type from "typebox";
 import type { AgentTool, ExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import { getNoviDir } from "../config.js";
 import { textResult } from "./shared.js";
-import { makeCacheKey, readCache, writeCache } from "./web/cache.js";
+import { configureWebCacheRetention, makeCacheKey, readCache, writeCache } from "./web/cache.js";
 import { mapConcurrent } from "./web/concurrency.js";
 import { toWebItemError } from "./web/errors.js";
 import { resolveSearchProvider, validateCapabilities } from "./web/search-provider.js";
@@ -38,6 +38,7 @@ export function createWebSearchTool(
   const provider = resolveSearchProvider(options);
   const env = options.env ?? process.env;
   const cacheRoot = options.cacheRoot ?? path.join(getNoviDir(), "cache", "web");
+  if (options.cacheRetention) configureWebCacheRetention(cacheRoot, options.cacheRetention);
   const ttlMs = clamp(options.webSearch?.cacheTtlMinutes, 1, 24 * 60, 15) * 60_000;
   const timeoutMs = clamp(options.webSearch?.timeoutSeconds, 1, 120, 15) * 1000;
   const concurrency = clamp(options.webSearch?.concurrency, 1, 5, 3);

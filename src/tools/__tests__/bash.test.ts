@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { getTool, setupEnv } from "./helpers.js";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { DEFAULT_TOOL_EXECUTION_BUDGET } from "../runtime/budget.js";
 
 describe("bash tool", () => {
   it("returns stdout on success", async () => {
@@ -8,7 +12,8 @@ describe("bash tool", () => {
       const tool = getTool(env, "bash");
       const res = await tool.execute("t", { command: "echo hello" });
       expect((res.content[0] as { text: string }).text).toContain("hello");
-      expect(res.details).toMatchObject({ exitCode: 0, stdout: "hello\n" });
+      expect(res.details).toMatchObject({ exitCode: 0, resourceGoverned: true });
+      expect(res.details).not.toHaveProperty("stdout");
     } finally {
       await cleanup();
     }
@@ -38,8 +43,8 @@ describe("bash tool", () => {
       expect(text).toContain("[Output truncated:");
       // Tail truncation: the last output line (3000) should be preserved.
       expect(text).toContain("3000");
-      const truncation = (res.details as { truncation: { truncated: boolean } }).truncation;
-      expect(truncation.truncated).toBe(true);
+      const resource = (res.details as { resource: { truncated: boolean } }).resource;
+      expect(resource.truncated).toBe(true);
     } finally {
       await cleanup();
     }
@@ -58,8 +63,8 @@ describe("bash tool", () => {
       const text = (res.content[0] as { text: string }).text;
       expect(text).toContain("[Output truncated:");
       expect(Buffer.byteLength(text, "utf8")).toBeLessThanOrEqual(60000);
-      const truncation = (res.details as { truncation: { truncatedBy: string } }).truncation;
-      expect(truncation.truncatedBy).toBe("bytes");
+      const resource = (res.details as { resource: { truncationReasons: string[] } }).resource;
+      expect(resource.truncationReasons).toContain("bytes");
     } finally {
       await cleanup();
     }
@@ -80,7 +85,7 @@ describe("bash tool", () => {
       expect(partials.some((t) => t.includes("b"))).toBe(true);
       // All partials should have streaming details.
       for (const c of calls) {
-        expect(c[0].details).toMatchObject({ exitCode: null, streaming: true });
+        expect(c[0].details).toMatchObject({ streaming: true, delta: true });
       }
     } finally {
       await cleanup();
@@ -102,11 +107,8 @@ describe("bash tool", () => {
     const { env, cleanup } = await setupEnv();
     try {
       const tool = getTool(env, "bash");
-      const execSpy = vi.spyOn(env, "exec");
-      await tool.execute("t", { command: "echo hello" }, undefined);
-      expect(execSpy).toHaveBeenCalledOnce();
-      const opts = execSpy.mock.calls[0][1];
-      expect(opts?.timeout).toBe(120_000);
+      const result = await tool.execute("t", { command: "echo hello" }, undefined);
+      expect(result.details).toMatchObject({ timeoutMs: 120_000 });
     } finally {
       await cleanup();
     }
@@ -116,17 +118,14 @@ describe("bash tool", () => {
     const { env, cleanup } = await setupEnv();
     try {
       const tool = getTool(env, "bash");
-      const execSpy = vi.spyOn(env, "exec");
-      await tool.execute("t", { command: "echo hello", timeout: 500 }, undefined);
-      expect(execSpy).toHaveBeenCalledOnce();
-      const opts = execSpy.mock.calls[0][1];
-      expect(opts?.timeout).toBe(500);
+      const result = await tool.execute("t", { command: "echo hello", timeout: 500 }, undefined);
+      expect(result.details).toMatchObject({ timeoutMs: 500 });
     } finally {
       await cleanup();
     }
   });
 
-  it("final result contains full stdout/stderr", async () => {
+  it("final result contains bounded stdout/stderr without duplicating them in details", async () => {
     const { env, cleanup } = await setupEnv();
     try {
       const tool = getTool(env, "bash");
@@ -140,9 +139,81 @@ describe("bash tool", () => {
       const text = (res.content[0] as { text: string }).text;
       expect(text).toContain("out");
       expect(text).toContain("err");
-      expect(res.details).toMatchObject({ exitCode: 0, stdout: "out\n", stderr: "err\n" });
+      expect(res.details).toMatchObject({ exitCode: 0, resourceGoverned: true });
+      expect(res.details).not.toHaveProperty("stdout");
+      expect(res.details).not.toHaveProperty("stderr");
       // Final details should not have streaming flag.
       expect((res.details as { streaming?: boolean }).streaming).toBeUndefined();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("keeps multi-megabyte output bounded and persists the exact artifact", async () => {
+    const { env, cleanup } = await setupEnv();
+    const artifactRoot = await mkdtemp(path.join(tmpdir(), "novi-bash-artifact-"));
+    try {
+      const budget = {
+        ...DEFAULT_TOOL_EXECUTION_BUDGET,
+        modelBytes: 1024,
+        modelLines: 100,
+        memoryBytes: 4096,
+        partialBytes: 1024,
+        partialUpdatesPerSecond: 100,
+      };
+      const tool = getTool(env, "bash", "large-output", {
+        budget,
+        artifactsEnabled: true,
+        artifactRoot,
+      });
+      const updates: Array<{ content: Array<{ type: string; text?: string }> }> = [];
+      const res = await tool.execute(
+        "large-call",
+        { command: "head -c 2097152 /dev/zero | tr '\\0' x" },
+        undefined,
+        (update) => updates.push(update as (typeof updates)[number]),
+      );
+      const details = res.details as {
+        resource: { artifactPath: string; totalBytes: number; outputBytes: number };
+      };
+      expect(details.resource.totalBytes).toBe(2 * 1024 * 1024);
+      expect(details.resource.outputBytes).toBeLessThanOrEqual(1024);
+      expect((await readFile(details.resource.artifactPath)).byteLength).toBe(2 * 1024 * 1024);
+      expect(
+        updates.every((update) => Buffer.byteLength(update.content[0]?.text ?? "") <= 1024),
+      ).toBe(true);
+    } finally {
+      await cleanup();
+      await rm(artifactRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("hard-fails at the resolved timeout and bounds non-zero error text", async () => {
+    const { env, cleanup } = await setupEnv();
+    try {
+      const timeoutTool = getTool(env, "bash", "timeout", {
+        budget: { ...DEFAULT_TOOL_EXECUTION_BUDGET, timeoutMs: 50 },
+      });
+      const started = Date.now();
+      await expect(timeoutTool.execute("timeout-call", { command: "sleep 2" })).rejects.toThrow(
+        "NOVI_ERROR:TOOL_TIMEOUT:",
+      );
+      expect(Date.now() - started).toBeLessThan(1000);
+
+      const errorTool = getTool(env, "bash", "error", {
+        budget: { ...DEFAULT_TOOL_EXECUTION_BUDGET, modelBytes: 1024 },
+      });
+      let thrown: unknown;
+      try {
+        await errorTool.execute("error-call", {
+          command: "head -c 1048576 /dev/zero | tr '\\0' x; exit 9",
+        });
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toBeInstanceOf(Error);
+      expect((thrown as Error).message).toContain("TOOL_EXIT_NONZERO");
+      expect(Buffer.byteLength((thrown as Error).message)).toBeLessThan(600);
     } finally {
       await cleanup();
     }

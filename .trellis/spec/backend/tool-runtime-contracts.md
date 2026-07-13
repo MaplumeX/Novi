@@ -179,3 +179,145 @@ if (decision.level === "ask" && !store.has(minimalGrant(intents))) {
 ```
 
 Current static deny/boundary checks always precede minimal-scope grants.
+
+## Scenario: Govern tool resources and overflow
+
+### 1. Scope / Trigger
+
+Use this contract when changing tool execution, output streaming, traversal,
+artifact persistence, cache retention, tool settings, CLI parsing, or any
+harness construction/rebuild path. Domain tools must not invent independent
+timeouts, cumulative partial snapshots, or unbounded result details.
+
+### 2. Signatures
+
+```ts
+interface ToolExecutionBudget {
+  modelBytes: number; // default 50 KiB
+  modelLines: number; // default 2,000
+  memoryBytes: number; // default 256 KiB
+  partialBytes: number; // default 16 KiB
+  partialUpdatesPerSecond: number; // default 10
+  timeoutMs: number; // default 120,000
+  maxConcurrentCalls: number; // default 4 per session runtime
+  traversalFiles: number; // default 50,000
+  traversalDepth: number; // default 64
+  resultCount: number; // default 10,000
+  artifactSessionBytes: number; // default 256 MiB
+  artifactGlobalBytes: number; // default 1 GiB
+  artifactMaxAgeMs: number; // default 7 days
+  webCacheBytes: number; // default 512 MiB
+  webCacheMaxAgeMs: number; // default 30 days
+}
+
+function parseToolBudgetOverrides(values: readonly string[]): ToolBudgetOverrides;
+function resolveToolExecutionBudget(
+  layers: SettingsLayers,
+  cli?: ToolBudgetOverrides,
+): ResolvedToolExecutionBudget;
+
+class ToolExecutionRuntime {
+  wrap(tool: AgentTool): AgentTool;
+  createCapture(callId: string, tool: string, direction?: "head" | "tail"): BoundedTextCapture;
+}
+```
+
+CLI values are repeatable: `--tool-budget <field>=<positive-safe-integer>`.
+
+### 3. Contracts
+
+- Resolution order is defaults, global (loosen/tighten), trusted project
+  (tighten only), CLI (explicit loosen/tighten). Unknown/invalid settings add
+  diagnostics; unknown/invalid/conflicting CLI values fail startup.
+- `artifacts.enabled` defaults true. Global may choose either value; project
+  may only set false. The resolved values and provenance appear in settings.
+- `GatewayEnv` and `BootstrapResult` carry one resolved budget. Fresh, resume,
+  print/JSON, Gateway, `/new`, and `/reload` pass it to the same assembly path;
+  reload re-resolves with the original CLI overrides.
+- `ToolExecutionRuntime` owns the per-session semaphore, hard timeout, final
+  bounding, details bounding, artifact store, and stable runtime error prefix.
+- Streaming tools emit true text deltas with monotonically increasing
+  `details.sequence`; each delta is at most `partialBytes`, pending delta memory
+  is bounded, and delivery is at most `partialUpdatesPerSecond`.
+- Governed results set `details.resourceGoverned: true` and
+  `details.resource` with total/output bytes and lines, truncation reasons,
+  partial counts, dropped backpressure bytes, and optional artifact path/size.
+  Complete stdout/stderr/content must not be duplicated in details or errors.
+- Overflow persistence is incremental under
+  `~/.novi/artifacts/<session>/<call>/{output.log,metadata.json}`. Directories
+  are `0700`; files are `0600`. Active temp files are never cleanup candidates.
+  Age/session/global quotas include concurrent active writers; oldest completed
+  artifacts are removed first. Permission denials occur before `execute` and
+  therefore never enter the artifact pipeline.
+- `bash` uses direct child-process pipes because `ExecutionEnv.exec` retains
+  complete stdout/stderr internally. It intentionally remains an unsandboxed
+  shell with normal OS filesystem reach. Its input timeout may only tighten the
+  resolved timeout.
+- `read_file`, `glob`, and `grep` stream through captures. Traversal skips
+  symlinks and heavy directories, reads root `.gitignore`, sorts entries, checks
+  AbortSignal between operations, and reports file/depth/result termination.
+  Grep prefers direct-argv Ripgrep batches over the already bounded file set;
+  when `rg` is unavailable it uses the same streaming Node scanner and limits.
+- Web TTL controls freshness; retention independently limits cache bytes/age.
+  Cleanup is opportunistic single-flight and never follows symlinks.
+
+### 4. Validation & Error Matrix
+
+| Condition                                                    | Behavior / code                                                     |
+| ------------------------------------------------------------ | ------------------------------------------------------------------- |
+| unknown/malformed/conflicting CLI budget                     | fatal CLI argument error                                            |
+| invalid global/project budget                                | ignore value + startup diagnostic                                   |
+| project raises a ceiling or enables artifacts                | ignore + diagnostic                                                 |
+| model byte/line, traversal, result, delta backpressure limit | successful bounded result + structured truncation                   |
+| tool exceeds `timeoutMs` (including concurrency wait)        | `NOVI_ERROR:TOOL_TIMEOUT`                                           |
+| caller abort                                                 | `NOVI_ERROR:TOOL_ABORTED`                                           |
+| edit input/result exceeds hard memory ceiling                | `NOVI_ERROR:TOOL_MEMORY_LIMIT`                                      |
+| enabled overflow cannot fit artifact quotas                  | `NOVI_ERROR:ARTIFACT_QUOTA_EXCEEDED`                                |
+| enabled overflow cannot be written/finalized                 | `NOVI_ERROR:ARTIFACT_WRITE_FAILED`                                  |
+| Bash non-zero exit                                           | `NOVI_ERROR:TOOL_EXIT_NONZERO` with bounded tail only               |
+| other thrown tool failure                                    | `NOVI_ERROR:TOOL_EXECUTION_FAILED` with bounded single-line message |
+| artifacts explicitly disabled                                | successful truncation without artifact path                         |
+
+### 5. Good / Base / Bad Cases
+
+- Good: a 2 MiB Bash result keeps only bounded capture/delta state, streams a
+  private exact artifact, and returns metrics plus a <= model-budget preview.
+- Base: a small read/search returns normal text with `truncated: false` and no
+  artifact file.
+- Bad: a tool sends cumulative stdout on every update, includes full output in
+  `details`, recursively collects an entire tree, or lets a project raise a
+  global/default ceiling.
+
+### 6. Tests Required
+
+- Resolver: every precedence layer, project tightening, artifact enable policy,
+  invalid settings diagnostics, strict repeatable CLI parsing, provenance.
+- Runtime: UTF-8 byte/line bounds, timeout, concurrency semaphore, oversized
+  details, ordered/rate-limited/delta-sized updates, final flush.
+- Bash/read: multi-megabyte output, exact artifact, non-zero bounded error,
+  hard timeout, no stdout/stderr details, streamed large file.
+- Artifact: file modes, disabled mode, session/global quota, oldest eviction,
+  concurrent active reservations, age cleanup, write/quota codes.
+- Traversal: deterministic file/depth/result stop, default and `.gitignore`,
+  symlink non-following, abort, bounded structured matches.
+- Cache: TTL, age and size retention, corrupt files, concurrent cleanup,
+  active read safety, symlink non-following, no credential persistence.
+- Cross-mode: fresh/resume/rebuild/Gateway receive the same resolved values.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```ts
+stdout += chunk;
+onUpdate({ content: [{ type: "text", text: stdout }], details: { stdout } });
+const files = await recursiveCollectEverything(root);
+```
+
+#### Correct
+
+```ts
+await capture.append(chunk); // bounded tail + incremental artifact
+deltas.push(chunk, "stdout"); // bounded true delta + sequence
+await visitFiles(env, root, budget, onFile, signal); // deterministic early stop
+```

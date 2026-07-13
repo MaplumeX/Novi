@@ -4,7 +4,13 @@ import * as Type from "typebox";
 import type { AgentTool, ExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import { getNoviDir } from "../config.js";
 import { textResult } from "./shared.js";
-import { makeCacheKey, readCache, writeCache, writeDocument } from "./web/cache.js";
+import {
+  configureWebCacheRetention,
+  makeCacheKey,
+  readCache,
+  writeCache,
+  writeDocument,
+} from "./web/cache.js";
 import { mapConcurrent } from "./web/concurrency.js";
 import { WebToolError, toWebItemError } from "./web/errors.js";
 import { extractHtml } from "./web/extractors/html.js";
@@ -49,6 +55,7 @@ export function createFetchContentTool(
 ): AgentTool<typeof Parameters> {
   const env = options.env ?? process.env;
   const cacheRoot = options.cacheRoot ?? path.join(getNoviDir(), "cache", "web");
+  if (options.cacheRetention) configureWebCacheRetention(cacheRoot, options.cacheRetention);
   const ttlMs = clamp(options.fetchContent?.cacheTtlMinutes, 1, 24 * 60, 15) * 60_000;
   const timeoutMs = clamp(options.fetchContent?.timeoutSeconds, 1, 120, 20) * 1000;
   const concurrency = clamp(options.fetchContent?.concurrency, 1, 8, 4);

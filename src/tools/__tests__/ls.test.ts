@@ -55,9 +55,9 @@ describe("ls tool", () => {
       expect(text).toContain("[Output truncated:");
       const outputLines = text.split("\n");
       expect(outputLines.length).toBeLessThanOrEqual(2001);
-      const truncation = (res.details as { truncation: { truncated: boolean; truncatedBy: string } }).truncation;
-      expect(truncation.truncated).toBe(true);
-      expect(truncation.truncatedBy).toBe("lines");
+      const resource = (res.details as { resource: { truncated: boolean; truncationReasons: string[] } }).resource;
+      expect(resource.truncated).toBe(true);
+      expect(resource.truncationReasons).toContain("lines");
     } finally {
       await cleanup();
     }

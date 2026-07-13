@@ -221,6 +221,25 @@ import { theme } from "../theme.js";
 
 - The default transcript protects the user/answer reading path. Thinking is a
   compact `Thought` row and tools are one or two semantic lines.
+- The assistant marker (`icons.assistant`) identifies the first visible answer
+  line, not the start of the assistant message container. Render thinking,
+  tools, and text blocks through the same fixed-width marker gutter; show the
+  marker only for the first non-whitespace text block. A thinking/tool-only
+  message leaves the gutter empty, and persisted and streaming paths must use
+  the same rule.
+
+  ```tsx
+  // Wrong: the marker aligns with whichever block happens to be first.
+  <AssistantSurface showMarker>{thinking}{answer}</AssistantSurface>
+
+  // Correct: each block owns a gutter row; only the first answer is marked.
+  <AssistantSurface>{thinking}</AssistantSurface>
+  <AssistantSurface showMarker>{answer}</AssistantSurface>
+  ```
+
+  Visual tests must assert that the marker and first answer share a line, that
+  thought/tool-only output contains no marker, and that mixed content renders
+  no more than one marker.
 - `App` owns one `detailMode` boolean toggled by `Ctrl-O`. It controls complete
   thinking and tool arguments/output/diffs together; do not add independent
   global expansion state for each content type.

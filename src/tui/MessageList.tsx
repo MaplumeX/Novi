@@ -63,10 +63,20 @@ export function unmatchedLiveToolCalls(
   return liveCalls.filter((call) => !persistedIds.has(call.id));
 }
 
-function AssistantSurface({ children }: { children: React.ReactNode }): React.ReactElement {
+interface AssistantSurfaceProps {
+  children: React.ReactNode;
+  showMarker?: boolean;
+}
+
+function AssistantSurface({
+  children,
+  showMarker = false,
+}: AssistantSurfaceProps): React.ReactElement {
   return (
     <Box flexDirection="row">
-      <Text color={theme.role.assistant}>{icons.assistant} </Text>
+      <Box width={2} flexShrink={0}>
+        {showMarker ? <Text color={theme.role.assistant}>{icons.assistant} </Text> : null}
+      </Box>
       <Box flexDirection="column" flexGrow={1}>
         {children}
       </Box>
@@ -84,10 +94,17 @@ function renderAssistantMessage(
 ): React.ReactElement {
   const parts: React.ReactElement[] = [];
   let textBuffer = "";
+  let answerMarked = false;
 
   const flushText = (key: string): void => {
     if (!textBuffer) return;
-    parts.push(<Markdown key={key} text={textBuffer} />);
+    const showMarker = !answerMarked && textBuffer.trim().length > 0;
+    parts.push(
+      <AssistantSurface key={key} showMarker={showMarker}>
+        <Markdown text={textBuffer} />
+      </AssistantSurface>,
+    );
+    answerMarked ||= showMarker;
     textBuffer = "";
   };
 
@@ -100,12 +117,9 @@ function renderAssistantMessage(
         flushText(`text-${partIndex}`);
         if (part.thinking) {
           parts.push(
-            <ThinkingBlock
-              key={`thinking-${partIndex}`}
-              text={part.thinking}
-              running={false}
-              detailed={detailed}
-            />,
+            <AssistantSurface key={`thinking-${partIndex}`}>
+              <ThinkingBlock text={part.thinking} running={false} detailed={detailed} />
+            </AssistantSurface>,
           );
         }
         break;
@@ -115,7 +129,11 @@ function renderAssistantMessage(
           const result = findToolResult(messages, part.id);
           const persisted = persistedToolCallView(part, result, toolCatalog);
           const view = result ? persisted : (liveById.get(part.id) ?? persisted);
-          parts.push(<ToolCallBlock key={part.id} view={view} detailed={detailed} />);
+          parts.push(
+            <AssistantSurface key={part.id}>
+              <ToolCallBlock view={view} detailed={detailed} />
+            </AssistantSurface>,
+          );
         }
         break;
     }
@@ -124,7 +142,7 @@ function renderAssistantMessage(
 
   return (
     <Box key={index} flexDirection="column" marginTop={1}>
-      <AssistantSurface>{parts}</AssistantSurface>
+      {parts}
     </Box>
   );
 }
@@ -202,16 +220,20 @@ export function MessageList({
       ) : null}
       {streamingThinkingActive || streamingThinking || streamingText ? (
         <Box flexDirection="column" marginTop={1}>
-          <AssistantSurface>
-            {streamingThinkingActive || streamingThinking ? (
+          {streamingThinkingActive || streamingThinking ? (
+            <AssistantSurface>
               <ThinkingBlock
                 text={streamingThinking}
                 running={streamingThinkingActive}
                 detailed={detailed}
               />
-            ) : null}
-            {streamingText ? <Markdown text={streamingText} /> : null}
-          </AssistantSurface>
+            </AssistantSurface>
+          ) : null}
+          {streamingText ? (
+            <AssistantSurface showMarker={streamingText.trim().length > 0}>
+              <Markdown text={streamingText} />
+            </AssistantSurface>
+          ) : null}
         </Box>
       ) : null}
       {waiting ? (

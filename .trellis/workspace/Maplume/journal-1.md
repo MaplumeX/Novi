@@ -1459,3 +1459,37 @@ Analyzed the full tool stack (descriptor/registry/assembly/runtime/permission/ev
 ### Next Steps
 
 - None - task complete
+
+
+## Session 44: Refine TUI thinking and answer markers
+
+**Date**: 2026-07-13
+**Task**: Refine TUI thinking and answer markers
+**Branch**: `main`
+
+### Summary
+
+Switched thinking indicators to Braille at 100ms, aligned the assistant marker with the first visible answer, added visual regressions, and documented the TUI marker contract.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ef67cb7` | (see git log) |
+| `2dcccdb` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

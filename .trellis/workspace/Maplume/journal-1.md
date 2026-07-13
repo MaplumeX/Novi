@@ -1251,3 +1251,38 @@ Replaced Novi web_search and fetch_content with batch-only normalized contracts,
 ### Next Steps
 
 - None - task complete
+
+
+## Session 38: Harden Novi P0/P1 tool system
+
+**Date**: 2026-07-13
+**Task**: Harden Novi P0/P1 tool system
+**Branch**: `main`
+
+### Summary
+
+Completed descriptor-based tool registration and scoped permissions, unified execution budgets/artifacts/traversal governance, and introduced one JSON-safe sequenced tool event envelope shared by Headless, TUI, Gateway, and persisted replay. Full validation passed: 63 test files / 635 tests, typecheck, lint, and build.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `290001e` | (see git log) |
+| `6c36f3a` | (see git log) |
+| `f78ffcb` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

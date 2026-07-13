@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 37
+- **Total Sessions**: 38
 - **Last Active**: 2026-07-13
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1253 | Active |
+| `journal-1.md` | ~1288 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 38 | 2026-07-13 | Harden Novi P0/P1 tool system | `290001e`, `6c36f3a`, `f78ffcb` | `main` |
 | 37 | 2026-07-13 | 统一重构 TUI 信息层级 | `23f48344283822072115364d20be76835ef13ae1` | `main` |
 | 36 | 2026-07-13 | Rewrite web search and content fetch tools | `53c2384` | `main` |
 | 35 | 2026-07-12 | 修复 fetch_content 截断存储测试 | `ddb67a8` | `main` |

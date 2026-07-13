@@ -1218,3 +1218,36 @@ Replaced Novi web_search and fetch_content with batch-only normalized contracts,
 ### Next Steps
 
 - None - task complete
+
+
+## Session 37: 统一重构 TUI 信息层级
+
+**Date**: 2026-07-13
+**Task**: 统一重构 TUI 信息层级
+**Branch**: `main`
+
+### Summary
+
+统一对话、Thinking、工具调用、输入与临时面板；增加稳定实时状态投影和视觉回归测试。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `23f48344283822072115364d20be76835ef13ae1` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

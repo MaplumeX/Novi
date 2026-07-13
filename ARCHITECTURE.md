@@ -16,7 +16,7 @@
 | Markdown | `marked` + 自渲染 token (`tui/markdown/render-token.tsx`) |
 | Schema | `typebox`（工具参数定义） |
 | 路径匹配 | `minimatch`（scoped-models glob 匹配 `provider/id`） |
-| 正文提取 | `@mozilla/readability` + `linkedom`（`fetch_content` 工具提取网页正文） |
+| Web 工具 | `undici` + Readability/LinkeDOM/Turndown + PDF.js（受控网络、网页/文本/JSON/PDF 提取） |
 | 其他依赖 | `ignore`、`yaml` |
 | 自定义 providers | `~/.novi/models.json` + `<cwd>/.novi/models.json` → pi-ai `createProvider` / `envApiKeyAuth` |
 | 生命周期钩子 | `~/.novi/hooks/hooks.json` + `<cwd>/.novi/hooks/hooks.json` → 子进程 IPC，经 `AgentHarness.on()` 注册 |
@@ -215,7 +215,7 @@ git root 用 env IO 探测 `.git`（file 或 dir），无 child_process。`findG
 compaction settings 消费 `settings.json` 的 `compaction.{enabled, reserveTokens, keepRecentTokens}` 字段，而非硬编码 `DEFAULT_COMPACTION_SETTINGS`。`resolveCompactionSettings(resolved: NoviSettings)` 以 `DEFAULT_COMPACTION_SETTINGS` 为底，逐字段用 `resolved.compaction?.*` 覆盖（部分配置不丢默认）。`AutoCompactor` 构造接受 `initialSettings`，持有可变 settings 并通过 `setSettings()` 更新；`maybeCompact` 内 `enabled === false` → 直接 return false（不 compact），`reserveTokens`/`keepRecentTokens` 阈值字段经 `shouldCompact` 生效。`useHarnessState` 经 `useMemo(() => resolveCompactionSettings(settings), [settings])` 计算后作为第三参数传入，effect 依赖数组含 `compactionSettings`，effect 内 `compactor.setSettings(...)` 同步更新 —— `/reload` 后 settings state 变化 → compactionSettings 重算 → effect 重跑 → compactor 更新。
 
 ### 4.11 tools/
-10 个内置工具，每个文件一个 `createXxxTool(env: ExecutionEnv): AgentTool`，全部经由 `tools/index.ts` 的 `createBuiltinTools(env, sessionId)` 聚合（`sessionId` 透传给 `todo` 工具），在 bootstrap 中以全 name 注册。
+10 个内置工具，每个文件一个 `createXxxTool(env: ExecutionEnv): AgentTool`，全部经由 `tools/index.ts` 的 `createBuiltinTools(env, sessionId, webToolOptions)` 聚合（`sessionId` 透传给 `todo`，解析后的 web 设置透传给两个 Web 工具），在 bootstrap、gateway session、TUI rebuild 中以同一设置注册。
 
 | tool | 说明 |
 | --- | --- |
@@ -223,10 +223,10 @@ compaction settings 消费 `settings.json` 的 `compaction.{enabled, reserveToke
 | `bash` | shell 执行 |
 | `ls` / `glob` / `grep` | 文件列举与检索 |
 | `todo` | 按 sessionId 分桶的 TODO 存储（`~/.novi/todos/<sessionId>.json` 磁盘持久化 + 内存 write-through 缓存），`/new`/`/resume` 切换 session 后 todo 隔离；`/resume` 后从磁盘恢复 |
-| `web_search` | 网页搜索（`web-search.ts`）。Provider 抽象在 `web-search/` 子目录下：`provider.ts`（`SearchProvider` 接口 + `resolveProvider()`）、`duckduckgo.ts`（零配置 provider）、`ssrf.ts`（私有 IP 检查）。DuckDuckGo 默认开箱即用，未来 key-gated provider 只需新增一个文件 + 注册到 `PROVIDERS` 数组 |
-| `fetch_content` | 抓取 URL 正文并转 markdown/text（`fetch-content.ts`）。用 `@mozilla/readability` + `linkedom` 提取，base64 图片替换为 `[IMAGE: alt]`，超长内容截断+全量存到 `~/.novi/cache/web/` + footer 指向 `read_file` 翻页。SSRF 防护拒绝私有/内网 URL |
+| `web_search` | 仅接受 `queries` 批量契约（1..5），按输入顺序返回独立结果。`tools/web/search-provider.ts` 统一 DuckDuckGo、Brave、Tavily；未配置时固定 DuckDuckGo，API key 不触发自动切换。Provider 能力在请求前严格校验 |
+| `fetch_content` | 仅接受 `urls` 批量契约（1..10），本地优先提取 HTML、文本、JSON、文本层 PDF；可显式启用 Tavily Extract fallback。长文完整保存并返回 `read_file` 续读路径，不调用 LLM |
 
-工具依赖仅 `ExecutionEnv` 能力 + node stdlib（`web_search`/`fetch_content` 额外依赖 `@mozilla/readability` + `linkedom`），绝不触及 TUI / harness 内部。`web-search/` 子目录只依赖 ExecutionEnv + node stdlib + readability/linkedom。
+`tools/web/` 提供统一错误模型、有序并发、版本化 TTL cache、URL/IP 策略、Undici 受控网络层、Provider 和媒体提取器。公网抓取会校验全部 DNS 回答并把已验证地址固定给连接，逐跳重新校验 redirect；拒绝内网、metadata、保留/测试地址、URL credentials，并限制超时、跳转与响应字节。缓存只保存公开结果和规范化正文，不保存凭证或请求授权头。
 
 ### 4.12 images/
 TUI 多模态图片附件的编码与剪贴板适配（不依赖 sharp/jimp）：

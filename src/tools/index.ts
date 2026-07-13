@@ -11,6 +11,7 @@ import { BuiltinToolRegistry } from "./registry.js";
 import { createTodoTool } from "./todo.js";
 import { createWebSearchTool } from "./web-search.js";
 import { createWriteFileTool } from "./write-file.js";
+import type { WebToolOptions } from "./web/types.js";
 
 /** Module-level registry declaring every built-in tool in one place. */
 const registry = new BuiltinToolRegistry()
@@ -22,14 +23,18 @@ const registry = new BuiltinToolRegistry()
   .add("glob", (env) => createGlobTool(env))
   .add("grep", (env) => createGrepTool(env))
   .add("todo", (_env, sessionId) => createTodoTool(sessionId))
-  .add("web_search", (env) => createWebSearchTool(env))
-  .add("fetch_content", (env) => createFetchContentTool(env));
+  .add("web_search", (env, _sessionId, options) => createWebSearchTool(env, options))
+  .add("fetch_content", (env, _sessionId, options) => createFetchContentTool(env, options));
 
 /**
  * Build the full set of built-in tools, each closing over the shared
  * {@link ExecutionEnv} and the active session id. Register via
- * `harness.setTools(createBuiltinTools(env, sessionId))`.
+ * `harness.setTools(createBuiltinTools(env, sessionId, options))`.
  */
-export function createBuiltinTools(env: ExecutionEnv, sessionId: string): AgentTool[] {
-  return registry.buildAll(env, sessionId);
+export function createBuiltinTools(
+  env: ExecutionEnv,
+  sessionId: string,
+  options: WebToolOptions = {},
+): AgentTool[] {
+  return registry.buildAll(env, sessionId, options);
 }

@@ -5,8 +5,13 @@ import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import { createBuiltinTools } from "../index.js";
 import type { AgentTool } from "@earendil-works/pi-agent-core/node";
 import { __resetTodoStoreForTests } from "../todo.js";
+import type { WebToolOptions } from "../web/types.js";
 
-export async function setupEnv(): Promise<{ env: NodeExecutionEnv; cwd: string; cleanup: () => Promise<void> }> {
+export async function setupEnv(): Promise<{
+  env: NodeExecutionEnv;
+  cwd: string;
+  cleanup: () => Promise<void>;
+}> {
   const cwd = await mkdtemp(path.join(tmpdir(), "novi-tools-"));
   const env = new NodeExecutionEnv({ cwd, shellEnv: process.env });
   return {
@@ -19,8 +24,13 @@ export async function setupEnv(): Promise<{ env: NodeExecutionEnv; cwd: string; 
 }
 
 /** Look up a tool by name from the full built-in set. */
-export function getTool(env: NodeExecutionEnv, name: string, sessionId = "test-session"): AgentTool {
-  const tool = createBuiltinTools(env, sessionId).find((t) => t.name === name);
+export function getTool(
+  env: NodeExecutionEnv,
+  name: string,
+  sessionId = "test-session",
+  options: WebToolOptions = {},
+): AgentTool {
+  const tool = createBuiltinTools(env, sessionId, options).find((t) => t.name === name);
   if (!tool) throw new Error(`tool "${name}" not found in createBuiltinTools`);
   return tool;
 }

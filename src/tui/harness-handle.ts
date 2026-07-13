@@ -90,6 +90,8 @@ export interface CreateHarnessHandleDeps {
   permissionGate: PermissionGate;
   /** Initial settings layers for permission re-resolve. */
   settingsLayers: SettingsLayers;
+  /** Initial resolved settings retained across /new and /resume rebuilds. */
+  resolvedSettings?: ResolvedSettings;
 }
 
 /**
@@ -123,6 +125,7 @@ export async function replayHarnessState(
     reloadResources?: boolean;
     trusted?: boolean;
     resolvedSettings?: ResolvedSettings;
+    toolSettings?: ResolvedSettings;
     settingsLayers?: SettingsLayers;
     yes?: boolean;
     permissionGate?: PermissionGate;
@@ -133,7 +136,10 @@ export async function replayHarnessState(
   const diagnostics: string[] = [];
 
   // Tools: re-create the built-in set and restore the active-tool selection.
-  const tools = createBuiltinTools(env, sessionId);
+  const tools = createBuiltinTools(env, sessionId, {
+    webSearch: (opts.toolSettings ?? opts.resolvedSettings)?.webSearch,
+    fetchContent: (opts.toolSettings ?? opts.resolvedSettings)?.fetchContent,
+  });
   const activeToolNames = oldHarness.getActiveTools().map((t) => t.name);
   await newHarness.setTools(tools, activeToolNames);
 
@@ -265,6 +271,7 @@ export function createHarnessHandle(
   const { env, models, cwd, systemPrompt, setHandle, yes, approver } = deps;
   // settingsLayers can update on /reload via replace opts; keep latest in a ref-like box.
   let settingsLayers = deps.settingsLayers;
+  let resolvedSettings = deps.resolvedSettings;
 
   // `makeReplace` returns a `replace` closure bound to a specific (old) handle.
   function makeReplace(old: HarnessHandle): HarnessHandle["replace"] {
@@ -279,6 +286,9 @@ export function createHarnessHandle(
       const sessionMeta = await session.getMetadata();
       if (next.settingsLayers) {
         settingsLayers = next.settingsLayers;
+      }
+      if (next.resolvedSettings) {
+        resolvedSettings = next.resolvedSettings;
       }
       // 4. Build the new harness, reusing the old model.
       const newHarness = new AgentHarness({
@@ -298,6 +308,7 @@ export function createHarnessHandle(
           reloadResources: next.reloadResources,
           trusted: old.trusted,
           resolvedSettings: next.resolvedSettings,
+          toolSettings: resolvedSettings,
           settingsLayers,
           yes,
           permissionGate: old.permissionGate,

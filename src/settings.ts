@@ -40,10 +40,21 @@ export interface NoviSettings {
   followUpMode?: "one-at-a-time" | "all";
   /** Glob patterns for scoped model cycling (Ctrl+P). Format: `provider/id`. */
   scopedModels?: string[];
-  /** Web search configuration. Absent means auto-detect (DuckDuckGo by default). */
+  /** Web search configuration. Absent always selects DuckDuckGo. */
   webSearch?: {
-    /** Explicit provider id; must match a registered SearchProvider name. */
-    provider?: string;
+    provider?: "duckduckgo" | "brave" | "tavily";
+    cacheTtlMinutes?: number;
+    timeoutSeconds?: number;
+    concurrency?: number;
+  };
+  /** Local-first public-content retrieval configuration. */
+  fetchContent?: {
+    fallbackProvider?: "tavily";
+    cacheTtlMinutes?: number;
+    timeoutSeconds?: number;
+    concurrency?: number;
+    maxResponseBytes?: number;
+    maxRedirects?: number;
   };
   /**
    * Tool permission policy. Unlisted tools default to `allow`.
@@ -341,6 +352,36 @@ export function resolveSettings(
       _sources[fullKey] = projectVal !== undefined ? "project" : globalVal !== undefined ? "global" : "default";
     } else {
       _sources[fullKey] = "default";
+    }
+  }
+
+  for (const [section, leaves] of [
+    ["webSearch", ["provider", "cacheTtlMinutes", "timeoutSeconds", "concurrency"]],
+    [
+      "fetchContent",
+      [
+        "fallbackProvider",
+        "cacheTtlMinutes",
+        "timeoutSeconds",
+        "concurrency",
+        "maxResponseBytes",
+        "maxRedirects",
+      ],
+    ],
+  ] as const) {
+    for (const leaf of leaves) {
+      const fullKey = `${section}.${leaf}`;
+      const mergedVal = (merged?.[section] as Record<string, unknown> | undefined)?.[leaf];
+      const projectVal = (layers.project?.[section] as Record<string, unknown> | undefined)?.[leaf];
+      const globalVal = (layers.global?.[section] as Record<string, unknown> | undefined)?.[leaf];
+      _sources[fullKey] =
+        mergedVal === undefined
+          ? "default"
+          : projectVal !== undefined
+            ? "project"
+            : globalVal !== undefined
+              ? "global"
+              : "default";
     }
   }
 

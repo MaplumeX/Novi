@@ -99,6 +99,7 @@ function App({
         permissionStore: initialHandle.permissionStore,
         permissionGate: initialHandle.permissionGate,
         settingsLayers,
+        resolvedSettings,
       },
     ),
   );
@@ -568,6 +569,7 @@ export function renderApp(
       permissionStore: bootstrapResult.permissionStore,
       permissionGate: bootstrapResult.permissionGate,
       settingsLayers: bootstrapResult.settingsLayers,
+      resolvedSettings,
     },
   );
 

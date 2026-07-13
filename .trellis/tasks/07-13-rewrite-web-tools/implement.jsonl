@@ -1,0 +1,9 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend package entry point and pre-development checklist."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Tool module organization, factory wiring, and test layout conventions."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Tool boundary errors and user/model-visible failure semantics."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "TypeScript, Typebox, dependency, testing, and validation requirements."}
+{"file": ".trellis/spec/backend/pi-agent-core-api.md", "reason": "Verified AgentTool and ExecutionEnv integration contracts."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Settings/bootstrap/tool integration across runtime surfaces."}
+{"file": ".trellis/tasks/07-13-rewrite-web-tools/research/openclaw-hermes-web-tools.md", "reason": "Competitor architecture findings that shaped local-first and provider decisions."}
+{"file": ".trellis/tasks/07-13-rewrite-web-tools/research/provider-and-runtime-notes.md", "reason": "Primary API and runtime research for Brave, Tavily, PDF.js, and Undici."}

@@ -1,346 +1,424 @@
-import * as Type from "typebox";
-import { createHash } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { Readability } from "@mozilla/readability";
-import { parseHTML } from "linkedom";
-import type { AgentTool } from "@earendil-works/pi-agent-core/node";
-import type { ExecutionEnv } from "@earendil-works/pi-agent-core/node";
+import { access } from "node:fs/promises";
+import * as Type from "typebox";
+import type { AgentTool, ExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import { getNoviDir } from "../config.js";
-import { isPrivateUrl } from "./web-search/ssrf.js";
 import { textResult } from "./shared.js";
+import { makeCacheKey, readCache, writeCache, writeDocument } from "./web/cache.js";
+import { mapConcurrent } from "./web/concurrency.js";
+import { WebToolError, toWebItemError } from "./web/errors.js";
+import { extractHtml } from "./web/extractors/html.js";
+import { extractJson } from "./web/extractors/json.js";
+import { charsetFromContentType, classifyMedia, type MediaType } from "./web/extractors/media.js";
+import { extractPdf } from "./web/extractors/pdf.js";
+import { decodeText, normalizeText } from "./web/extractors/text.js";
+import { guardedRequest, providerJsonRequest } from "./web/network.js";
+import type { ContentFormat, FetchOutcome, FetchSuccess, WebToolOptions } from "./web/types.js";
+import { canonicalUrl, parsePublicUrl } from "./web/urls.js";
 
-const Parameters = Type.Object({
-  url: Type.String(),
-  format: Type.Optional(Type.Union([Type.Literal("markdown"), Type.Literal("text")])),
-  char_limit: Type.Optional(Type.Number()),
-});
+const Parameters = Type.Object(
+  {
+    urls: Type.Array(Type.String({ minLength: 1 }), { minItems: 1, maxItems: 10 }),
+    format: Type.Optional(Type.Union([Type.Literal("markdown"), Type.Literal("text")])),
+    max_chars_per_item: Type.Optional(Type.Integer({ minimum: 2000, maximum: 50000 })),
+    force_refresh: Type.Optional(Type.Boolean()),
+  },
+  { additionalProperties: false },
+);
 
-const USER_AGENT = "Novi/0.0.0";
-const DEFAULT_CHAR_LIMIT = 15000;
-const MIN_CHAR_LIMIT = 2000;
-const MAX_CACHE_BYTES = 2 * 1024 * 1024; // 2 MB
+interface CachedContent {
+  requestedUrl: string;
+  finalUrl: string;
+  title: string | null;
+  mediaType: MediaType;
+  extractor: "local" | "tavily";
+  content: string;
+  bytesDownloaded: number | null;
+  redirectCount: number;
+  documentPath: string;
+}
 
-/**
- * `fetch_content`: fetch a URL and return its main content as markdown (or
- * plain text). Uses Readability + linkedom to extract the article body from
- * HTML. Long content is head/tail truncated and the full text is saved to
- * `~/.novi/cache/web/` with a footer pointing to `read_file` for pagination.
- *
- * SSRF guard rejects private/internal network addresses. Throws on HTTP
- * errors, SSRF, and non-http(s) schemes.
- */
-export function createFetchContentTool(env: ExecutionEnv): AgentTool<typeof Parameters> {
-  void env;
+interface LocalResult {
+  outcome: FetchOutcome;
+  fallbackEligible: boolean;
+}
+
+export function createFetchContentTool(
+  _env: ExecutionEnv,
+  options: WebToolOptions = {},
+): AgentTool<typeof Parameters> {
+  const env = options.env ?? process.env;
+  const cacheRoot = options.cacheRoot ?? path.join(getNoviDir(), "cache", "web");
+  const ttlMs = clamp(options.fetchContent?.cacheTtlMinutes, 1, 24 * 60, 15) * 60_000;
+  const timeoutMs = clamp(options.fetchContent?.timeoutSeconds, 1, 120, 20) * 1000;
+  const concurrency = clamp(options.fetchContent?.concurrency, 1, 8, 4);
+  const maxBytes = clamp(
+    options.fetchContent?.maxResponseBytes,
+    1024,
+    25 * 1024 * 1024,
+    25 * 1024 * 1024,
+  );
+  const maxRedirects = clamp(options.fetchContent?.maxRedirects, 0, 10, 3);
+  if (options.fetchContent?.fallbackProvider === "tavily" && !env.TAVILY_API_KEY) {
+    throw new Error("fetch_content: Tavily fallback requires TAVILY_API_KEY");
+  }
   return {
     name: "fetch_content",
     label: "Fetch Content",
     description:
-      'Fetch a URL and return its content as markdown or text. Rejects private/internal network addresses (SSRF guard). Long content is truncated with a footer pointing to read_file for the rest.',
+      "Fetch up to ten public HTML, text, JSON, or text-layer PDF URLs with ordered per-URL outcomes and deterministic continuation paths.",
     parameters: Parameters,
-    execute: async (_toolCallId, params, signal) => {
-      const url = params.url;
+    execute: async (_id, params, signal) => {
+      if (!Array.isArray(params.urls) || params.urls.length < 1 || params.urls.length > 10)
+        throw new Error("fetch_content: urls must contain 1 to 10 items");
       const format = params.format ?? "markdown";
-      const charLimit = clampCharLimit(params.char_limit);
-
-      // 1. Validate scheme
-      if (!url.startsWith("http://") && !url.startsWith("https://")) {
-        throw new Error(`fetch_content: URL must use http or https, got "${url}"`);
-      }
-
-      // 2. SSRF guard
-      if (isPrivateUrl(url)) {
-        throw new Error(`fetch_content: blocked — URL targets a private/internal network address: ${url}`);
-      }
-
-      // 3. Fetch
-      const response = await fetch(url, {
+      const maxChars = params.max_chars_per_item ?? 20_000;
+      if (!Number.isInteger(maxChars) || maxChars < 2000 || maxChars > 50_000)
+        throw new Error("fetch_content: max_chars_per_item must be an integer from 2000 to 50000");
+      const local = await mapConcurrent(
+        params.urls,
+        concurrency,
+        (url) =>
+          fetchOne(url, format, maxChars, Boolean(params.force_refresh), {
+            cacheRoot,
+            ttlMs,
+            timeoutMs,
+            maxBytes,
+            maxRedirects,
+            fallbackProvider: options.fetchContent?.fallbackProvider,
+            signal,
+          }),
         signal,
-        headers: { "User-Agent": USER_AGENT },
-        redirect: "follow",
-      });
-
-      // 4. HTTP error
-      if (!response.ok) {
-        throw new Error(`fetch_content: HTTP ${response.status} ${response.statusText}: ${url}`);
-      }
-
-      const contentType = response.headers.get("content-type") ?? "";
-
-      // 5. Non-HTML: return raw text (truncated)
-      if (!isHtmlContentType(contentType)) {
-        const raw = await response.text();
-        const truncated = raw.length > charLimit;
-        const text = truncated ? raw.slice(0, charLimit) : raw;
-        const body = truncated
-          ? text + `\n\n[Content truncated at ${charLimit} characters; original length: ${raw.length}]`
-          : text;
-        return textResult(body, {
-          url,
+      );
+      if (options.fetchContent?.fallbackProvider === "tavily") {
+        await applyTavilyFallback(
+          local,
           format,
-          truncated,
-          originalLength: raw.length,
-          contentType,
-        });
+          maxChars,
+          cacheRoot,
+          options.fetchContent?.fallbackProvider,
+          env.TAVILY_API_KEY ?? "",
+          timeoutMs,
+          signal,
+        );
       }
-
-      // 6. HTML → Readability extraction
-      const html = await response.text();
-      const extracted = extractContent(html, format);
-      let content = extracted;
-
-      // 9. Replace base64 images
-      content = replaceBase64Images(content);
-
-      // 10. Truncate + store + footer
-      const { text, truncated, storedPath } = await truncateWithFooter(content, url, charLimit);
-
-      // 11. Return
-      return textResult(text, {
-        url,
-        format,
-        truncated,
-        storedPath: storedPath ?? null,
-        originalLength: content.length,
-      });
+      const outcomes = local.map((entry) => entry.outcome);
+      return textResult(render(outcomes), { format, outcomes });
     },
   };
 }
 
-function clampCharLimit(limit: number | undefined): number {
-  if (limit === undefined || Number.isNaN(limit)) return DEFAULT_CHAR_LIMIT;
-  return Math.max(MIN_CHAR_LIMIT, Math.floor(limit));
-}
-
-function isHtmlContentType(contentType: string): boolean {
-  return contentType.includes("text/html") || contentType.includes("application/xhtml");
-}
-
-/**
- * Extract the main content from an HTML string using Readability + linkedom.
- * Returns markdown (from Readability's cleaned HTML) or plain text.
- */
-function extractContent(html: string, format: "markdown" | "text"): string {
-  const { document } = parseHTML(html);
-  const article = new Readability(document as unknown as Document).parse();
-
-  if (format === "text") {
-    return article?.textContent?.trim() ?? document.body?.textContent?.trim() ?? "";
-  }
-
-  // markdown: convert Readability's cleaned HTML
-  const contentHtml = article?.content;
-  if (!contentHtml) {
-    return document.body?.textContent?.trim() ?? "";
-  }
-  return convertHtmlToMarkdown(contentHtml).trim();
-}
-
-/**
- * Convert Readability's cleaned HTML to a simple markdown representation.
- *
- * Readability output is already quite clean (script/style stripped, main
- * article wrapped in a `<div>`). We handle headings, links, images, lists,
- * code blocks, and paragraphs. Anything else is reduced to its text content.
- */
-function convertHtmlToMarkdown(html: string): string {
-  let out = html;
-
-  // Remove any residual script/style
-  out = out.replace(/<script[\s\S]*?<\/script>/gi, "");
-  out = out.replace(/<style[\s\S]*?<\/style>/gi, "");
-
-  // Headings
-  out = out.replace(/<h([1-6])[^>]*>([\s\S]*?)<\/h\1>/gi, (_m, level: string, inner: string) => {
-    return `\n${"#".repeat(Number(level))} ${stripTags(inner).trim()}\n`;
-  });
-
-  // Code blocks
-  out = out.replace(/<pre[^>]*>([\s\S]*?)<\/pre>/gi, (_m, inner: string) => {
-    const code = stripTags(inner).replace(/\n/g, "\n");
-    return `\n\`\`\`\n${code}\n\`\`\`\n`;
-  });
-  out = out.replace(/<code[^>]*>([\s\S]*?)<\/code>/gi, (_m, inner: string) => {
-    const text = stripTags(inner);
-    // Inline code if no newlines, otherwise leave as-is
-    if (text.includes("\n")) return text;
-    return `\`${text}\``;
-  });
-
-  // Links: [text](href)
-  out = out.replace(/<a[^>]+href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi, (_m, href: string, inner: string) => {
-    const text = stripTags(inner).trim();
-    if (!text) return "";
-    return `[${text}](${href})`;
-  });
-
-  // Images: ![alt](src)
-  out = out.replace(/<img[^>]+src="([^"]*)"[^>]*alt="([^"]*)"[^>]*\/?>/gi, (_m, src: string, alt: string) => {
-    return `![${alt}](${src})`;
-  });
-  out = out.replace(/<img[^>]+src="([^"]*)"[^>]*\/?>/gi, (_m, src: string) => {
-    return `![](${src})`;
-  });
-
-  // Lists
-  out = out.replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, (_m, inner: string) => {
-    return `- ${stripTags(inner).trim()}\n`;
-  });
-  out = out.replace(/<\/?(ul|ol)[^>]*>/gi, "\n");
-
-  // Blockquotes
-  out = out.replace(/<blockquote[^>]*>([\s\S]*?)<\/blockquote>/gi, (_m, inner: string) => {
-    return stripTags(inner)
-      .split("\n")
-      .map((l) => `> ${l}`)
-      .join("\n") + "\n";
-  });
-
-  // Paragraphs and divs: add newlines
-  out = out.replace(/<p[^>]*>([\s\S]*?)<\/p>/gi, (_m, inner: string) => `\n${inner.trim()}\n`);
-  out = out.replace(/<\/?(div|article|section|main|figure|figcaption)[^>]*>/gi, "\n");
-  out = out.replace(/<br\s*\/?>/gi, "\n");
-  out = out.replace(/<hr\s*\/?>/gi, "\n---\n");
-
-  // Strip remaining tags
-  out = stripTags(out);
-
-  // Clean up whitespace
-  out = decodeEntities(out);
-  out = out.replace(/\n{3,}/g, "\n\n");
-  return out.trim();
-}
-
-function stripTags(html: string): string {
-  return html.replace(/<[^>]+>/g, "");
-}
-
-function decodeEntities(text: string): string {
-  return text
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&nbsp;/g, " ");
-}
-
-/**
- * Replace base64-encoded inline images with `[IMAGE: alt]` placeholders.
- *
- * Handles both raw HTML `<img>` tags (pre-conversion) and markdown
- * `![alt](data:...)` image syntax (post-conversion). Discards the blob to
- * prevent token explosion while preserving alt text.
- */
-function replaceBase64Images(text: string): string {
-  // Step 1: HTML img with alt before data URI
-  let out = text.replace(
-    /<img[^>]+src="data:image\/[^"]*"[^>]*alt="([^"]*)"[^>]*\/?>/gi,
-    (_m, alt: string) => `[IMAGE: ${alt}]`,
-  );
-  // Step 2: HTML img with alt after data URI
-  out = out.replace(
-    /<img[^>]+alt="([^"]*)"[^>]*src="data:image\/[^"]*"[^>]*\/?>/gi,
-    (_m, alt: string) => `[IMAGE: ${alt}]`,
-  );
-  // Step 3: HTML img without alt
-  out = out.replace(
-    /<img[^>]+src="data:image\/[^"]*"[^>]*\/?>/gi,
-    "[IMAGE]",
-  );
-  // Step 4: Markdown image ![alt](data:...)
-  out = out.replace(
-    /!\[([^\]]*)\]\(data:image\/[^)]*\)/gi,
-    (_m, alt: string) => `[IMAGE: ${alt}]`,
-  );
-  return out;
-}
-
-interface TruncateResult {
-  text: string;
-  truncated: boolean;
-  storedPath?: string;
-}
-
-/**
- * If content fits within `charLimit`, return as-is. Otherwise take head 75%
- * + tail 25% (aligned to line boundaries), store the full text to
- * `~/.novi/cache/web/<host>-<sha256(url)[:10]>.md` (2 MB cap), and append a
- * footer pointing to `read_file` for the omitted middle.
- */
-async function truncateWithFooter(content: string, url: string, charLimit: number): Promise<TruncateResult> {
-  if (content.length <= charLimit) {
-    return { text: content, truncated: false };
-  }
-
-  const headSize = Math.floor(charLimit * 0.75);
-  const tailSize = charLimit - headSize;
-
-  // Align head to the last newline within the head window
-  const headCut = content.lastIndexOf("\n", headSize);
-  const headEnd = headCut > 0 ? headCut : headSize;
-  const head = content.slice(0, headEnd);
-
-  // Align tail to the first newline within the tail window
-  const tailStartRaw = content.length - tailSize;
-  const tailCut = content.indexOf("\n", tailStartRaw);
-  const tailStart = tailCut > 0 ? tailCut + 1 : tailStartRaw;
-  const tail = content.slice(tailStart);
-
-  const headLines = head.split("\n").length;
-
-  // Store full text (best-effort)
-  const storedPath = await storeFullText(url, content);
-
-  const footerLines: string[] = ["", "---", `[Content truncated: showing ${head.length + tail.length} of ${content.length} characters]`];
-  if (storedPath) {
-    footerLines.push(`Full text saved to: ${storedPath}`);
-    footerLines.push(
-      `To read omitted middle: read_file path="${storedPath}" offset=${headLines + 2} limit=200`,
+async function fetchOne(
+  input: string,
+  format: ContentFormat,
+  maxChars: number,
+  forceRefresh: boolean,
+  runtime: {
+    cacheRoot: string;
+    ttlMs: number;
+    timeoutMs: number;
+    maxBytes: number;
+    maxRedirects: number;
+    fallbackProvider?: "tavily";
+    signal?: AbortSignal;
+  },
+): Promise<LocalResult> {
+  const started = Date.now();
+  const cacheState = forceRefresh ? ("bypass" as const) : ("miss" as const);
+  try {
+    const requestedUrl = canonicalUrl(input);
+    const key = makeCacheKey("content", {
+      url: requestedUrl,
+      format,
+      extractor: "local-first-v1",
+      fallbackProvider: runtime.fallbackProvider ?? null,
+    });
+    if (!forceRefresh) {
+      const cached = await readCache<CachedContent>(
+        runtime.cacheRoot,
+        "content",
+        key,
+        runtime.ttlMs,
+      );
+      if (isCachedContent(cached) && (await documentExists(cached.documentPath)))
+        return {
+          outcome: bound(cached, maxChars, "hit", Date.now() - started),
+          fallbackEligible: false,
+        };
+    }
+    const response = await guardedRequest(requestedUrl, {
+      signal: runtime.signal,
+      timeoutMs: runtime.timeoutMs,
+      maxRedirects: runtime.maxRedirects,
+      maxBytes: runtime.maxBytes,
+    });
+    if (response.status < 200 || response.status >= 300) {
+      throw new WebToolError(
+        "HTTP_ERROR",
+        `HTTP ${response.status} for ${requestedUrl}`,
+        response.status === 429 || response.status >= 500,
+      );
+    }
+    const contentType = header(response.headers, "content-type");
+    const mediaType = classifyMedia(contentType, response.body);
+    if (
+      mediaType !== "pdf" &&
+      response.body.byteLength > Math.min(runtime.maxBytes, 5 * 1024 * 1024)
+    ) {
+      throw new WebToolError(
+        "RESPONSE_TOO_LARGE",
+        "HTML, text, and JSON responses are limited to 5 MiB",
+      );
+    }
+    const charset = charsetFromContentType(contentType);
+    const extracted = await extract(
+      response.body,
+      mediaType,
+      charset,
+      response.finalUrl,
+      format,
+      runtime.signal,
     );
-  } else {
-    footerLines.push("Full text could not be stored; re-run on a more specific URL.");
+    const documentPath = await writeDocument(runtime.cacheRoot, key, format, extracted.content);
+    const cached: CachedContent = {
+      requestedUrl,
+      finalUrl: response.finalUrl,
+      title: extracted.title,
+      mediaType,
+      extractor: "local",
+      content: extracted.content,
+      bytesDownloaded: response.body.byteLength,
+      redirectCount: response.redirectCount,
+      documentPath,
+    };
+    await writeCache(runtime.cacheRoot, "content", key, cached);
+    return {
+      outcome: bound(cached, maxChars, cacheState, Date.now() - started),
+      fallbackEligible: false,
+    };
+  } catch (error) {
+    if (runtime.signal?.aborted) throw error;
+    const publicError = toWebItemError(error, "EXTRACTION_FAILED");
+    return {
+      outcome: {
+        ok: false,
+        requestedUrl: input,
+        error: publicError,
+        cache: cacheState,
+        durationMs: Date.now() - started,
+      },
+      fallbackEligible:
+        publicError.code === "EXTRACTION_FAILED" ||
+        (publicError.code === "HTTP_ERROR" && /HTTP (401|403|429)/.test(publicError.message)),
+    };
   }
+}
 
-  const footer = "\n" + footerLines.join("\n");
+async function extract(
+  bytes: Uint8Array,
+  mediaType: MediaType,
+  charset: string,
+  finalUrl: string,
+  format: ContentFormat,
+  signal?: AbortSignal,
+): Promise<{ title: string | null; content: string }> {
+  if (mediaType === "html")
+    return extractHtml(decodeText(bytes, charset), finalUrl, format, signal);
+  if (mediaType === "json") return { title: null, content: extractJson(bytes, charset) };
+  if (mediaType === "pdf") return extractPdf(bytes, format, signal);
+  return { title: null, content: normalizeText(decodeText(bytes, charset)) };
+}
 
+function bound(
+  cached: CachedContent,
+  maxChars: number,
+  cache: FetchSuccess["cache"],
+  durationMs: number,
+): FetchSuccess {
+  const truncated = cached.content.length > maxChars;
+  let preview = cached.content;
+  if (truncated) {
+    const cut = cached.content.lastIndexOf("\n", maxChars);
+    preview = cached.content.slice(0, cut > maxChars / 2 ? cut : maxChars);
+    preview += `\n\n[Content truncated: ${cached.content.length} characters total. Full text: ${cached.documentPath}]`;
+  }
   return {
-    text: head + footer + "\n\n" + tail,
-    truncated: true,
-    storedPath: storedPath ?? undefined,
+    ok: true,
+    requestedUrl: cached.requestedUrl,
+    finalUrl: cached.finalUrl,
+    title: cached.title,
+    mediaType: cached.mediaType,
+    extractor: cached.extractor,
+    content: preview,
+    bytesDownloaded: cached.bytesDownloaded,
+    redirectCount: cached.redirectCount,
+    cache,
+    durationMs,
+    originalChars: cached.content.length,
+    originalLines: cached.content.split("\n").length,
+    truncated,
+    cachePath: cached.documentPath,
   };
 }
 
-/**
- * Best-effort storage of full content to `~/.novi/cache/web/`.
- * Returns the path on success, or `undefined` on failure. Content over 2 MB
- * is truncated and annotated.
- */
-async function storeFullText(url: string, content: string): Promise<string | undefined> {
+async function applyTavilyFallback(
+  entries: LocalResult[],
+  format: ContentFormat,
+  maxChars: number,
+  cacheRoot: string,
+  fallbackProvider: "tavily" | undefined,
+  apiKey: string,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  const indexes = entries.flatMap((entry, index) => (entry.fallbackEligible ? [index] : []));
+  if (indexes.length === 0) return;
+  const urls = indexes.map((index) => {
+    const outcome = entries[index].outcome;
+    parsePublicUrl(outcome.requestedUrl);
+    return outcome.requestedUrl;
+  });
+  let response: Awaited<ReturnType<typeof providerJsonRequest>>;
   try {
-    let parsed: URL;
-    try {
-      parsed = new URL(url);
-    } catch {
-      return undefined;
+    response = await providerJsonRequest("https://api.tavily.com/extract", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({ urls, extract_depth: "basic", format }),
+      signal,
+      timeoutMs,
+    });
+    if (response.status === 401 || response.status === 403)
+      throw new WebToolError("PROVIDER_AUTH", "Tavily rejected the API key");
+    if (response.status === 429)
+      throw new WebToolError("PROVIDER_RATE_LIMIT", "Tavily rate limit exceeded", true);
+    if (response.status < 200 || response.status >= 300)
+      throw new WebToolError(
+        "PROVIDER_ERROR",
+        `Tavily returned HTTP ${response.status}`,
+        response.status >= 500,
+      );
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    const publicError = toWebItemError(error, "PROVIDER_ERROR");
+    for (const index of indexes) {
+      entries[index].outcome = {
+        ok: false,
+        requestedUrl: entries[index].outcome.requestedUrl,
+        error: publicError,
+        cache: failureCacheState(entries[index].outcome),
+        durationMs: entries[index].outcome.durationMs,
+      };
     }
-    const host = parsed.hostname.replace(/[^\w.-]/g, "_") || "unknown";
-    const hash = createHash("sha256").update(url).digest("hex").slice(0, 10);
-    const dir = path.join(getNoviDir(), "cache", "web");
-    const filename = `${host}-${hash}.md`;
-    const fullPath = path.join(dir, filename);
-
-    let toWrite = content;
-    const byteLen = Buffer.byteLength(content, "utf8");
-    if (byteLen > MAX_CACHE_BYTES) {
-      const cut = content.slice(0, Math.floor((MAX_CACHE_BYTES / byteLen) * content.length));
-      toWrite = cut + `\n\n[Cache file truncated at ${MAX_CACHE_BYTES} bytes; original: ${byteLen} bytes]`;
-    }
-
-    await mkdir(dir, { recursive: true });
-    await writeFile(fullPath, toWrite, "utf8");
-    return fullPath;
-  } catch {
-    return undefined;
+    return;
   }
+  const payload = response.json as {
+    results?: Array<{ url?: string; raw_content?: string }>;
+    failed_results?: Array<{ url?: string; error?: string }>;
+  };
+  const successes = new Map(
+    (payload.results ?? [])
+      .filter((item) => item.url && typeof item.raw_content === "string")
+      .map((item) => [item.url as string, item.raw_content as string]),
+  );
+  const failures = new Map(
+    (payload.failed_results ?? [])
+      .filter((item) => item.url)
+      .map((item) => [item.url as string, item.error ?? "Tavily extraction failed"]),
+  );
+  for (let offset = 0; offset < indexes.length; offset++) {
+    const index = indexes[offset];
+    const url = urls[offset];
+    const content = successes.get(url);
+    if (content === undefined) {
+      entries[index].outcome = {
+        ok: false,
+        requestedUrl: url,
+        error: {
+          code: "PROVIDER_ERROR",
+          message: failures.get(url) ?? "Tavily returned no result",
+          retryable: true,
+        },
+        cache: failureCacheState(entries[index].outcome),
+        durationMs: entries[index].outcome.durationMs,
+      };
+      continue;
+    }
+    const key = makeCacheKey("content", {
+      url: canonicalUrl(url),
+      format,
+      extractor: "local-first-v1",
+      fallbackProvider: fallbackProvider ?? null,
+    });
+    const normalized = normalizeText(content);
+    const documentPath = await writeDocument(cacheRoot, key, format, normalized);
+    const cached: CachedContent = {
+      requestedUrl: url,
+      finalUrl: url,
+      title: null,
+      mediaType: "html",
+      extractor: "tavily",
+      content: normalized,
+      bytesDownloaded: null,
+      redirectCount: 0,
+      documentPath,
+    };
+    await writeCache(cacheRoot, "content", key, cached);
+    entries[index].outcome = bound(
+      cached,
+      maxChars,
+      failureCacheState(entries[index].outcome),
+      entries[index].outcome.durationMs,
+    );
+  }
+}
+
+function header(headers: Record<string, string | string[]>, name: string): string {
+  const value = headers[name];
+  return Array.isArray(value) ? value.join(", ") : (value ?? "");
+}
+
+function render(outcomes: FetchOutcome[]): string {
+  return outcomes
+    .map((outcome, index) => {
+      const heading = `## ${index + 1}. ${outcome.requestedUrl}`;
+      if (!outcome.ok)
+        return `${heading}\n\nError [${outcome.error.code}]: ${outcome.error.message}`;
+      const metadata = `Final URL: ${outcome.finalUrl}\nExtractor: ${outcome.extractor}\nCache: ${outcome.cache}`;
+      return `${heading}\n\n${metadata}\n\n${outcome.content}`;
+    })
+    .join("\n\n");
+}
+
+function clamp(value: number | undefined, min: number, max: number, fallback: number): number {
+  return value === undefined || !Number.isFinite(value)
+    ? fallback
+    : Math.max(min, Math.min(max, Math.floor(value)));
+}
+
+async function documentExists(filePath: string): Promise<boolean> {
+  try {
+    await access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function failureCacheState(outcome: FetchOutcome): "miss" | "bypass" {
+  return outcome.cache === "bypass" ? "bypass" : "miss";
+}
+
+function isCachedContent(value: unknown): value is CachedContent {
+  if (value === null || typeof value !== "object") return false;
+  const entry = value as Partial<CachedContent>;
+  return (
+    typeof entry.requestedUrl === "string" &&
+    typeof entry.finalUrl === "string" &&
+    (entry.title === null || typeof entry.title === "string") &&
+    ["html", "text", "json", "pdf"].includes(entry.mediaType ?? "") &&
+    (entry.extractor === "local" || entry.extractor === "tavily") &&
+    typeof entry.content === "string" &&
+    typeof entry.redirectCount === "number" &&
+    typeof entry.documentPath === "string"
+  );
 }

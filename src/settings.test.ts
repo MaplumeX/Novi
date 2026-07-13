@@ -32,10 +32,22 @@ describe("mergeSettings", () => {
   });
 
   it("merges webSearch one level deep", () => {
-    const g: NoviSettings = { webSearch: { provider: "duckduckgo" } };
+    const g: NoviSettings = { webSearch: { provider: "duckduckgo", cacheTtlMinutes: 15 } };
     const p: NoviSettings = { webSearch: { provider: "brave" } };
     const out = mergeSettings(g, p);
-    expect(out.webSearch).toEqual({ provider: "brave" });
+    expect(out.webSearch).toEqual({ provider: "brave", cacheTtlMinutes: 15 });
+  });
+
+  it("merges fetchContent one level deep", () => {
+    const out = mergeSettings(
+      { fetchContent: { cacheTtlMinutes: 30, concurrency: 2 } },
+      { fetchContent: { fallbackProvider: "tavily", concurrency: 4 } },
+    );
+    expect(out.fetchContent).toEqual({
+      cacheTtlMinutes: 30,
+      concurrency: 4,
+      fallbackProvider: "tavily",
+    });
   });
 
   it("merges retry one level deep (project.provider replaces global.provider)", () => {
@@ -117,6 +129,22 @@ describe("resolveSettings", () => {
     expect(out._sources["followUpMode"]).toBe("default");
     expect(out._sources["scopedModels"]).toBe("default");
     expect(out._sources["permissions.tools.bash"]).toBe("default");
+    expect(out._sources["webSearch.provider"]).toBe("default");
+    expect(out._sources["fetchContent.fallbackProvider"]).toBe("default");
+  });
+
+  it("tracks web tool setting leaf provenance", () => {
+    const merged: NoviSettings = {
+      webSearch: { provider: "brave", cacheTtlMinutes: 10 },
+      fetchContent: { concurrency: 4 },
+    };
+    const out = resolveSettings(merged, {
+      global: { webSearch: { cacheTtlMinutes: 10 } },
+      project: { webSearch: { provider: "brave" }, fetchContent: { concurrency: 4 } },
+    }, {});
+    expect(out._sources["webSearch.provider"]).toBe("project");
+    expect(out._sources["webSearch.cacheTtlMinutes"]).toBe("global");
+    expect(out._sources["fetchContent.concurrency"]).toBe("project");
   });
 
   it("marks permissions.tools.bash by layer source", () => {

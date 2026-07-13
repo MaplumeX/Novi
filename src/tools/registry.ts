@@ -1,12 +1,17 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core/node";
 import type { ExecutionEnv } from "@earendil-works/pi-agent-core/node";
+import type { WebToolOptions } from "./web/types.js";
 
 /**
  * Factory that builds a single {@link AgentTool} from a shared
  * {@link ExecutionEnv} and the current session id. Tools that don't need the
  * session id (most tools) simply ignore the second parameter.
  */
-export type ToolFactory = (env: ExecutionEnv, sessionId: string) => AgentTool;
+export type ToolFactory = (
+  env: ExecutionEnv,
+  sessionId: string,
+  options: WebToolOptions,
+) => AgentTool;
 
 interface ToolRegistration {
   name: string;
@@ -29,8 +34,8 @@ export class BuiltinToolRegistry {
   }
 
   /** Build every registered tool, closing over `env` and `sessionId`. */
-  buildAll(env: ExecutionEnv, sessionId: string): AgentTool[] {
-    return this.entries.map((entry) => entry.factory(env, sessionId));
+  buildAll(env: ExecutionEnv, sessionId: string, options: WebToolOptions = {}): AgentTool[] {
+    return this.entries.map((entry) => entry.factory(env, sessionId, options));
   }
 
   /** Registered tool names, in insertion order. */

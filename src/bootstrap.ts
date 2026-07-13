@@ -420,7 +420,10 @@ export async function createHarnessForSession(
 
   // Register the built-in tool set. Must pass all tool names explicitly,
   // otherwise `setTools` reuses the (empty) initial `activeToolNames`.
-  const tools: AgentTool[] = createBuiltinTools(env, metadata.id);
+  const tools: AgentTool[] = createBuiltinTools(env, metadata.id, {
+    webSearch: gatewayEnv.resolvedSettings.webSearch,
+    fetchContent: gatewayEnv.resolvedSettings.fetchContent,
+  });
   await harness.setTools(tools, tools.map((t) => t.name));
 
   await harness.setResources({
@@ -508,7 +511,10 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
       thinkingLevel: gatewayEnv.thinkingLevel,
     });
 
-    const tools: AgentTool[] = createBuiltinTools(env, metadata.id);
+    const tools: AgentTool[] = createBuiltinTools(env, metadata.id, {
+      webSearch: gatewayEnv.resolvedSettings.webSearch,
+      fetchContent: gatewayEnv.resolvedSettings.fetchContent,
+    });
     await harness.setTools(tools, tools.map((t) => t.name));
     await harness.setResources({
       skills: gatewayEnv.resources.skills,

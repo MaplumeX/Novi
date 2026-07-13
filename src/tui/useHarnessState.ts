@@ -155,7 +155,7 @@ export interface HarnessState {
   model: Model<Api>;
   /** Requested reasoning level, kept in sync with `thinking_level_update`. */
   thinkingLevel: ThinkingLevel;
-  /** Active tool names, kept in sync with `tools_update`. Empty before child 3. */
+  /** Active tool names from the validated catalog/harness active set. */
   activeToolNames: string[];
   /** Queued steer/followUp/nextTurn messages, projected from `queue_update`. */
   queue: QueueState;
@@ -213,6 +213,15 @@ export function useHarnessState(
     // Sync the compactor's settings whenever this effect re-runs (e.g. after
     // /reload changes the resolved settings and App re-computes them).
     if (compactionSettings) compactor.setSettings(compactionSettings);
+
+    // `setTools` runs before a replacement harness is published to React, so
+    // its tools_update event is not observable by this subscription. Pull the
+    // public getter on every re-subscribe to keep /reload and session switches
+    // aligned with the catalog-computed active set.
+    setState((prev) => ({
+      ...prev,
+      activeToolNames: harness.getActiveTools().map((tool) => tool.name),
+    }));
 
     // Pull MessageEntry → message from a branch and sync both the ref (for
     // synchronous reads) and React state (for rendering).

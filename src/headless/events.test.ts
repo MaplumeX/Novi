@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AgentHarnessEvent } from "@earendil-works/pi-agent-core/node";
-import { projectEvent, extractText } from "./events.js";
+import { projectEvent, extractText, projectToolCatalog } from "./events.js";
 
 /** Assert a value survives `JSON.stringify` (no functions / circular refs). */
 function assertJsonSafe(value: unknown): void {
@@ -49,7 +49,12 @@ describe("projectEvent", () => {
       {
         type: "message_update",
         message: { role: "assistant", content: [] } as never,
-        assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "d", partial: {} as never },
+        assistantMessageEvent: {
+          type: "text_delta",
+          contentIndex: 0,
+          delta: "d",
+          partial: {} as never,
+        },
       },
       {
         type: "message_end",
@@ -203,7 +208,10 @@ describe("projectEvent", () => {
   it("projects context with message count", () => {
     const event = {
       type: "context",
-      messages: [{ role: "user", content: "a" } as never, { role: "assistant", content: "b" } as never],
+      messages: [
+        { role: "user", content: "a" } as never,
+        { role: "assistant", content: "b" } as never,
+      ],
     } as unknown as AgentHarnessEvent;
     expect(projectEvent(event)).toEqual({ type: "context", messageCount: 2 });
   });
@@ -259,7 +267,10 @@ describe("projectEvent", () => {
       toolCallId: "tc1",
       toolName: "bash",
       input: { cmd: "ls" },
-      content: [{ type: "text", text: "a" }, { type: "text", text: "b" }],
+      content: [
+        { type: "text", text: "a" },
+        { type: "text", text: "b" },
+      ],
       details: {},
       isError: false,
     } as unknown as AgentHarnessEvent;
@@ -269,6 +280,27 @@ describe("projectEvent", () => {
       toolName: "bash",
       isError: false,
       contentCount: 2,
+    });
+  });
+
+  it("projects a machine-readable permission denial", () => {
+    const event = {
+      type: "tool_result",
+      toolCallId: "tc2",
+      toolName: "bash",
+      input: { command: "pwd" },
+      content: [
+        {
+          type: "text",
+          text: "NOVI_ERROR:PERMISSION_INTERACTION_REQUIRED:approval required",
+        },
+      ],
+      details: {},
+      isError: true,
+    } as unknown as AgentHarnessEvent;
+    expect(projectEvent(event)).toMatchObject({
+      errorCode: "PERMISSION_INTERACTION_REQUIRED",
+      errorMessage: "approval required",
     });
   });
 
@@ -345,6 +377,69 @@ describe("projectEvent", () => {
       toolNames: ["bash", "read"],
       activeToolNames: ["bash"],
       source: "set",
+    });
+  });
+
+  it("projects descriptor metadata and unavailable reasons", () => {
+    const catalog = {
+      descriptors: [
+        {
+          name: "web_search",
+          label: "Web Search",
+          source: { kind: "builtin" as const, id: "builtin" },
+          capabilities: ["network.search" as const],
+          risk: "network" as const,
+          defaultPermission: "allow" as const,
+          defaultEnabled: true,
+          streaming: "none" as const,
+          modes: ["tui" as const, "print" as const, "json" as const, "gateway" as const],
+          optional: true,
+        },
+      ],
+      activeToolNames: [],
+      availability: [
+        {
+          name: "web_search",
+          source: { kind: "builtin" as const, id: "builtin" },
+          status: "unavailable" as const,
+          reasonCode: "INITIALIZATION_FAILED" as const,
+          reason: "missing BRAVE_API_KEY",
+        },
+      ],
+      diagnostics: ['tool "web_search" unavailable: missing BRAVE_API_KEY'],
+    };
+    expect(projectToolCatalog(catalog, "bootstrap")).toEqual({
+      type: "tools_update",
+      source: "bootstrap",
+      activeToolNames: [],
+      tools: [
+        {
+          name: "web_search",
+          label: "Web Search",
+          source: { kind: "builtin", id: "builtin" },
+          capabilities: ["network.search"],
+          risk: "network",
+          modes: ["tui", "print", "json", "gateway"],
+          status: "unavailable",
+          reasonCode: "INITIALIZATION_FAILED",
+          reason: "missing BRAVE_API_KEY",
+        },
+      ],
+      diagnostics: ['tool "web_search" unavailable: missing BRAVE_API_KEY'],
+    });
+
+    const event = {
+      type: "tools_update",
+      toolNames: [],
+      previousToolNames: [],
+      activeToolNames: [],
+      previousActiveToolNames: [],
+      source: "set",
+    } as unknown as AgentHarnessEvent;
+    expect(projectEvent(event, catalog)).toMatchObject({
+      type: "tools_update",
+      source: "set",
+      tools: [{ name: "web_search", status: "unavailable" }],
     });
   });
 

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getTool, setupEnv } from "./helpers.js";
+import { createBuiltinToolAssembly } from "../index.js";
 import { guardedRequest, providerJsonRequest } from "../web/network.js";
 
 vi.mock("../web/network.js", () => ({ guardedRequest: vi.fn(), providerJsonRequest: vi.fn() }));
@@ -146,12 +147,18 @@ describe("fetch_content batch contract", () => {
       await expect(tool.execute("1", { url: "https://example.com" } as never)).rejects.toThrow(
         /urls/,
       );
-      expect(() =>
-        getTool(env, "fetch_content", "test", {
-          fetchContent: { fallbackProvider: "tavily" },
-          env: {},
-        }),
-      ).toThrow(/TAVILY_API_KEY/);
+      const unavailable = createBuiltinToolAssembly(env, "test", {
+        fetchContent: { fallbackProvider: "tavily" },
+        env: {},
+      });
+      expect(unavailable.activeToolNames).not.toContain("fetch_content");
+      expect(
+        unavailable.availability.find((entry) => entry.name === "fetch_content"),
+      ).toMatchObject({
+        status: "unavailable",
+        reasonCode: "INITIALIZATION_FAILED",
+        reason: expect.stringMatching(/TAVILY_API_KEY/),
+      });
     } finally {
       await cleanup();
     }

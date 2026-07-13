@@ -5,7 +5,12 @@ import type {
   Session,
 } from "@earendil-works/pi-agent-core/node";
 import type { Models } from "@earendil-works/pi-ai";
-import { createBuiltinTools } from "../tools/index.js";
+import { createBuiltinToolAssembly } from "../tools/index.js";
+import {
+  snapshotToolAssembly,
+  type ToolCatalogSnapshot,
+  type ToolRuntimeMode,
+} from "../tools/contracts.js";
 import { loadResources } from "../resources.js";
 import { loadHooks, registerHooks } from "../hooks/index.js";
 import type { ResolvedSettings, SettingsLayers } from "../settings.js";
@@ -40,6 +45,9 @@ export interface HarnessHandle {
   permissionGate: PermissionGate;
   /** Process-lifetime session grants (survives replace). */
   permissionStore: SessionPermissionStore;
+  /** Current validated tool catalog used by /tools and rebuilds. */
+  toolCatalog: ToolCatalogSnapshot;
+  toolMode: ToolRuntimeMode;
   /**
    * Rebuild the harness and update the holder state.
    *
@@ -92,6 +100,8 @@ export interface CreateHarnessHandleDeps {
   settingsLayers: SettingsLayers;
   /** Initial resolved settings retained across /new and /resume rebuilds. */
   resolvedSettings?: ResolvedSettings;
+  /** Runtime surface retained across harness rebuilds. */
+  toolMode: ToolRuntimeMode;
 }
 
 /**
@@ -131,23 +141,65 @@ export async function replayHarnessState(
     permissionGate?: PermissionGate;
     permissionStore?: SessionPermissionStore;
     approver?: Approver;
+    toolMode?: ToolRuntimeMode;
   } = {},
-): Promise<{ diagnostics: string[]; permissionGate: PermissionGate | undefined }> {
+): Promise<{
+  diagnostics: string[];
+  permissionGate: PermissionGate | undefined;
+  toolCatalog: ToolCatalogSnapshot;
+}> {
   const diagnostics: string[] = [];
 
-  // Tools: re-create the built-in set and restore the active-tool selection.
-  const tools = createBuiltinTools(env, sessionId, {
+  // Permissions are resolved before assembly because a whole-tool deny must
+  // remove the descriptor from the model-visible active set on /reload.
+  let permissionGate = opts.permissionGate;
+  if (opts.resolvedSettings && opts.permissionStore) {
+    const nextPerms = resolvePermissionsFromSettings(opts.resolvedSettings, {
+      yes: opts.yes === true,
+      layers: opts.settingsLayers,
+      workspace: cwd,
+    });
+    diagnostics.push(...nextPerms.diagnostics);
+    permissionGate?.setPermissions(nextPerms);
+  }
+
+  const toolSettings = opts.toolSettings ?? opts.resolvedSettings;
+  const permissions =
+    permissionGate?.getPermissions() ??
+    resolvePermissionsFromSettings(toolSettings, {
+      yes: opts.yes === true,
+      layers: opts.settingsLayers,
+      workspace: cwd,
+    });
+  const toolAssembly = createBuiltinToolAssembly(env, sessionId, {
     webSearch: (opts.toolSettings ?? opts.resolvedSettings)?.webSearch,
     fetchContent: (opts.toolSettings ?? opts.resolvedSettings)?.fetchContent,
+    exposure: toolSettings?.tools,
+    permissions,
+    mode: opts.toolMode ?? "tui",
+    workspace: cwd,
   });
-  const activeToolNames = oldHarness.getActiveTools().map((t) => t.name);
-  await newHarness.setTools(tools, activeToolNames);
+  await newHarness.setTools(toolAssembly.tools, toolAssembly.activeToolNames);
+  diagnostics.push(...toolAssembly.diagnostics);
+  if (permissionGate) {
+    permissionGate.setScopeGuard(toolAssembly.scopeGuard);
+  } else if (opts.permissionStore) {
+    permissionGate = buildPermissionGate(
+      {
+        permissions,
+        permissionStore: opts.permissionStore,
+        approver: opts.approver,
+      },
+      toolAssembly.scopeGuard,
+    );
+  }
 
   if (opts.resolvedSettings) {
     // /reload path: re-resolve model/thinking/stream/queue from disk settings.
     const rs = opts.resolvedSettings;
     const provider = rs.defaultProvider ?? DEFAULT_PROVIDER;
-    const modelId = rs.defaultModel ?? (provider === DEFAULT_PROVIDER ? DEFAULT_MODEL_ID : undefined);
+    const modelId =
+      rs.defaultModel ?? (provider === DEFAULT_PROVIDER ? DEFAULT_MODEL_ID : undefined);
     const model = modelId ? models.getModel(provider, modelId) : undefined;
     if (model) {
       await newHarness.setModel(model);
@@ -158,9 +210,7 @@ export async function replayHarnessState(
         `model "${modelId ?? ""}" not found for provider "${provider}"; keeping current model`,
       );
     }
-    await newHarness.setThinkingLevel(
-      rs.defaultThinkingLevel ?? DEFAULT_THINKING_LEVEL,
-    );
+    await newHarness.setThinkingLevel(rs.defaultThinkingLevel ?? DEFAULT_THINKING_LEVEL);
 
     // Stream options: rebuild from settings retry/transport (only set fields).
     const retry = rs.retry?.provider;
@@ -177,12 +227,8 @@ export async function replayHarnessState(
     }
 
     // Queue delivery modes from settings (fall back to old harness if unset).
-    await newHarness.setSteeringMode(
-      rs.steeringMode ?? oldHarness.getSteeringMode(),
-    );
-    await newHarness.setFollowUpMode(
-      rs.followUpMode ?? oldHarness.getFollowUpMode(),
-    );
+    await newHarness.setSteeringMode(rs.steeringMode ?? oldHarness.getSteeringMode());
+    await newHarness.setFollowUpMode(rs.followUpMode ?? oldHarness.getFollowUpMode());
   } else {
     // /new /resume path: replay from old harness (preserve runtime config).
     await newHarness.setModel(oldHarness.getModel());
@@ -207,24 +253,6 @@ export async function replayHarnessState(
     await newHarness.setResources(oldHarness.getResources());
   }
 
-  // Permissions: re-resolve on /reload; keep the same store (session grants).
-  let permissionGate = opts.permissionGate;
-  if (opts.resolvedSettings && opts.permissionStore) {
-    const nextPerms = resolvePermissionsFromSettings(opts.resolvedSettings, {
-      yes: opts.yes === true,
-      layers: opts.settingsLayers,
-    });
-    if (permissionGate) {
-      permissionGate.setPermissions(nextPerms);
-    } else {
-      permissionGate = buildPermissionGate({
-        permissions: nextPerms,
-        permissionStore: opts.permissionStore,
-        approver: opts.approver,
-      });
-    }
-  }
-
   // Hooks: re-load manifests and re-register dispatchers. Handler closures
   // bind to a specific harness instance, so they must be re-created on every
   // rebuild. Trust gate is reused from the old handle (cwd-scoped).
@@ -232,21 +260,18 @@ export async function replayHarnessState(
     const hookConfig = await loadHooks(env, cwd, {
       includeProject: opts.trusted !== false,
     });
-    registerHooks(
-      newHarness,
-      hookConfig,
-      { env, cwd, sessionId },
-      { permissionGate },
-    );
+    registerHooks(newHarness, hookConfig, { env, cwd, sessionId }, { permissionGate });
     diagnostics.push(...hookConfig.diagnostics);
   } catch (e) {
     // Hook registration must never block harness rebuild.
-    diagnostics.push(
-      `hooks: failed to reload: ${e instanceof Error ? e.message : String(e)}`,
-    );
+    diagnostics.push(`hooks: failed to reload: ${e instanceof Error ? e.message : String(e)}`);
   }
 
-  return { diagnostics, permissionGate };
+  return {
+    diagnostics,
+    permissionGate,
+    toolCatalog: snapshotToolAssembly(toolAssembly),
+  };
 }
 
 /**
@@ -265,10 +290,12 @@ export function createHarnessHandle(
     trusted: boolean;
     permissionGate: PermissionGate;
     permissionStore: SessionPermissionStore;
+    toolCatalog: ToolCatalogSnapshot;
+    toolMode: ToolRuntimeMode;
   },
   deps: CreateHarnessHandleDeps,
 ): HarnessHandle {
-  const { env, models, cwd, systemPrompt, setHandle, yes, approver } = deps;
+  const { env, models, cwd, systemPrompt, setHandle, yes, approver, toolMode } = deps;
   // settingsLayers can update on /reload via replace opts; keep latest in a ref-like box.
   let settingsLayers = deps.settingsLayers;
   let resolvedSettings = deps.resolvedSettings;
@@ -302,8 +329,13 @@ export function createHarnessHandle(
       //    handle (trust is cwd-scoped, not session-scoped; re-resolving would
       //    require a fresh trust prompt mid-session, which we don't support).
       //    Session permission store is the same instance (AC13).
-      const { diagnostics, permissionGate } = await replayHarnessState(
-        newHarness, old.harness, env, cwd, sessionMeta.id, models,
+      const { diagnostics, permissionGate, toolCatalog } = await replayHarnessState(
+        newHarness,
+        old.harness,
+        env,
+        cwd,
+        sessionMeta.id,
+        models,
         {
           reloadResources: next.reloadResources,
           trusted: old.trusted,
@@ -314,6 +346,7 @@ export function createHarnessHandle(
           permissionGate: old.permissionGate,
           permissionStore: old.permissionStore,
           approver,
+          toolMode,
         },
       );
       // 6. Build the new handle with its own replace closure, then publish.
@@ -324,6 +357,8 @@ export function createHarnessHandle(
         trusted: old.trusted,
         permissionGate: permissionGate ?? old.permissionGate,
         permissionStore: old.permissionStore,
+        toolCatalog,
+        toolMode: old.toolMode,
         replace: async () => {
           // Placeholder overwritten immediately below (TDZ-safe fixup).
           return { diagnostics: [] };
@@ -342,6 +377,8 @@ export function createHarnessHandle(
     trusted: initial.trusted,
     permissionGate: initial.permissionGate,
     permissionStore: initial.permissionStore,
+    toolCatalog: initial.toolCatalog,
+    toolMode: initial.toolMode,
     replace: async () => {
       // Placeholder overwritten immediately below.
       return { diagnostics: [] };

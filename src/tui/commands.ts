@@ -17,6 +17,7 @@ import type { HarnessHandle } from "./harness-handle.js";
 import type { ResolvedSettings } from "../settings.js";
 import { loadSettings, resolveSettings, writeSettings } from "../settings.js";
 import type { BootstrapResult } from "../bootstrap.js";
+import type { ToolCatalogSnapshot } from "../tools/contracts.js";
 import type { QueueState } from "./useHarnessState.js";
 import { summarizeUsage, formatTokens, formatCost } from "./usage.js";
 import { loadTrust, resolveProjectTrust, saveTrust, hasGatedResources } from "../trust.js";
@@ -29,10 +30,7 @@ import {
   encodeImageBytes,
   type PendingImage,
 } from "../images/encode.js";
-import {
-  createClipboardImageReader,
-  type ClipboardImageReader,
-} from "../images/clipboard.js";
+import { createClipboardImageReader, type ClipboardImageReader } from "../images/clipboard.js";
 
 export interface ParsedCommand {
   name: string;
@@ -152,6 +150,25 @@ export const THINKING_LEVELS: readonly ThinkingLevel[] = [
   "high",
   "xhigh",
 ];
+
+/** Format the validated catalog for `/tools` without reading raw harness events. */
+export function formatToolCatalog(catalog: ToolCatalogSnapshot): string {
+  const availability = new Map(catalog.availability.map((entry) => [entry.name, entry]));
+  const lines = ["Tools:"];
+  for (const descriptor of catalog.descriptors) {
+    const state = availability.get(descriptor.name);
+    const status = state?.status ?? "unavailable";
+    lines.push(
+      `  ${descriptor.name}  ${status}  [${descriptor.source.kind}:${descriptor.source.id}] ` +
+        descriptor.capabilities.join(","),
+    );
+    if (state?.reason) lines.push(`    ${state.reasonCode ?? "UNAVAILABLE"}: ${state.reason}`);
+  }
+  if (catalog.diagnostics.length > 0) {
+    lines.push("Diagnostics:", ...catalog.diagnostics.map((diagnostic) => `  ${diagnostic}`));
+  }
+  return lines.join("\n");
+}
 
 /**
  * Return the next thinking level in the {@link THINKING_LEVELS} cycle,
@@ -294,7 +311,11 @@ export const COMMANDS: readonly Command[] = [
         const id = uuidv7();
         const session = await repo.create({ cwd: ctx.cwd, id });
         const meta = await session.getMetadata();
-        const { diagnostics } = await ctx.handle.replace({ session, sessionPath: meta.path, reloadResources: true });
+        const { diagnostics } = await ctx.handle.replace({
+          session,
+          sessionPath: meta.path,
+          reloadResources: true,
+        });
         for (const d of diagnostics) ctx.print(`warning: ${d}`);
         ctx.print(`New session: ${meta.path}`);
       } catch (e) {
@@ -338,9 +359,7 @@ export const COMMANDS: readonly Command[] = [
         try {
           const current = await ctx.session.getSessionName();
           ctx.print(
-            current
-              ? `Session name: ${current}`
-              : "Session has no name. Usage: /name <name>",
+            current ? `Session name: ${current}` : "Session has no name. Usage: /name <name>",
           );
         } catch (e) {
           ctx.print(`Failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -368,11 +387,12 @@ export const COMMANDS: readonly Command[] = [
         const model = ctx.harness.getModel();
         const contextWindow = model.contextWindow ?? 0;
         const cumulativeTokens =
-          usage.inputTokens + usage.outputTokens +
-          usage.cacheReadTokens + usage.cacheWriteTokens;
+          usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheWriteTokens;
         const hasUsage =
-          usage.inputTokens !== 0 || usage.outputTokens !== 0 ||
-          usage.cacheReadTokens !== 0 || usage.cacheWriteTokens !== 0 ||
+          usage.inputTokens !== 0 ||
+          usage.outputTokens !== 0 ||
+          usage.cacheReadTokens !== 0 ||
+          usage.cacheWriteTokens !== 0 ||
           usage.cost !== 0;
         const retry = ctx.harness.getStreamOptions();
         const lines = [
@@ -398,6 +418,13 @@ export const COMMANDS: readonly Command[] = [
       } catch (e) {
         ctx.print(`Session info failed: ${e instanceof Error ? e.message : String(e)}`);
       }
+    },
+  },
+  {
+    name: "tools",
+    description: "Show active, disabled, denied, and unavailable tools",
+    run: async (ctx) => {
+      ctx.print(formatToolCatalog(ctx.handle.toolCatalog));
     },
   },
   {
@@ -436,7 +463,11 @@ export const COMMANDS: readonly Command[] = [
           const db = await loadTrust(ctx.env);
           const gated = await hasGatedResources(ctx.env, cwd);
           const settingsLoad = await loadSettings(ctx.env, cwd);
-          const resolved = resolveSettings(settingsLoad.merged, settingsLoad.layers, ctx.cliOverrides);
+          const resolved = resolveSettings(
+            settingsLoad.merged,
+            settingsLoad.layers,
+            ctx.cliOverrides,
+          );
           const decision = resolveProjectTrust(cwd, db, {
             defaultProjectTrust: resolved.defaultProjectTrust,
             isHeadless: false,
@@ -483,7 +514,8 @@ export const COMMANDS: readonly Command[] = [
   },
   {
     name: "scoped-models",
-    description: "Manage scoped models for Ctrl+P cycling (/scoped-models [add|remove|clear] <pattern>)",
+    description:
+      "Manage scoped models for Ctrl+P cycling (/scoped-models [add|remove|clear] <pattern>)",
     run: async (ctx, args) => {
       const trimmed = args.trim();
       const current: string[] = ctx.settings.scopedModels ?? [];
@@ -608,7 +640,7 @@ export const COMMANDS: readonly Command[] = [
 ];
 
 const COMMAND_HINT =
-  "Try /quit /model /session /new /resume /name /compact /settings /trust /scoped-models /reload /image /paste-image /skill:<name>.";
+  "Try /quit /model /tools /session /new /resume /name /compact /settings /trust /scoped-models /reload /image /paste-image /skill:<name>.";
 
 /**
  * Read the system clipboard image and append it to pending.
@@ -651,10 +683,7 @@ export function makeAddPendingImages(
 }
 
 /** Execute a `/name args` input line against the registry. */
-export async function runCommand(
-  line: string,
-  ctx: CommandContext,
-): Promise<void> {
+export async function runCommand(line: string, ctx: CommandContext): Promise<void> {
   const { name, args } = parseCommand(line);
   if (!name) {
     ctx.print(`Empty command. ${COMMAND_HINT}`);

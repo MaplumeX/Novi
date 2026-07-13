@@ -2,25 +2,26 @@ export type {
   ApprovalChoice,
   ApprovalRequest,
   Approver,
+  CanonicalPermissionIntent,
   PermissionDecision,
+  PermissionErrorCode,
+  PermissionGrant,
   PermissionLevel,
+  PermissionRule,
   PermissionSource,
+  ResolvedPermissionRule,
   ResolvedPermissions,
-  ToolPermissionMap,
 } from "./types.js";
 
 export {
-  DEFAULT_TOOL_PERMISSIONS,
-  mergePermissionsTightenOnly,
-  resolvePermissions,
+  DEFAULT_PERMISSION_RULES,
+  resolveIntentPermission,
   resolvePermissionsFromSettings,
-  resolveToolPermission,
-  sanitizeToolPermissions,
+  resolveWholeToolPermission,
 } from "./policy.js";
 
 export {
   NonInteractiveApprover,
-  NonInteractivePermissionGate,
   PermissionGate,
   SessionPermissionStore,
   createNonInteractivePermissionGate,
@@ -28,7 +29,8 @@ export {
 } from "./gate.js";
 export type { PermissionGateOptions, ToolCallEvent, ToolCallGateResult } from "./gate.js";
 
-export { summarizeToolInput } from "./summary.js";
+export { WorkspaceScopeGuard, containsPath, grantKey } from "./scope.js";
+export { decodePermissionError, encodePermissionError, findPermissionError } from "./errors.js";
 
 export { TuiApprover } from "./tui-approver.js";
 export type { PermissionPromptState } from "./tui-approver.js";

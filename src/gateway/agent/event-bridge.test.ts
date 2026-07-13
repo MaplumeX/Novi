@@ -118,6 +118,31 @@ describe("createEventBridge", () => {
     unsub();
   });
 
+  it("decodes structured permission failures for gateway callbacks", () => {
+    const { harness, emit } = makeHarnessMock();
+    const onToolCall = vi.fn();
+    const unsub = createEventBridge(harness as never, { onToolCall });
+    emit({
+      type: "tool_execution_end",
+      toolCallId: "tc2",
+      toolName: "bash",
+      result: {
+        content: [
+          {
+            type: "text",
+            text: "NOVI_ERROR:PERMISSION_INTERACTION_REQUIRED:approval required",
+          },
+        ],
+      },
+      isError: true,
+    } as AgentHarnessEvent);
+    expect(onToolCall).toHaveBeenCalledWith("bash", "error", {
+      code: "PERMISSION_INTERACTION_REQUIRED",
+      message: "approval required",
+    });
+    unsub();
+  });
+
   it("buffers message_end (assistant) text and flushes on agent_end", () => {
     const { harness, emit } = makeHarnessMock();
     const onTurnEnd = vi.fn();

@@ -2,10 +2,10 @@ import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
-import { createBuiltinTools } from "../index.js";
+import { createBuiltinToolAssembly } from "../index.js";
 import type { AgentTool } from "@earendil-works/pi-agent-core/node";
 import { __resetTodoStoreForTests } from "../todo.js";
-import type { WebToolOptions } from "../web/types.js";
+import type { CreateBuiltinToolAssemblyOptions } from "../index.js";
 
 export async function setupEnv(): Promise<{
   env: NodeExecutionEnv;
@@ -28,10 +28,12 @@ export function getTool(
   env: NodeExecutionEnv,
   name: string,
   sessionId = "test-session",
-  options: WebToolOptions = {},
+  options: CreateBuiltinToolAssemblyOptions = {},
 ): AgentTool {
-  const tool = createBuiltinTools(env, sessionId, options).find((t) => t.name === name);
-  if (!tool) throw new Error(`tool "${name}" not found in createBuiltinTools`);
+  const tool = createBuiltinToolAssembly(env, sessionId, options).tools.find(
+    (candidate) => candidate.name === name,
+  );
+  if (!tool) throw new Error(`tool "${name}" not found in createBuiltinToolAssembly`);
   return tool;
 }
 

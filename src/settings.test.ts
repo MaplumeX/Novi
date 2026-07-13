@@ -50,6 +50,32 @@ describe("mergeSettings", () => {
     });
   });
 
+  it("merges tool exposure with project tighten-only semantics", () => {
+    const global: NoviSettings = {
+      tools: {
+        enabled: { bash: true, grep: false },
+        sources: { builtin: true, "mcp-example": true },
+      },
+    };
+    const project: NoviSettings = {
+      tools: {
+        enabled: { bash: false, grep: true },
+        sources: { builtin: true, "mcp-example": false },
+      },
+    };
+    expect(mergeSettings(global, project).tools).toEqual({
+      enabled: { bash: false, grep: false },
+      sources: { builtin: true, "mcp-example": false },
+    });
+  });
+
+  it("does not let a project enable a default-off external source", () => {
+    expect(mergeSettings({}, { tools: { sources: { "mcp-example": true } } }).tools).toEqual({
+      enabled: {},
+      sources: {},
+    });
+  });
+
   it("merges retry one level deep (project.provider replaces global.provider)", () => {
     // mergeSettings is one level deep: `retry` is merged, but `provider` (a
     // nested object beyond one level) is replaced wholesale by project.
@@ -73,30 +99,46 @@ describe("mergeSettings", () => {
     expect(out.defaultProvider).toBe("anthropic");
   });
 
-  it("merges permissions.tools map one extra level deep", () => {
-    const g: NoviSettings = { permissions: { tools: { bash: "ask", read_file: "allow" } } };
-    const p: NoviSettings = { permissions: { tools: { bash: "deny" } } };
+  it("concatenates global rules with project tightening rules", () => {
+    const g: NoviSettings = {
+      permissions: { rules: [{ tool: "bash", effect: "ask" }] },
+    };
+    const p: NoviSettings = {
+      permissions: { rules: [{ tool: "read_file", effect: "deny" }] },
+    };
     const out = mergeSettings(g, p);
-    expect(out.permissions?.tools).toEqual({ bash: "deny", read_file: "allow" });
+    expect(out.permissions?.rules).toEqual([
+      { tool: "bash", effect: "ask" },
+      { tool: "read_file", effect: "deny" },
+    ]);
   });
 
-  it("rejects project relaxing permissions.tools (tighten-only, AC9)", () => {
-    const g: NoviSettings = { permissions: { tools: { bash: "ask" } } };
-    const p: NoviSettings = { permissions: { tools: { bash: "allow" } } };
+  it("rejects project allow rules and project external-write allowlist", () => {
+    const g: NoviSettings = {
+      permissions: {
+        rules: [{ tool: "bash", effect: "ask" }],
+        externalWriteAllowlist: ["/global"],
+      },
+    };
+    const p: NoviSettings = {
+      permissions: {
+        rules: [{ tool: "bash", effect: "allow" }],
+        externalWriteAllowlist: ["/project"],
+      },
+    };
     const out = mergeSettings(g, p);
-    expect(out.permissions?.tools?.bash).toBe("ask");
-  });
-
-  it("keeps default bash=ask when project only tries to allow (AC9)", () => {
-    const out = mergeSettings({}, { permissions: { tools: { bash: "allow" } } });
-    expect(out.permissions?.tools?.bash).toBe("ask");
+    expect(out.permissions?.rules).toEqual([{ tool: "bash", effect: "ask" }]);
+    expect(out.permissions?.externalWriteAllowlist).toEqual(["/global"]);
   });
 });
 
 describe("resolveSettings", () => {
   it("marks cli overrides as 'cli'", () => {
     const merged: NoviSettings = { defaultProvider: "anthropic" };
-    const layers = { global: { defaultProvider: "anthropic" } as NoviSettings | null, project: null };
+    const layers = {
+      global: { defaultProvider: "anthropic" } as NoviSettings | null,
+      project: null,
+    };
     const out = resolveSettings(merged, layers, { provider: "openai" });
     expect(out.defaultProvider).toBe("openai");
     expect(out._sources["defaultProvider"]).toBe("cli");
@@ -111,7 +153,10 @@ describe("resolveSettings", () => {
 
   it("marks global-sourced values as 'global'", () => {
     const merged: NoviSettings = { defaultProvider: "anthropic" };
-    const layers = { global: { defaultProvider: "anthropic" } as NoviSettings | null, project: null };
+    const layers = {
+      global: { defaultProvider: "anthropic" } as NoviSettings | null,
+      project: null,
+    };
     const out = resolveSettings(merged, layers, {});
     expect(out._sources["defaultProvider"]).toBe("global");
   });
@@ -128,7 +173,8 @@ describe("resolveSettings", () => {
     expect(out._sources["steeringMode"]).toBe("default");
     expect(out._sources["followUpMode"]).toBe("default");
     expect(out._sources["scopedModels"]).toBe("default");
-    expect(out._sources["permissions.tools.bash"]).toBe("default");
+    expect(out._sources["permissions.rules"]).toBe("default");
+    expect(out._sources["permissions.externalWriteAllowlist"]).toBe("default");
     expect(out._sources["webSearch.provider"]).toBe("default");
     expect(out._sources["fetchContent.fallbackProvider"]).toBe("default");
   });
@@ -138,48 +184,89 @@ describe("resolveSettings", () => {
       webSearch: { provider: "brave", cacheTtlMinutes: 10 },
       fetchContent: { concurrency: 4 },
     };
-    const out = resolveSettings(merged, {
-      global: { webSearch: { cacheTtlMinutes: 10 } },
-      project: { webSearch: { provider: "brave" }, fetchContent: { concurrency: 4 } },
-    }, {});
+    const out = resolveSettings(
+      merged,
+      {
+        global: { webSearch: { cacheTtlMinutes: 10 } },
+        project: { webSearch: { provider: "brave" }, fetchContent: { concurrency: 4 } },
+      },
+      {},
+    );
     expect(out._sources["webSearch.provider"]).toBe("project");
     expect(out._sources["webSearch.cacheTtlMinutes"]).toBe("global");
     expect(out._sources["fetchContent.concurrency"]).toBe("project");
   });
 
-  it("marks permissions.tools.bash by layer source", () => {
+  it("tracks permission rule and global allowlist provenance", () => {
     const g = resolveSettings(
-      { permissions: { tools: { bash: "allow" } } },
-      { global: { permissions: { tools: { bash: "allow" } } }, project: null },
+      {
+        permissions: {
+          rules: [{ tool: "bash", effect: "ask" }],
+          externalWriteAllowlist: ["/shared"],
+        },
+      },
+      {
+        global: {
+          permissions: {
+            rules: [{ tool: "bash", effect: "ask" }],
+            externalWriteAllowlist: ["/shared"],
+          },
+        },
+        project: null,
+      },
       {},
     );
-    expect(g._sources["permissions.tools.bash"]).toBe("global");
-    expect(g.permissions?.tools?.bash).toBe("allow");
+    expect(g._sources["permissions.rules"]).toBe("global");
+    expect(g._sources["permissions.externalWriteAllowlist"]).toBe("global");
 
     const p = resolveSettings(
-      { permissions: { tools: { bash: "deny" } } },
-      {
-        global: { permissions: { tools: { bash: "ask" } } },
-        project: { permissions: { tools: { bash: "deny" } } },
-      },
-      {},
-    );
-    expect(p._sources["permissions.tools.bash"]).toBe("project");
-    expect(p.permissions?.tools?.bash).toBe("deny");
-  });
-
-  it("does not attribute rejected project relax to project source (AC9)", () => {
-    const out = resolveSettings(
-      { permissions: { tools: { bash: "allow" } } }, // naive merge would have allow
+      { permissions: { rules: [{ tool: "bash", effect: "deny" }] } },
       {
         global: null,
-        project: { permissions: { tools: { bash: "allow" } } },
+        project: { permissions: { rules: [{ tool: "bash", effect: "deny" }] } },
       },
       {},
     );
-    // Effective stays default ask; source is default (project value rejected).
-    expect(out.permissions?.tools?.bash).toBe("ask");
-    expect(out._sources["permissions.tools.bash"]).toBe("default");
+    expect(p._sources["permissions.rules"]).toBe("project");
+    expect(p.permissions?.rules).toEqual([{ tool: "bash", effect: "deny" }]);
+  });
+
+  it("tracks accepted tool exposure provenance", () => {
+    const out = resolveSettings(
+      {
+        tools: {
+          enabled: { bash: false, grep: false },
+          sources: { builtin: true },
+        },
+      },
+      {
+        global: {
+          tools: {
+            enabled: { bash: true, grep: false },
+            sources: { builtin: true },
+          },
+        },
+        project: { tools: { enabled: { bash: false, grep: true } } },
+      },
+      {},
+    );
+    expect(out.tools?.enabled).toEqual({ bash: false, grep: false });
+    expect(out._sources["tools.enabled.bash"]).toBe("project");
+    expect(out._sources["tools.enabled.grep"]).toBe("global");
+    expect(out._sources["tools.sources.builtin"]).toBe("global");
+  });
+
+  it("does not retain a rejected project allow rule", () => {
+    const out = resolveSettings(
+      { permissions: { rules: [{ tool: "bash", effect: "allow" }] } },
+      {
+        global: null,
+        project: { permissions: { rules: [{ tool: "bash", effect: "allow" }] } },
+      },
+      {},
+    );
+    expect(out.permissions?.rules).toEqual([]);
+    expect(out._sources["permissions.rules"]).toBe("default");
   });
 
   it("marks nested compaction leaves by their source", () => {
@@ -237,11 +324,15 @@ describe("resolveSettings", () => {
 
   it("marks transport/steeringMode/followUpMode with cli/project/global/default", () => {
     // cli override
-    const c = resolveSettings(null, { global: null, project: null }, {
-      transport: "websocket",
-      steeringMode: "all",
-      followUpMode: "one-at-a-time",
-    });
+    const c = resolveSettings(
+      null,
+      { global: null, project: null },
+      {
+        transport: "websocket",
+        steeringMode: "all",
+        followUpMode: "one-at-a-time",
+      },
+    );
     expect(c._sources.transport).toBe("cli");
     expect(c._sources.steeringMode).toBe("cli");
     expect(c._sources.followUpMode).toBe("cli");

@@ -1,5 +1,5 @@
 import type { BootstrapResult } from "../bootstrap.js";
-import { extractText, projectEvent } from "./events.js";
+import { extractText, projectEvent, projectToolCatalog } from "./events.js";
 import { mergePrompt, readStdinIfPiped } from "./stdin.js";
 
 /** Write to stderr and exit non-zero (mirrors `cli.fail` for headless paths). */
@@ -45,10 +45,7 @@ export async function runPrint(opts: RunOptions): Promise<void> {
 
   let lastAssistantText = "";
   const unsub = harness.subscribe((event) => {
-    if (
-      event.type === "message_end" &&
-      (event.message as { role?: string }).role === "assistant"
-    ) {
+    if (event.type === "message_end" && (event.message as { role?: string }).role === "assistant") {
       lastAssistantText = extractText(
         (event.message as { content?: string | unknown[] }).content ?? "",
       );
@@ -86,8 +83,12 @@ export async function runJson(opts: RunOptions): Promise<void> {
     fail(`No prompt provided (use --mode json "prompt" or pipe stdin)`);
   }
 
+  process.stdout.write(
+    JSON.stringify(projectToolCatalog(opts.result.toolCatalog, "bootstrap")) + "\n",
+  );
+
   const unsub = harness.subscribe((event) => {
-    const projected = projectEvent(event);
+    const projected = projectEvent(event, opts.result.toolCatalog);
     process.stdout.write(JSON.stringify(projected) + "\n");
   });
 

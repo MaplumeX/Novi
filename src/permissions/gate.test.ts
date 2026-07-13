@@ -1,207 +1,296 @@
-import { describe, expect, it, vi } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { getBuiltinToolDescriptor } from "../tools/index.js";
+import { decodePermissionError } from "./errors.js";
 import {
-  NonInteractiveApprover,
   PermissionGate,
   SessionPermissionStore,
   createNonInteractivePermissionGate,
 } from "./gate.js";
-import type { Approver } from "./types.js";
-
-function makeGate(
-  tools: Record<string, "allow" | "ask" | "deny">,
-  approver: Approver,
-  store = new SessionPermissionStore(),
-): PermissionGate {
-  return new PermissionGate({
-    permissions: { tools },
-    approver,
-    store,
-  });
-}
+import { resolvePermissionsFromSettings } from "./policy.js";
+import { WorkspaceScopeGuard } from "./scope.js";
+import type { Approver, ResolvedPermissions } from "./types.js";
 
 describe("SessionPermissionStore", () => {
-  it("tracks grants", () => {
+  it("matches exact file, directory, domain, search, and command grants", () => {
     const store = new SessionPermissionStore();
-    expect(store.has("bash")).toBe(false);
-    store.grant("bash");
-    expect(store.has("bash")).toBe(true);
-    expect(store.list()).toEqual(["bash"]);
-    store.clear();
-    expect(store.has("bash")).toBe(false);
+    const grants = [
+      { capability: "filesystem.read", scope: "file", target: "/work/a" },
+      { capability: "filesystem.read", scope: "directory", target: "/work" },
+      { capability: "network.fetch", scope: "domain", target: "example.com" },
+      { capability: "network.search", scope: "search", target: "public-web-search" },
+      { capability: "shell.execute", scope: "command", target: "git status" },
+    ] as const;
+    for (const grant of grants) store.grant(grant);
+    for (const grant of grants) expect(store.has(grant)).toBe(true);
+    expect(
+      store.has({ capability: "shell.execute", scope: "command", target: "git  status" }),
+    ).toBe(false);
+    expect(
+      store.has({ capability: "network.fetch", scope: "domain", target: "other.example.com" }),
+    ).toBe(false);
+  });
+
+  it("matches descendants of a granted lexical and effective subtree only", () => {
+    const store = new SessionPermissionStore();
+    store.grant({
+      capability: "filesystem.read",
+      scope: "subtree",
+      target: "/real/work",
+      lexicalTarget: "/work",
+      effectiveTarget: "/real/work",
+    });
+    expect(
+      store.has({
+        capability: "filesystem.read",
+        scope: "subtree",
+        target: "/real/work/src",
+        lexicalTarget: "/work/src",
+        effectiveTarget: "/real/work/src",
+      }),
+    ).toBe(true);
+    expect(
+      store.has({
+        capability: "filesystem.read",
+        scope: "subtree",
+        target: "/real/work/src",
+        lexicalTarget: "/alias/src",
+        effectiveTarget: "/real/work/src",
+      }),
+    ).toBe(false);
   });
 });
 
 describe("PermissionGate", () => {
-  it("allows tools with allow level without calling approver", async () => {
-    const request = vi.fn();
-    const gate = makeGate({ read_file: "allow" }, { request });
-    const result = await gate.onToolCall({
-      toolName: "read_file",
-      toolCallId: "1",
-      input: { path: "a.ts" },
-    });
-    expect(result).toBeUndefined();
-    expect(request).not.toHaveBeenCalled();
+  let cwd: string;
+  let env: NodeExecutionEnv;
+
+  beforeEach(async () => {
+    cwd = await mkdtemp(path.join(tmpdir(), "novi-permission-"));
+    env = new NodeExecutionEnv({ cwd, shellEnv: process.env });
   });
 
-  it("denies tools with deny level without calling approver (AC7)", async () => {
-    const request = vi.fn();
-    const gate = makeGate({ bash: "deny" }, { request });
-    const result = await gate.onToolCall({
-      toolName: "bash",
-      toolCallId: "1",
-      input: { command: "ls" },
-    });
-    expect(result).toEqual({
-      block: true,
-      reason: "permission denied: bash (deny)",
-    });
-    expect(request).not.toHaveBeenCalled();
+  afterEach(async () => {
+    await env.cleanup();
+    await rm(cwd, { recursive: true, force: true });
   });
 
-  it("asks and allows once without granting session (AC2)", async () => {
-    const request = vi.fn().mockResolvedValue("once");
+  function permissions(
+    rules: unknown[] = [],
+    externalWriteAllowlist: string[] = [],
+  ): ResolvedPermissions {
+    return resolvePermissionsFromSettings(
+      { permissions: { rules, externalWriteAllowlist } },
+      { workspace: cwd },
+    );
+  }
+
+  function gate(
+    opts: {
+      permissions?: ResolvedPermissions;
+      store?: SessionPermissionStore;
+      choice?: "once" | "session" | "deny";
+    } = {},
+  ): { gate: PermissionGate; request: ReturnType<typeof vi.fn> } {
+    const resolved = opts.permissions ?? permissions();
+    const request = vi.fn(async () => opts.choice ?? "once");
+    const approver: Approver = { request };
+    return {
+      gate: new PermissionGate({
+        permissions: resolved,
+        store: opts.store ?? new SessionPermissionStore(),
+        approver,
+        scopeGuard: new WorkspaceScopeGuard({
+          env,
+          workspace: cwd,
+          externalWriteAllowlist: resolved.externalWriteAllowlist,
+        }),
+        resolveDescriptor: getBuiltinToolDescriptor,
+        interactive: true,
+      }),
+      request,
+    };
+  }
+
+  it("checks a current deny before an existing session grant", async () => {
     const store = new SessionPermissionStore();
-    const gate = makeGate({ bash: "ask" }, { request }, store);
+    const first = gate({ store, choice: "session" });
+    expect(
+      await first.gate.onToolCall({
+        toolName: "bash",
+        toolCallId: "1",
+        input: { command: "git status" },
+      }),
+    ).toBeUndefined();
+    expect(store.list()).toHaveLength(1);
 
-    const r1 = await gate.onToolCall({
-      toolName: "bash",
-      toolCallId: "1",
-      input: { command: "echo 1" },
-    });
-    expect(r1).toBeUndefined();
-    expect(store.has("bash")).toBe(false);
-
-    // Second call asks again.
-    const r2 = await gate.onToolCall({
+    first.gate.setPermissions(permissions([{ tool: "bash", effect: "deny" }]));
+    const denied = await first.gate.onToolCall({
       toolName: "bash",
       toolCallId: "2",
-      input: { command: "echo 2" },
+      input: { command: "git status" },
     });
-    expect(r2).toBeUndefined();
+    expect(decodePermissionError(denied?.reason)?.code).toBe("TOOL_DISABLED");
+  });
+
+  it("session grant only matches the exact normalized command", async () => {
+    const store = new SessionPermissionStore();
+    const { gate: permissionGate, request } = gate({ store, choice: "session" });
+    await permissionGate.onToolCall({
+      toolName: "bash",
+      toolCallId: "1",
+      input: { command: "git status" },
+    });
+    await permissionGate.onToolCall({
+      toolName: "bash",
+      toolCallId: "2",
+      input: { command: "git status" },
+    });
+    await permissionGate.onToolCall({
+      toolName: "bash",
+      toolCallId: "3",
+      input: { command: "git  status" },
+    });
     expect(request).toHaveBeenCalledTimes(2);
   });
 
-  it("asks and grants session so subsequent calls skip ask (AC3)", async () => {
-    const request = vi.fn().mockResolvedValue("session");
+  it("fetch session grants are scoped to the normalized hostname", async () => {
     const store = new SessionPermissionStore();
-    const gate = makeGate({ bash: "ask" }, { request }, store);
-
-    await gate.onToolCall({
-      toolName: "bash",
-      toolCallId: "1",
-      input: { command: "echo 1" },
+    const { gate: permissionGate, request } = gate({
+      permissions: permissions([{ capability: "network.fetch", effect: "ask" }]),
+      store,
+      choice: "session",
     });
-    expect(store.has("bash")).toBe(true);
-
-    const r2 = await gate.onToolCall({
-      toolName: "bash",
+    await permissionGate.onToolCall({
+      toolName: "fetch_content",
+      toolCallId: "1",
+      input: { urls: ["https://EXAMPLE.com/a"] },
+    });
+    await permissionGate.onToolCall({
+      toolName: "fetch_content",
       toolCallId: "2",
-      input: { command: "echo 2" },
+      input: { urls: ["https://example.com/b"] },
     });
-    expect(r2).toBeUndefined();
-    expect(request).toHaveBeenCalledTimes(1);
+    await permissionGate.onToolCall({
+      toolName: "fetch_content",
+      toolCallId: "3",
+      input: { urls: ["https://other.example/b"] },
+    });
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(request.mock.calls[0]![0].target).toBe("example.com");
   });
 
-  it("asks and denies with blocked-by-user reason (AC4)", async () => {
-    const request = vi.fn().mockResolvedValue("deny");
-    const gate = makeGate({ bash: "ask" }, { request });
-    const result = await gate.onToolCall({
-      toolName: "bash",
+  it("external read asks and grants only the canonical file", async () => {
+    const outside = path.join(path.dirname(cwd), "outside.txt");
+    const { gate: permissionGate, request } = gate({ choice: "session" });
+    expect(
+      await permissionGate.onToolCall({
+        toolName: "read_file",
+        toolCallId: "1",
+        input: { path: outside },
+      }),
+    ).toBeUndefined();
+    await permissionGate.onToolCall({
+      toolName: "read_file",
+      toolCallId: "2",
+      input: { path: outside },
+    });
+    await permissionGate.onToolCall({
+      toolName: "read_file",
+      toolCallId: "3",
+      input: { path: `${outside}.other` },
+    });
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(request.mock.calls[0]![0].scope).toBe("file");
+  });
+
+  it("external write is denied unless covered by the global allowlist", async () => {
+    const outsideRoot = path.join(path.dirname(cwd), "allowed-root");
+    const deniedGate = gate().gate;
+    const denied = await deniedGate.onToolCall({
+      toolName: "write_file",
       toolCallId: "1",
-      input: { command: "rm -rf /" },
+      input: { path: path.join(outsideRoot, "a.txt") },
     });
-    expect(result).toEqual({
-      block: true,
-      reason: "permission denied: bash (blocked by user)",
-    });
+    expect(decodePermissionError(denied?.reason)?.code).toBe("WORKSPACE_EXTERNAL_WRITE_DENIED");
+
+    const allowed = gate({ permissions: permissions([], [outsideRoot]) }).gate;
+    expect(
+      await allowed.onToolCall({
+        toolName: "write_file",
+        toolCallId: "2",
+        input: { path: path.join(outsideRoot, "a.txt") },
+      }),
+    ).toBeUndefined();
   });
 
-  it("unlisted tools default to allow", async () => {
-    const request = vi.fn();
-    const gate = makeGate({ bash: "ask" }, { request });
-    const result = await gate.onToolCall({
+  it("does not create session grants for allowlisted external writes", async () => {
+    const outsideRoot = path.join(path.dirname(cwd), "allowed-root");
+    const store = new SessionPermissionStore();
+    const resolved = permissions(
+      [{ capability: "filesystem.write", effect: "ask" }],
+      [outsideRoot],
+    );
+    const { gate: permissionGate, request } = gate({
+      permissions: resolved,
+      store,
+      choice: "session",
+    });
+    expect(
+      await permissionGate.onToolCall({
+        toolName: "write_file",
+        toolCallId: "1",
+        input: { path: path.join(outsideRoot, "a.txt") },
+      }),
+    ).toBeUndefined();
+    expect(request.mock.calls[0]![0].sessionGrantAvailable).toBe(false);
+    expect(store.list()).toEqual([]);
+  });
+
+  it("scoped deny blocks matching calls without denying the whole tool", async () => {
+    const secret = path.join(cwd, "secret.txt");
+    const permissionGate = gate({
+      permissions: permissions([
+        {
+          capability: "filesystem.read",
+          scope: "file",
+          target: secret,
+          effect: "deny",
+        },
+      ]),
+    }).gate;
+    const denied = await permissionGate.onToolCall({
       toolName: "read_file",
       toolCallId: "1",
-      input: {},
+      input: { path: secret },
     });
-    expect(result).toBeUndefined();
-    expect(request).not.toHaveBeenCalled();
-  });
-
-  it("setPermissions updates policy without clearing store", async () => {
-    const request = vi.fn().mockResolvedValue("session");
-    const store = new SessionPermissionStore();
-    const gate = makeGate({ bash: "ask" }, { request }, store);
-    await gate.onToolCall({ toolName: "bash", toolCallId: "1", input: {} });
-    expect(store.has("bash")).toBe(true);
-
-    gate.setPermissions({ tools: { bash: "deny" } });
-    // Session grant still short-circuits even after policy becomes deny —
-    // grants are process-lifetime trust for that tool name (AC13).
-    const result = await gate.onToolCall({
-      toolName: "bash",
-      toolCallId: "2",
-      input: {},
-    });
-    expect(result).toBeUndefined();
-    expect(request).toHaveBeenCalledTimes(1);
-  });
-
-  it("passes summary to approver for bash command", async () => {
-    const request = vi.fn().mockResolvedValue("once");
-    const gate = makeGate({ bash: "ask" }, { request });
-    await gate.onToolCall({
-      toolName: "bash",
-      toolCallId: "tc1",
-      input: { command: "git status" },
-    });
-    expect(request).toHaveBeenCalledWith(
-      expect.objectContaining({
-        toolName: "bash",
-        toolCallId: "tc1",
-        summary: "command: git status",
+    expect(decodePermissionError(denied?.reason)?.code).toBe("PERMISSION_DENIED");
+    expect(
+      await permissionGate.onToolCall({
+        toolName: "read_file",
+        toolCallId: "2",
+        input: { path: path.join(cwd, "public.txt") },
       }),
-    );
-  });
-});
-
-describe("NonInteractiveApprover / createNonInteractivePermissionGate", () => {
-  it("auto-denies ask with non-interactive reason (AC5)", async () => {
-    const store = new SessionPermissionStore();
-    const gate = createNonInteractivePermissionGate({
-      permissions: { tools: { bash: "ask" } },
-      store,
-    });
-    const result = await gate.onToolCall({
-      toolName: "bash",
-      toolCallId: "1",
-      input: { command: "echo hi" },
-    });
-    expect(result).toEqual({
-      block: true,
-      reason:
-        "permission denied: bash (ask, non-interactive; pass --yes to allow)",
-    });
+    ).toBeUndefined();
   });
 
-  it("still allows allow-level tools", async () => {
-    const gate = createNonInteractivePermissionGate({
-      permissions: { tools: { bash: "allow" } },
+  it("unknown tools fail closed", async () => {
+    const denied = await gate().gate.onToolCall({ toolName: "external_unknown", input: {} });
+    expect(decodePermissionError(denied?.reason)?.code).toBe("PERMISSION_INTENT_INVALID");
+  });
+
+  it("non-interactive ask returns a machine-readable code", async () => {
+    const denied = await createNonInteractivePermissionGate({
+      permissions: permissions(),
       store: new SessionPermissionStore(),
+      scopeGuard: new WorkspaceScopeGuard({ env, workspace: cwd }),
+      resolveDescriptor: getBuiltinToolDescriptor,
+    }).onToolCall({ toolName: "bash", input: { command: "pwd" } });
+    expect(decodePermissionError(denied?.reason)).toMatchObject({
+      code: "PERMISSION_INTERACTION_REQUIRED",
     });
-    const result = await gate.onToolCall({
-      toolName: "bash",
-      toolCallId: "1",
-      input: {},
-    });
-    expect(result).toBeUndefined();
-  });
-
-  it("NonInteractiveApprover always returns deny", async () => {
-    const a = new NonInteractiveApprover();
-    await expect(
-      a.request({ toolName: "bash", toolCallId: "1", input: {}, summary: "" }),
-    ).resolves.toBe("deny");
   });
 });

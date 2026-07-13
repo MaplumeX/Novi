@@ -8,28 +8,49 @@ import { builtinModels } from "@earendil-works/pi-ai/providers/all";
 import type { Models } from "@earendil-works/pi-ai";
 import { replayHarnessState } from "./harness-handle.js";
 import type { ResolvedSettings } from "../settings.js";
+import {
+  PermissionGate,
+  SessionPermissionStore,
+  WorkspaceScopeGuard,
+  resolvePermissionsFromSettings,
+} from "../permissions/index.js";
+import { getBuiltinToolDescriptor } from "../tools/index.js";
 
 /** Minimal mock: records setter calls, returns canned getter values. */
-function makeMockHarness(overrides: Partial<{
-  activeTools: Array<{ name: string }>;
-  model: unknown;
-  thinkingLevel: string;
-  streamOptions: unknown;
-  steeringMode: string;
-  followUpMode: string;
-  resources: unknown;
-}> = {}): AgentHarness & { calls: Array<[string, ...unknown[]]> } {
+function makeMockHarness(
+  overrides: Partial<{
+    activeTools: Array<{ name: string }>;
+    model: unknown;
+    thinkingLevel: string;
+    streamOptions: unknown;
+    steeringMode: string;
+    followUpMode: string;
+    resources: unknown;
+  }> = {},
+): AgentHarness & { calls: Array<[string, ...unknown[]]> } {
   const calls: Array<[string, ...unknown[]]> = [];
   const mock = {
     setTools: async (tools: unknown, active?: string[]) => {
       calls.push(["setTools", tools, active]);
     },
-    setModel: async (m: unknown) => { calls.push(["setModel", m]); },
-    setThinkingLevel: async (l: unknown) => { calls.push(["setThinkingLevel", l]); },
-    setStreamOptions: async (o: unknown) => { calls.push(["setStreamOptions", o]); },
-    setSteeringMode: async (m: unknown) => { calls.push(["setSteeringMode", m]); },
-    setFollowUpMode: async (m: unknown) => { calls.push(["setFollowUpMode", m]); },
-    setResources: async (r: unknown) => { calls.push(["setResources", r]); },
+    setModel: async (m: unknown) => {
+      calls.push(["setModel", m]);
+    },
+    setThinkingLevel: async (l: unknown) => {
+      calls.push(["setThinkingLevel", l]);
+    },
+    setStreamOptions: async (o: unknown) => {
+      calls.push(["setStreamOptions", o]);
+    },
+    setSteeringMode: async (m: unknown) => {
+      calls.push(["setSteeringMode", m]);
+    },
+    setFollowUpMode: async (m: unknown) => {
+      calls.push(["setFollowUpMode", m]);
+    },
+    setResources: async (r: unknown) => {
+      calls.push(["setResources", r]);
+    },
     // registerHooks may call on() during replay; record and no-op unsubscribe.
     on: (type: string, handler: unknown) => {
       calls.push(["on", type, handler]);
@@ -77,7 +98,7 @@ describe("replayHarnessState", () => {
     return { env, cwd, models };
   }
 
-  it("replays tools, model, thinking, streamOptions, and resources (no reload, no resolvedSettings)", async () => {
+  it("rebuilds the catalog, then replays model, stream options, and resources", async () => {
     const { env, cwd, models } = await setup();
     const oldHarness = makeMockHarness({
       activeTools: [{ name: "bash" }, { name: "read_file" }],
@@ -88,17 +109,37 @@ describe("replayHarnessState", () => {
     });
     const newHarness = makeMockHarness();
 
-    await replayHarnessState(newHarness, oldHarness, env, cwd, "test-session", models, { reloadResources: false });
+    await replayHarnessState(newHarness, oldHarness, env, cwd, "test-session", models, {
+      reloadResources: false,
+    });
 
-    // setTools called with built-in tools + active names from old.
+    // Active names come from the shared catalog policy, not a stale old-harness
+    // snapshot. All default built-ins remain visible (bash is ask, not deny).
     const setToolsCall = newHarness.calls.find((c) => c[0] === "setTools");
     expect(setToolsCall).toBeDefined();
-    expect(setToolsCall![2]).toEqual(["bash", "read_file"]);
+    expect(setToolsCall![2]).toEqual([
+      "read_file",
+      "write_file",
+      "edit_file",
+      "bash",
+      "ls",
+      "glob",
+      "grep",
+      "todo",
+      "web_search",
+      "fetch_content",
+    ]);
 
     // setModel, setThinkingLevel, setStreamOptions replayed from old.
-    expect(newHarness.calls.find((c) => c[0] === "setModel")?.[1]).toEqual({ id: "claude", provider: "anthropic" });
+    expect(newHarness.calls.find((c) => c[0] === "setModel")?.[1]).toEqual({
+      id: "claude",
+      provider: "anthropic",
+    });
     expect(newHarness.calls.find((c) => c[0] === "setThinkingLevel")?.[1]).toBe("high");
-    expect(newHarness.calls.find((c) => c[0] === "setStreamOptions")?.[1]).toEqual({ maxRetries: 5, timeoutMs: 60000 });
+    expect(newHarness.calls.find((c) => c[0] === "setStreamOptions")?.[1]).toEqual({
+      maxRetries: 5,
+      timeoutMs: 60000,
+    });
 
     // Queue modes replayed from old (defaults: one-at-a-time).
     expect(newHarness.calls.find((c) => c[0] === "setSteeringMode")?.[1]).toBe("one-at-a-time");
@@ -116,7 +157,15 @@ describe("replayHarnessState", () => {
     });
     const newHarness = makeMockHarness();
 
-    const result = await replayHarnessState(newHarness, oldHarness, env, cwd, "test-session", models, { reloadResources: true });
+    const result = await replayHarnessState(
+      newHarness,
+      oldHarness,
+      env,
+      cwd,
+      "test-session",
+      models,
+      { reloadResources: true },
+    );
 
     // setResources with freshly-loaded resources (empty dirs → empty skills).
     const setResCall = newHarness.calls.find((c) => c[0] === "setResources");
@@ -186,9 +235,17 @@ describe("replayHarnessState", () => {
     const oldHarness = makeMockHarness();
     const newHarness = makeMockHarness();
 
-    const result = await replayHarnessState(newHarness, oldHarness, env, cwd, "test-session", models, {
-      reloadResources: true,
-    });
+    const result = await replayHarnessState(
+      newHarness,
+      oldHarness,
+      env,
+      cwd,
+      "test-session",
+      models,
+      {
+        reloadResources: true,
+      },
+    );
 
     // Diagnostics should be non-empty (the broken skill produced a warning).
     expect(result.diagnostics.length).toBeGreaterThan(0);
@@ -244,6 +301,56 @@ describe("replayHarnessState", () => {
     expect(newHarness.calls.find((c) => c[0] === "setFollowUpMode")?.[1]).toBe("all");
   });
 
+  it("recomputes disabled and whole-tool denied availability on reload", async () => {
+    const { env, cwd, models } = await setup();
+    const oldHarness = makeMockHarness();
+    const newHarness = makeMockHarness();
+    const permissionStore = new SessionPermissionStore();
+    const permissionGate = new PermissionGate({
+      permissions: resolvePermissionsFromSettings(undefined, { workspace: cwd }),
+      store: permissionStore,
+      approver: { request: async () => "deny" },
+      scopeGuard: new WorkspaceScopeGuard({ env, workspace: cwd }),
+      resolveDescriptor: getBuiltinToolDescriptor,
+      interactive: true,
+    });
+    const resolvedSettings: ResolvedSettings = {
+      permissions: { rules: [{ tool: "bash", effect: "deny" }] },
+      tools: { enabled: { grep: false } },
+      _sources: {},
+    };
+
+    const result = await replayHarnessState(
+      newHarness,
+      oldHarness,
+      env,
+      cwd,
+      "test-session",
+      models,
+      {
+        resolvedSettings,
+        toolSettings: resolvedSettings,
+        settingsLayers: {
+          global: { permissions: { rules: [{ tool: "bash", effect: "deny" }] } },
+          project: { tools: { enabled: { grep: false } } },
+        },
+        permissionGate,
+        permissionStore,
+      },
+    );
+
+    const activeNames = newHarness.calls.find((call) => call[0] === "setTools")?.[2];
+    expect(activeNames).not.toContain("bash");
+    expect(activeNames).not.toContain("grep");
+    expect(result.toolCatalog.availability.find((entry) => entry.name === "bash")?.status).toBe(
+      "denied",
+    );
+    expect(result.toolCatalog.availability.find((entry) => entry.name === "grep")?.status).toBe(
+      "disabled",
+    );
+    expect(result.permissionGate?.getStore()).toBe(permissionStore);
+  });
+
   it("falls back to old harness model + diagnostic when resolvedSettings model not found (R4 degrade)", async () => {
     const { env, cwd, models } = await setup();
     const oldModel = { id: "old-model", provider: "test" };
@@ -258,10 +365,18 @@ describe("replayHarnessState", () => {
       _sources: {},
     };
 
-    const result = await replayHarnessState(newHarness, oldHarness, env, cwd, "test-session", models, {
-      reloadResources: false,
-      resolvedSettings: rs,
-    });
+    const result = await replayHarnessState(
+      newHarness,
+      oldHarness,
+      env,
+      cwd,
+      "test-session",
+      models,
+      {
+        reloadResources: false,
+        resolvedSettings: rs,
+      },
+    );
 
     // model falls back to old harness model.
     const setModelCall = newHarness.calls.find((c) => c[0] === "setModel");
@@ -290,9 +405,15 @@ describe("replayHarnessState", () => {
     });
 
     // Everything replayed from old harness.
-    expect(newHarness.calls.find((c) => c[0] === "setModel")?.[1]).toEqual({ id: "claude", provider: "anthropic" });
+    expect(newHarness.calls.find((c) => c[0] === "setModel")?.[1]).toEqual({
+      id: "claude",
+      provider: "anthropic",
+    });
     expect(newHarness.calls.find((c) => c[0] === "setThinkingLevel")?.[1]).toBe("high");
-    expect(newHarness.calls.find((c) => c[0] === "setStreamOptions")?.[1]).toEqual({ maxRetries: 5, timeoutMs: 60000 });
+    expect(newHarness.calls.find((c) => c[0] === "setStreamOptions")?.[1]).toEqual({
+      maxRetries: 5,
+      timeoutMs: 60000,
+    });
     expect(newHarness.calls.find((c) => c[0] === "setSteeringMode")?.[1]).toBe("all");
     expect(newHarness.calls.find((c) => c[0] === "setFollowUpMode")?.[1]).toBe("all");
   });

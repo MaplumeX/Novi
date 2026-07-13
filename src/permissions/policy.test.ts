@@ -1,168 +1,105 @@
 import { describe, expect, it } from "vitest";
+import type { ToolDescriptor } from "../tools/contracts.js";
 import {
-  DEFAULT_TOOL_PERMISSIONS,
-  mergePermissionsTightenOnly,
-  resolvePermissions,
+  resolveIntentPermission,
   resolvePermissionsFromSettings,
-  resolveToolPermission,
-  sanitizeToolPermissions,
+  resolveWholeToolPermission,
 } from "./policy.js";
 
-describe("DEFAULT_TOOL_PERMISSIONS", () => {
-  it("defaults bash to ask only", () => {
-    expect(DEFAULT_TOOL_PERMISSIONS).toEqual({ bash: "ask" });
-  });
-});
+const bash = {
+  name: "bash",
+  capabilities: ["shell.execute"],
+  defaultPermission: "ask",
+} as Pick<ToolDescriptor, "name" | "capabilities" | "defaultPermission">;
 
-describe("resolveToolPermission", () => {
-  it("returns listed level", () => {
-    expect(resolveToolPermission({ bash: "deny" }, "bash")).toBe("deny");
-  });
+const read = {
+  name: "read_file",
+  capabilities: ["filesystem.read"],
+  defaultPermission: "allow",
+} as Pick<ToolDescriptor, "name" | "capabilities" | "defaultPermission">;
 
-  it("defaults unlisted tools to allow", () => {
-    expect(resolveToolPermission({ bash: "ask" }, "read_file")).toBe("allow");
-  });
-});
-
-describe("mergePermissionsTightenOnly", () => {
-  it("allows project to tighten ask → deny (AC10)", () => {
-    const out = mergePermissionsTightenOnly({ bash: "ask" }, { bash: "deny" });
-    expect(out.bash).toBe("deny");
+describe("scoped permission policy", () => {
+  it("uses descriptor defaults instead of an implicit allow map", () => {
+    const permissions = resolvePermissionsFromSettings(undefined, { workspace: "/work" });
+    expect(resolveWholeToolPermission(permissions, bash).level).toBe("ask");
+    expect(resolveWholeToolPermission(permissions, read).level).toBe("allow");
   });
 
-  it("allows project to tighten allow → ask", () => {
-    const out = mergePermissionsTightenOnly({ read_file: "allow" }, { read_file: "ask" });
-    expect(out.read_file).toBe("ask");
-  });
-
-  it("rejects project relaxing ask → allow (AC9)", () => {
-    const out = mergePermissionsTightenOnly({ bash: "ask" }, { bash: "allow" });
-    expect(out.bash).toBe("ask");
-  });
-
-  it("rejects project relaxing deny → anything", () => {
-    const out = mergePermissionsTightenOnly({ bash: "deny" }, { bash: "allow" });
-    expect(out.bash).toBe("deny");
-    const out2 = mergePermissionsTightenOnly({ bash: "deny" }, { bash: "ask" });
-    expect(out2.bash).toBe("deny");
-  });
-
-  it("accepts same-level project value", () => {
-    const out = mergePermissionsTightenOnly({ bash: "ask" }, { bash: "ask" });
-    expect(out.bash).toBe("ask");
-  });
-
-  it("adds project-only tools (tighten from implicit allow)", () => {
-    const out = mergePermissionsTightenOnly({ bash: "ask" }, { write_file: "deny" });
-    expect(out.write_file).toBe("deny");
-    expect(out.bash).toBe("ask");
-  });
-});
-
-describe("resolvePermissions", () => {
-  it("starts from defaults", () => {
-    const r = resolvePermissions({});
-    expect(r.tools.bash).toBe("ask");
-    expect(resolveToolPermission(r.tools, "read_file")).toBe("allow");
-  });
-
-  it("global can set bash=allow (AC8)", () => {
-    const r = resolvePermissions({ globalTools: { bash: "allow" } });
-    expect(r.tools.bash).toBe("allow");
-  });
-
-  it("global can set bash=deny (AC7)", () => {
-    const r = resolvePermissions({ globalTools: { bash: "deny" } });
-    expect(r.tools.bash).toBe("deny");
-  });
-
-  it("project cannot relax default ask to allow (AC9)", () => {
-    const r = resolvePermissions({
-      globalTools: {},
-      projectTools: { bash: "allow" },
-    });
-    expect(r.tools.bash).toBe("ask");
-  });
-
-  it("project can tighten default ask to deny (AC10)", () => {
-    const r = resolvePermissions({
-      globalTools: {},
-      projectTools: { bash: "deny" },
-    });
-    expect(r.tools.bash).toBe("deny");
-  });
-
-  it("--yes converts ask → allow (AC6)", () => {
-    const r = resolvePermissions({ yes: true });
-    expect(r.tools.bash).toBe("allow");
-  });
-
-  it("--yes does not convert deny → allow", () => {
-    const r = resolvePermissions({
-      globalTools: { bash: "deny" },
-      yes: true,
-    });
-    expect(r.tools.bash).toBe("deny");
-  });
-
-  it("global override then project tighten", () => {
-    const r = resolvePermissions({
-      globalTools: { bash: "allow", write_file: "allow" },
-      projectTools: { bash: "ask", write_file: "deny" },
-    });
-    expect(r.tools.bash).toBe("ask");
-    expect(r.tools.write_file).toBe("deny");
-  });
-});
-
-describe("resolvePermissionsFromSettings", () => {
-  it("uses split layers for tighten-only", () => {
-    const r = resolvePermissionsFromSettings(
-      { permissions: { tools: { bash: "allow" } } }, // merged (ignored when layers present)
+  it("uses deny > ask > allow precedence", () => {
+    const permissions = resolvePermissionsFromSettings(
       {
-        layers: {
-          global: { permissions: { tools: { bash: "ask" } } },
-          project: { permissions: { tools: { bash: "allow" } } },
+        permissions: {
+          rules: [
+            { capability: "filesystem.read", effect: "allow" },
+            { tool: "read_file", effect: "ask" },
+            { tool: "read_file", effect: "deny" },
+          ],
         },
       },
+      { workspace: "/work" },
     );
-    expect(r.tools.bash).toBe("ask");
+    expect(resolveWholeToolPermission(permissions, read).level).toBe("deny");
   });
 
-  it("falls back to merged when no layers", () => {
-    const r = resolvePermissionsFromSettings({
-      permissions: { tools: { bash: "deny" } },
-    });
-    expect(r.tools.bash).toBe("deny");
-  });
-
-  it("applies yes with layers", () => {
-    const r = resolvePermissionsFromSettings(
-      null,
+  it("keeps scoped deny out of whole-tool availability", () => {
+    const permissions = resolvePermissionsFromSettings(
       {
-        yes: true,
-        layers: {
-          global: null,
-          project: null,
+        permissions: {
+          rules: [
+            {
+              capability: "filesystem.read",
+              scope: "file",
+              target: "secret.txt",
+              effect: "deny",
+            },
+          ],
         },
       },
+      { workspace: "/work" },
     );
-    expect(r.tools.bash).toBe("allow");
+    expect(resolveWholeToolPermission(permissions, read).level).toBe("allow");
+    expect(
+      resolveIntentPermission(permissions, read, {
+        capability: "filesystem.read",
+        scope: "file",
+        target: "/work/secret.txt",
+        lexicalTarget: "/work/secret.txt",
+        effectiveTarget: "/work/secret.txt",
+        summary: "secret",
+      }).level,
+    ).toBe("deny");
   });
-});
 
-describe("sanitizeToolPermissions", () => {
-  it("drops invalid levels", () => {
-    const out = sanitizeToolPermissions({
-      bash: "ask",
-      foo: "maybe",
-      bar: 1,
-    } as Record<string, unknown>);
-    expect(out).toEqual({ bash: "ask" });
+  it("ignores project allow rules and project external-write allowlists", () => {
+    const permissions = resolvePermissionsFromSettings(null, {
+      workspace: "/work",
+      layers: {
+        global: {
+          permissions: {
+            rules: [{ tool: "bash", effect: "deny" }],
+            externalWriteAllowlist: ["/shared"],
+          },
+        },
+        project: {
+          permissions: {
+            rules: [{ tool: "bash", effect: "allow" }],
+            externalWriteAllowlist: ["/tmp"],
+          },
+        },
+      },
+    });
+    expect(resolveWholeToolPermission(permissions, bash).level).toBe("deny");
+    expect(permissions.externalWriteAllowlist).toEqual(["/shared"]);
+    expect(permissions.diagnostics.join("\n")).toContain("project allow rule ignored");
+    expect(permissions.diagnostics.join("\n")).toContain("global settings only");
   });
 
-  it("handles null/undefined", () => {
-    expect(sanitizeToolPermissions(null)).toEqual({});
-    expect(sanitizeToolPermissions(undefined)).toEqual({});
+  it("fails closed for malformed rules", () => {
+    const permissions = resolvePermissionsFromSettings(
+      { permissions: { rules: [{ tool: "bash", effect: "bogus" }] } },
+      { workspace: "/work" },
+    );
+    expect(resolveWholeToolPermission(permissions, bash).level).toBe("deny");
+    expect(permissions.diagnostics[0]).toContain("failing closed");
   });
 });

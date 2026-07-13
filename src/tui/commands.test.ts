@@ -5,6 +5,7 @@ import {
   runCommand,
   nextThinkingLevel,
   THINKING_LEVELS,
+  formatToolCatalog,
 } from "./commands.js";
 import type { CommandContext } from "./commands.js";
 
@@ -52,11 +53,9 @@ function makeCtx(opts: {
 }
 
 /** Build a ctx with a real temp env + cwd so /trust can hit the filesystem. */
-function makeTrustCtx(opts: {
-  cwd: string;
-  env: unknown;
-  settings?: Record<string, unknown>;
-}): { ctx: CommandContext } {
+function makeTrustCtx(opts: { cwd: string; env: unknown; settings?: Record<string, unknown> }): {
+  ctx: CommandContext;
+} {
   const ctx = {
     harness: {
       getResources: () => ({ skills: [], promptTemplates: [] }),
@@ -170,12 +169,72 @@ describe("nextThinkingLevel", () => {
   });
 });
 
+describe("/tools", () => {
+  const catalog = {
+    descriptors: [
+      {
+        name: "read_file",
+        label: "Read File",
+        source: { kind: "builtin" as const, id: "builtin" },
+        capabilities: ["filesystem.read" as const],
+        risk: "read" as const,
+        defaultPermission: "allow" as const,
+        defaultEnabled: true,
+        streaming: "none" as const,
+        modes: ["tui" as const, "print" as const, "json" as const, "gateway" as const],
+        optional: false,
+      },
+      {
+        name: "web_search",
+        label: "Web Search",
+        source: { kind: "builtin" as const, id: "builtin" },
+        capabilities: ["network.search" as const],
+        risk: "network" as const,
+        defaultPermission: "allow" as const,
+        defaultEnabled: true,
+        streaming: "none" as const,
+        modes: ["tui" as const, "print" as const, "json" as const, "gateway" as const],
+        optional: true,
+      },
+    ],
+    activeToolNames: ["read_file"],
+    availability: [
+      {
+        name: "read_file",
+        source: { kind: "builtin" as const, id: "builtin" },
+        status: "active" as const,
+      },
+      {
+        name: "web_search",
+        source: { kind: "builtin" as const, id: "builtin" },
+        status: "unavailable" as const,
+        reasonCode: "INITIALIZATION_FAILED" as const,
+        reason: "missing BRAVE_API_KEY",
+      },
+    ],
+    diagnostics: ['tool "web_search" unavailable: missing BRAVE_API_KEY'],
+  };
+
+  it("formats source, capabilities, status, and diagnostics", () => {
+    const text = formatToolCatalog(catalog);
+    expect(text).toContain("read_file  active  [builtin:builtin] filesystem.read");
+    expect(text).toContain("web_search  unavailable");
+    expect(text).toContain("INITIALIZATION_FAILED: missing BRAVE_API_KEY");
+    expect(text).toContain("Diagnostics:");
+  });
+
+  it("prints the current handle catalog", async () => {
+    const { ctx } = makeCtx({});
+    ctx.handle.toolCatalog = catalog;
+    await runCommand("/tools", ctx);
+    expect(ctx.print).toHaveBeenCalledWith(formatToolCatalog(catalog));
+  });
+});
+
 describe("runCommand — prompt-template fallback", () => {
   it("expands a template by name and sends substituted content to harness.prompt", async () => {
     const { ctx, promptSpy } = makeCtx({
-      promptTemplates: [
-        { name: "review", description: "Review code", content: "Review this: $@" },
-      ],
+      promptTemplates: [{ name: "review", description: "Review code", content: "Review this: $@" }],
     });
     await runCommand("/review foo bar", ctx);
     expect(promptSpy).toHaveBeenCalledOnce();
@@ -244,20 +303,14 @@ describe("runCommand — prompt-template fallback", () => {
     expect(ctx.print).toHaveBeenCalledWith(
       expect.stringContaining("Unknown command: /nonexistent."),
     );
-    expect(ctx.print).toHaveBeenCalledWith(
-      expect.stringContaining("/skill:<name>"),
-    );
+    expect(ctx.print).toHaveBeenCalledWith(expect.stringContaining("/skill:<name>"));
   });
 
   it("surfaces empty command notice", async () => {
     const { ctx } = makeCtx({});
     await runCommand("/", ctx);
-    expect(ctx.print).toHaveBeenCalledWith(
-      expect.stringContaining("Empty command."),
-    );
-    expect(ctx.print).toHaveBeenCalledWith(
-      expect.stringContaining("/skill:<name>"),
-    );
+    expect(ctx.print).toHaveBeenCalledWith(expect.stringContaining("Empty command."));
+    expect(ctx.print).toHaveBeenCalledWith(expect.stringContaining("/skill:<name>"));
   });
 });
 
@@ -324,9 +377,7 @@ describe("runCommand — skill invoke", () => {
     });
     await runCommand("/skill:foo", ctx);
     expect(skillSpy).not.toHaveBeenCalled();
-    expect(ctx.print).toHaveBeenCalledWith(
-      expect.stringMatching(/busy|idle/i),
-    );
+    expect(ctx.print).toHaveBeenCalledWith(expect.stringMatching(/busy|idle/i));
   });
 
   it("does not fall through to prompt-template for skill: names", async () => {
@@ -381,10 +432,8 @@ describe("runCommand — /model", () => {
         getResources: () => ({ skills: [], promptTemplates: [] }),
       },
       models: {
-        getModel: (p: string, id: string) =>
-          models.find((m) => m.provider === p && m.id === id),
-        getModels: (p?: string) =>
-          models.filter((m) => !p || m.provider === p),
+        getModel: (p: string, id: string) => models.find((m) => m.provider === p && m.id === id),
+        getModels: (p?: string) => models.filter((m) => !p || m.provider === p),
         getProviders: () => providers,
         getAuth: async (model: { provider: string }) =>
           authed.has(model.provider) ? { ok: true } : undefined,
@@ -473,7 +522,8 @@ describe("/trust", () => {
 
   afterEach(async () => {
     while (cleanups.length) await cleanups.pop()!();
-    if (home) await import("node:fs/promises").then((fs) => fs.rm(home, { recursive: true, force: true }));
+    if (home)
+      await import("node:fs/promises").then((fs) => fs.rm(home, { recursive: true, force: true }));
     process.env.HOME = realHome;
   });
 
@@ -556,9 +606,7 @@ describe("/trust", () => {
 
     const { ctx } = makeTrustCtx({ cwd, env });
     await runCommand("/trust", ctx);
-    expect(ctx.print).toHaveBeenCalledWith(
-      expect.stringContaining("Gated resources present: yes"),
-    );
+    expect(ctx.print).toHaveBeenCalledWith(expect.stringContaining("Gated resources present: yes"));
   });
 });
 
@@ -569,7 +617,8 @@ describe("/scoped-models", () => {
 
   afterEach(async () => {
     while (cleanups.length) await cleanups.pop()!();
-    if (home) await import("node:fs/promises").then((fs) => fs.rm(home, { recursive: true, force: true }));
+    if (home)
+      await import("node:fs/promises").then((fs) => fs.rm(home, { recursive: true, force: true }));
     process.env.HOME = realHome;
   });
 
@@ -593,17 +642,13 @@ describe("/scoped-models", () => {
   it("prints guidance when no patterns configured and no args", async () => {
     const { ctx } = await setup();
     await runCommand("/scoped-models", ctx);
-    expect(ctx.print).toHaveBeenCalledWith(
-      expect.stringContaining("No scoped models configured"),
-    );
+    expect(ctx.print).toHaveBeenCalledWith(expect.stringContaining("No scoped models configured"));
   });
 
   it("rejects an invalid subcommand", async () => {
     const { ctx } = await setup();
     await runCommand("/scoped-models frobnicate x", ctx);
-    expect(ctx.print).toHaveBeenCalledWith(
-      expect.stringContaining("Usage: /scoped-models"),
-    );
+    expect(ctx.print).toHaveBeenCalledWith(expect.stringContaining("Usage: /scoped-models"));
   });
 });
 
@@ -626,20 +671,18 @@ describe("/image and /paste-image", () => {
       await env.cleanup();
       await rm(cwd, { recursive: true, force: true });
     });
-    await writeFile(
-      nodePath.join(cwd, "shot.png"),
-      Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]),
-    );
+    await writeFile(nodePath.join(cwd, "shot.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]));
 
     const pending: unknown[] = [];
     const addPendingImages = vi.fn((items: unknown[]) => {
       pending.push(...items);
     });
     const { ctx } = makeCtx({});
-    ((ctx as unknown) as { env: unknown }).env = env;
-    ((ctx as unknown) as { cwd: string }).cwd = cwd;
-    ((ctx as unknown) as { pendingImages: unknown[] }).pendingImages = pending;
-    ((ctx as unknown) as { addPendingImages: typeof addPendingImages }).addPendingImages = addPendingImages;
+    (ctx as unknown as { env: unknown }).env = env;
+    (ctx as unknown as { cwd: string }).cwd = cwd;
+    (ctx as unknown as { pendingImages: unknown[] }).pendingImages = pending;
+    (ctx as unknown as { addPendingImages: typeof addPendingImages }).addPendingImages =
+      addPendingImages;
 
     await runCommand("/image shot.png", ctx);
     expect(addPendingImages).toHaveBeenCalledTimes(1);
@@ -656,8 +699,8 @@ describe("/image and /paste-image", () => {
   it("/image clear clears pending", async () => {
     const clearPendingImages = vi.fn();
     const { ctx } = makeCtx({});
-    ((ctx as unknown) as { pendingImages: unknown[] }).pendingImages = [{ id: "1" }];
-    ((ctx as unknown) as { clearPendingImages: typeof clearPendingImages }).clearPendingImages =
+    (ctx as unknown as { pendingImages: unknown[] }).pendingImages = [{ id: "1" }];
+    (ctx as unknown as { clearPendingImages: typeof clearPendingImages }).clearPendingImages =
       clearPendingImages;
     await runCommand("/image clear", ctx);
     expect(clearPendingImages).toHaveBeenCalled();
@@ -673,7 +716,8 @@ describe("/image and /paste-image", () => {
   it("/paste-image uses clipboard reader and adds pending", async () => {
     const { ctx } = makeCtx({});
     const addPendingImages = vi.fn();
-    ((ctx as unknown) as { addPendingImages: typeof addPendingImages }).addPendingImages = addPendingImages;
+    (ctx as unknown as { addPendingImages: typeof addPendingImages }).addPendingImages =
+      addPendingImages;
     (ctx as { clipboardReader: { readImage: () => Promise<unknown> } }).clipboardReader = {
       readImage: async () => ({
         ok: true,

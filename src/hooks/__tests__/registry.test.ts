@@ -1,14 +1,35 @@
 import { describe, expect, it, vi } from "vitest";
-import type { AgentHarness } from "@earendil-works/pi-agent-core/node";
+import type { AgentHarness, ExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import { registerHooks, matcherMatches, makeComposedToolCallDispatcher } from "../registry.js";
 import type { HookConfig, RegisterHooksDeps } from "../types.js";
 import {
   PermissionGate,
   SessionPermissionStore,
   type Approver,
+  WorkspaceScopeGuard,
 } from "../../permissions/index.js";
+import { getBuiltinToolDescriptor } from "../../tools/index.js";
 
 const deps: RegisterHooksDeps = { env: undefined, cwd: "/test", sessionId: "s1" };
+
+function makeGate(effect: "allow" | "ask" | "deny", approver?: Approver): PermissionGate {
+  return new PermissionGate({
+    permissions: {
+      rules: [{ tool: "bash", effect, source: "global" }],
+      externalWriteAllowlist: [],
+      autoApproveAsks: false,
+      diagnostics: [],
+    },
+    approver: approver ?? { request: async () => "deny" },
+    store: new SessionPermissionStore(),
+    scopeGuard: new WorkspaceScopeGuard({
+      env: {} as ExecutionEnv,
+      workspace: "/test",
+    }),
+    resolveDescriptor: getBuiltinToolDescriptor,
+    interactive: true,
+  });
+}
 
 /** Build a mock harness that records `on()` registrations and lets us invoke them. */
 function makeMockHarness(): {
@@ -114,11 +135,7 @@ describe("registerHooks", () => {
 
   it("registers tool_call when only permissionGate is provided (no user hooks)", () => {
     const { harness, dispatchers } = makeMockHarness();
-    const gate = new PermissionGate({
-      permissions: { tools: { bash: "deny" } },
-      approver: { request: async () => "deny" },
-      store: new SessionPermissionStore(),
-    });
+    const gate = makeGate("deny");
     const config: HookConfig = { events: new Map(), diagnostics: [] };
     registerHooks(harness, config, deps, { permissionGate: gate });
     expect(dispatchers.has("tool_call")).toBe(true);
@@ -128,11 +145,7 @@ describe("registerHooks", () => {
     const { harness, dispatchers } = makeMockHarness();
     const userScript = vi.fn();
     // Gate denies bash.
-    const gate = new PermissionGate({
-      permissions: { tools: { bash: "deny" } },
-      approver: { request: async () => "once" } as Approver,
-      store: new SessionPermissionStore(),
-    });
+    const gate = makeGate("deny", { request: async () => "once" } as Approver);
     // User hooks present but must not run when gate denies.
     const config: HookConfig = {
       events: new Map([
@@ -148,19 +161,13 @@ describe("registerHooks", () => {
       toolCallId: "1",
       input: { command: "ls" },
     });
-    expect(result).toEqual({
-      block: true,
-      reason: "permission denied: bash (deny)",
-    });
+    expect(result).toMatchObject({ block: true });
+    expect((result as { reason: string }).reason).toContain("NOVI_ERROR:TOOL_DISABLED:");
     void userScript;
   });
 
   it("user hook can still block after permission allow (AC11)", async () => {
-    const gate = new PermissionGate({
-      permissions: { tools: { bash: "allow" } },
-      approver: { request: async () => "deny" },
-      store: new SessionPermissionStore(),
-    });
+    const gate = makeGate("allow");
     const userDispatcher = vi.fn().mockResolvedValue({
       block: true,
       reason: "blocked by user hook",
@@ -169,24 +176,20 @@ describe("registerHooks", () => {
     const result = await composed({
       toolName: "bash",
       toolCallId: "1",
-      input: {},
+      input: { command: "ls" },
     });
     expect(userDispatcher).toHaveBeenCalled();
     expect(result).toEqual({ block: true, reason: "blocked by user hook" });
   });
 
   it("both allow → undefined", async () => {
-    const gate = new PermissionGate({
-      permissions: { tools: { bash: "allow" } },
-      approver: { request: async () => "deny" },
-      store: new SessionPermissionStore(),
-    });
+    const gate = makeGate("allow");
     const userDispatcher = vi.fn().mockResolvedValue(undefined);
     const composed = makeComposedToolCallDispatcher(gate, userDispatcher);
     const result = await composed({
       toolName: "bash",
       toolCallId: "1",
-      input: {},
+      input: { command: "ls" },
     });
     expect(result).toBeUndefined();
   });
@@ -194,14 +197,14 @@ describe("registerHooks", () => {
 
 describe("makeComposedToolCallDispatcher", () => {
   it("permission deny does not invoke user dispatcher", async () => {
-    const gate = new PermissionGate({
-      permissions: { tools: { bash: "deny" } },
-      approver: { request: async () => "once" },
-      store: new SessionPermissionStore(),
-    });
+    const gate = makeGate("deny", { request: async () => "once" });
     const userDispatcher = vi.fn().mockResolvedValue({ block: false });
     const composed = makeComposedToolCallDispatcher(gate, userDispatcher);
-    const result = await composed({ toolName: "bash", toolCallId: "1", input: {} });
+    const result = await composed({
+      toolName: "bash",
+      toolCallId: "1",
+      input: { command: "ls" },
+    });
     expect(result).toMatchObject({ block: true });
     expect(userDispatcher).not.toHaveBeenCalled();
   });

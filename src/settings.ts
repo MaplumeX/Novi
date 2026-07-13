@@ -2,11 +2,7 @@ import os from "node:os";
 import path from "node:path";
 import type { ExecutionEnv, ThinkingLevel } from "@earendil-works/pi-agent-core/node";
 import { getNoviDir } from "./config.js";
-import {
-  DEFAULT_TOOL_PERMISSIONS,
-  mergePermissionsTightenOnly,
-  sanitizeToolPermissions,
-} from "./permissions/policy.js";
+import type { PermissionRule } from "./permissions/types.js";
 
 /**
  * User-configurable Novi settings.
@@ -56,13 +52,16 @@ export interface NoviSettings {
     maxResponseBytes?: number;
     maxRedirects?: number;
   };
-  /**
-   * Tool permission policy. Unlisted tools default to `allow`.
-   * Built-in default (not written to disk): `{ bash: "ask" }`.
-   * Project layer can only tighten (see permissions policy merge).
-   */
+  /** Tool/source exposure. Project settings may only disable entries. */
+  tools?: {
+    enabled?: Record<string, boolean>;
+    sources?: Record<string, boolean>;
+  };
+  /** Descriptor-default policy plus global/project scoped overrides. */
   permissions?: {
-    tools?: Record<string, "allow" | "ask" | "deny">;
+    rules?: PermissionRule[];
+    /** Global-only roots allowed for native writes outside the workspace. */
+    externalWriteAllowlist?: string[];
   };
 }
 
@@ -122,9 +121,15 @@ export async function loadSettings(
   // Project layer is loaded only when trusted (gate). When `includeProject`
   // is false (untrusted), skip the project file entirely so its values cannot
   // influence provider resolution or the merged settings.
-  const project = opts.includeProject === false
-    ? null
-    : await readSettingsLayer(env, path.join(cwd, ".novi", "settings.json"), "project", diagnostics);
+  const project =
+    opts.includeProject === false
+      ? null
+      : await readSettingsLayer(
+          env,
+          path.join(cwd, ".novi", "settings.json"),
+          "project",
+          diagnostics,
+        );
 
   const layers: SettingsLayers = { global, project };
   if (!global && !project) {
@@ -164,9 +169,8 @@ async function readSettingsLayer(
  * Shallow-merge two settings layers: nested objects are merged one level deep,
  * project overrides global. Unknown keys are preserved (forward-compat).
  *
- * Exception: `permissions.tools` is merge-deep one extra level (tool name →
- * level) with **tighten-only** project semantics (defaults ← global ← project),
- * matching the runtime gate in `permissions/policy`.
+ * Exception: permission rules concatenate, project `allow` rules are removed,
+ * and the external-write allowlist is global-only.
  */
 export function mergeSettings(global: NoviSettings, project: NoviSettings): NoviSettings {
   const keys = new Set<string>([...Object.keys(global), ...Object.keys(project)]);
@@ -178,6 +182,13 @@ export function mergeSettings(global: NoviSettings, project: NoviSettings): Novi
       out[key] = mergePermissionsSettings(
         (g ?? {}) as NoviSettings["permissions"],
         (p ?? {}) as NoviSettings["permissions"],
+      );
+      continue;
+    }
+    if (key === "tools") {
+      out[key] = mergeToolExposureSettings(
+        (g ?? {}) as NoviSettings["tools"],
+        (p ?? {}) as NoviSettings["tools"],
       );
       continue;
     }
@@ -199,13 +210,55 @@ export function mergeSettings(global: NoviSettings, project: NoviSettings): Novi
   return out as NoviSettings;
 }
 
+function sanitizeBooleanMap(raw: Record<string, unknown> | undefined): Record<string, boolean> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Record<string, boolean> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (typeof value === "boolean") out[key] = value;
+  }
+  return out;
+}
+
+/** Global may enable/disable; project can only add a disabling `false`. */
+function mergeToolExposureMap(
+  global: Record<string, unknown> | undefined,
+  project: Record<string, unknown> | undefined,
+): Record<string, boolean> {
+  const out = sanitizeBooleanMap(global);
+  for (const [name, enabled] of Object.entries(sanitizeBooleanMap(project))) {
+    if (!enabled) out[name] = false;
+  }
+  return out;
+}
+
+function mergeToolExposureSettings(
+  global: NoviSettings["tools"] | Record<string, never> | undefined,
+  project: NoviSettings["tools"] | Record<string, never> | undefined,
+): NoviSettings["tools"] | undefined {
+  const g = global ?? {};
+  const p = project ?? {};
+  const enabled = mergeToolExposureMap(g.enabled, p.enabled);
+  const sources = mergeToolExposureMap(g.sources, p.sources);
+  if (
+    Object.keys(enabled).length === 0 &&
+    Object.keys(sources).length === 0 &&
+    Object.keys(g).length === 0 &&
+    Object.keys(p).length === 0
+  ) {
+    return undefined;
+  }
+  return {
+    ...g,
+    ...p,
+    enabled,
+    sources,
+  };
+}
+
 /**
- * Merge `permissions` so `tools` maps combine with **tighten-only** project
- * semantics (AC9/AC10). Starts from built-in defaults so project cannot relax
- * implicit `bash=ask` via the settings merge path either.
- *
- * Runtime gate also re-resolves from layers; keeping merge consistent means
- * `/settings` and `resolvedSettings.permissions` match effective policy.
+ * Merge the display/settings view without letting project settings broaden
+ * permissions. Runtime policy still resolves from split layers and validates
+ * every rule fail-closed.
  */
 function mergePermissionsSettings(
   global: NoviSettings["permissions"] | Record<string, never> | undefined,
@@ -213,28 +266,26 @@ function mergePermissionsSettings(
 ): NoviSettings["permissions"] | undefined {
   const g = global ?? {};
   const p = project ?? {};
-  const gTools = sanitizeToolPermissions(
-    (g as { tools?: Record<string, unknown> }).tools,
-  );
-  const pTools = sanitizeToolPermissions(
-    (p as { tools?: Record<string, unknown> }).tools,
-  );
-  const hasG = Object.keys(gTools).length > 0;
-  const hasP = Object.keys(pTools).length > 0;
-  if (!hasG && !hasP) {
-    const keys = new Set([...Object.keys(g), ...Object.keys(p)]);
-    if (keys.size === 0) return undefined;
-    return { ...g, ...p } as NoviSettings["permissions"];
+  const globalRules = Array.isArray(g.rules) ? g.rules : [];
+  const projectRules = Array.isArray(p.rules)
+    ? p.rules.filter((rule) => rule?.effect === "ask" || rule?.effect === "deny")
+    : [];
+  if (
+    globalRules.length === 0 &&
+    projectRules.length === 0 &&
+    g.externalWriteAllowlist === undefined &&
+    Object.keys(g).length === 0 &&
+    Object.keys(p).length === 0
+  ) {
+    return undefined;
   }
-  // defaults ← global (full override) ← project (tighten-only)
-  const tools = mergePermissionsTightenOnly(
-    { ...DEFAULT_TOOL_PERMISSIONS, ...gTools },
-    pTools,
-  );
   return {
     ...g,
     ...p,
-    tools,
+    rules: [...globalRules, ...projectRules],
+    externalWriteAllowlist: Array.isArray(g.externalWriteAllowlist)
+      ? [...g.externalWriteAllowlist]
+      : undefined,
   };
 }
 
@@ -267,7 +318,8 @@ export function resolveSettings(
       const globalVal = (layers.global as Record<string, unknown> | null)?.[name];
       const mergedVal = (merged as Record<string, unknown> | null)?.[name];
       if (mergedVal !== undefined) {
-        _sources[name] = projectVal !== undefined ? "project" : globalVal !== undefined ? "global" : "default";
+        _sources[name] =
+          projectVal !== undefined ? "project" : globalVal !== undefined ? "global" : "default";
       } else {
         _sources[name] = "default";
       }
@@ -283,7 +335,8 @@ export function resolveSettings(
     const projectVal = (layers.project as Record<string, unknown> | null)?.defaultProjectTrust;
     const globalVal = (layers.global as Record<string, unknown> | null)?.defaultProjectTrust;
     if (mergedVal !== undefined) {
-      _sources.defaultProjectTrust = projectVal !== undefined ? "project" : globalVal !== undefined ? "global" : "default";
+      _sources.defaultProjectTrust =
+        projectVal !== undefined ? "project" : globalVal !== undefined ? "global" : "default";
     } else {
       _sources.defaultProjectTrust = "default";
     }
@@ -304,7 +357,8 @@ export function resolveSettings(
       const globalVal = (layers.global as Record<string, unknown> | null)?.[name];
       const mergedVal = (merged as Record<string, unknown> | null)?.[name];
       if (mergedVal !== undefined) {
-        _sources[name] = projectVal !== undefined ? "project" : globalVal !== undefined ? "global" : "default";
+        _sources[name] =
+          projectVal !== undefined ? "project" : globalVal !== undefined ? "global" : "default";
       } else {
         _sources[name] = "default";
       }
@@ -322,7 +376,8 @@ export function resolveSettings(
       const globalVal = (layers.global as Record<string, unknown> | null)?.scopedModels;
       const mergedVal = (merged as Record<string, unknown> | null)?.scopedModels;
       if (mergedVal !== undefined) {
-        _sources.scopedModels = projectVal !== undefined ? "project" : globalVal !== undefined ? "global" : "default";
+        _sources.scopedModels =
+          projectVal !== undefined ? "project" : globalVal !== undefined ? "global" : "default";
       } else {
         _sources.scopedModels = "default";
       }
@@ -336,7 +391,8 @@ export function resolveSettings(
     const projectVal = layers.project?.compaction?.[sub];
     const globalVal = layers.global?.compaction?.[sub];
     if (mergedVal !== undefined) {
-      _sources[fullKey] = projectVal !== undefined ? "project" : globalVal !== undefined ? "global" : "default";
+      _sources[fullKey] =
+        projectVal !== undefined ? "project" : globalVal !== undefined ? "global" : "default";
     } else {
       _sources[fullKey] = "default";
     }
@@ -349,7 +405,8 @@ export function resolveSettings(
     const projectVal = layers.project?.retry?.provider?.[sub];
     const globalVal = layers.global?.retry?.provider?.[sub];
     if (mergedVal !== undefined) {
-      _sources[fullKey] = projectVal !== undefined ? "project" : globalVal !== undefined ? "global" : "default";
+      _sources[fullKey] =
+        projectVal !== undefined ? "project" : globalVal !== undefined ? "global" : "default";
     } else {
       _sources[fullKey] = "default";
     }
@@ -385,48 +442,55 @@ export function resolveSettings(
     }
   }
 
-  // permissions.tools.* — re-apply tighten-only onto settings so the resolved
-  // view matches the gate even when callers pass a pre-merged map that skipped
-  // mergePermissionsSettings. Provenance: project only if its value was accepted.
+  // tools.enabled/tools.sources — global may choose either value; project can
+  // only contribute false. Re-resolve from split layers so a pre-merged object
+  // cannot accidentally let a project enable a disabled/default-off source.
   {
-    const gTools = sanitizeToolPermissions(layers.global?.permissions?.tools);
-    const pTools = sanitizeToolPermissions(layers.project?.permissions?.tools);
-    const effective = mergePermissionsTightenOnly(
-      { ...DEFAULT_TOOL_PERMISSIONS, ...gTools },
-      pTools,
-    );
-    // Also fold any tools present only on the merged view (defensive).
-    const mergedTools = sanitizeToolPermissions(merged?.permissions?.tools);
-    for (const [tool, level] of Object.entries(mergedTools)) {
-      if (!(tool in effective)) effective[tool] = level;
-    }
-    settings.permissions = {
-      ...(settings.permissions ?? {}),
-      tools: effective,
-    };
+    const tools = mergeToolExposureSettings(layers.global?.tools, layers.project?.tools);
+    if (tools) settings.tools = tools;
 
-    const toolNames = new Set<string>([
-      "bash",
-      ...Object.keys(effective),
-      ...Object.keys(gTools),
-      ...Object.keys(pTools),
-    ]);
-    for (const tool of toolNames) {
-      const fullKey = `permissions.tools.${tool}`;
-      const projectVal = pTools[tool];
-      const globalVal = gTools[tool];
-      const effectiveLevel = effective[tool] ?? "allow";
-      // Project source only when project contributed the *accepted* value.
-      if (projectVal !== undefined && projectVal === effectiveLevel) {
-        _sources[fullKey] = "project";
-      } else if (globalVal !== undefined) {
-        _sources[fullKey] = "global";
-      } else if (tool in DEFAULT_TOOL_PERMISSIONS) {
-        _sources[fullKey] = "default";
-      } else {
-        _sources[fullKey] = "default";
+    for (const mapName of ["enabled", "sources"] as const) {
+      const globalMap = sanitizeBooleanMap(layers.global?.tools?.[mapName]);
+      const projectMap = sanitizeBooleanMap(layers.project?.tools?.[mapName]);
+      const mergedMap = sanitizeBooleanMap(tools?.[mapName]);
+      const names = new Set([
+        ...Object.keys(globalMap),
+        ...Object.keys(projectMap),
+        ...Object.keys(mergedMap),
+      ]);
+      for (const name of names) {
+        const fullKey = `tools.${mapName}.${name}`;
+        if (projectMap[name] === false && mergedMap[name] === false) {
+          _sources[fullKey] = "project";
+        } else if (globalMap[name] !== undefined) {
+          _sources[fullKey] = "global";
+        } else {
+          _sources[fullKey] = "default";
+        }
       }
     }
+  }
+
+  // Permission rules use the same tighten-only/global-only merge as loading.
+  {
+    const permissions = mergePermissionsSettings(
+      layers.global?.permissions,
+      layers.project?.permissions,
+    );
+    if (permissions) settings.permissions = permissions;
+    const acceptedProjectRuleCount = Array.isArray(layers.project?.permissions?.rules)
+      ? layers.project.permissions.rules.filter(
+          (rule) => rule?.effect === "ask" || rule?.effect === "deny",
+        ).length
+      : 0;
+    _sources["permissions.rules"] =
+      acceptedProjectRuleCount > 0
+        ? "project"
+        : (layers.global?.permissions?.rules?.length ?? 0) > 0
+          ? "global"
+          : "default";
+    _sources["permissions.externalWriteAllowlist"] =
+      layers.global?.permissions?.externalWriteAllowlist !== undefined ? "global" : "default";
   }
 
   return { ...settings, _sources };
@@ -477,7 +541,10 @@ export async function writeSettings(
 }
 
 /** Apply a dot-path patch to an existing object, creating nested objects as needed. */
-export function applyPatch(existing: Record<string, unknown>, patch: Record<string, unknown>): Record<string, unknown> {
+export function applyPatch(
+  existing: Record<string, unknown>,
+  patch: Record<string, unknown>,
+): Record<string, unknown> {
   const out: Record<string, unknown> = { ...existing };
   for (const [key, value] of Object.entries(patch)) {
     const parts = key.split(".");

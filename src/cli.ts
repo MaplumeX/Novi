@@ -115,6 +115,13 @@ const bootstrapOptions = {
   ...cliOverrides,
   resumePath: values.resume,
   yes: values.yes === true,
+  toolMode: (values.gateway
+    ? "gateway"
+    : values.print
+      ? "print"
+      : values.mode === "json"
+        ? "json"
+        : "tui") as "tui" | "print" | "json" | "gateway",
 };
 
 // Pre-bootstrap credential probe. The check runs before bootstrap() so the

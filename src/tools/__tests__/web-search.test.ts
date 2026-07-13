@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getTool, setupEnv } from "./helpers.js";
+import { createBuiltinToolAssembly } from "../index.js";
 import { guardedRequest, providerJsonRequest } from "../web/network.js";
 
 vi.mock("../web/network.js", () => ({ guardedRequest: vi.fn(), providerJsonRequest: vi.fn() }));
@@ -83,9 +84,16 @@ describe("web_search batch contract", () => {
     const { env, cleanup } = await setupEnv();
     const cacheRoot = await mkdtemp(path.join(tmpdir(), "novi-search-"));
     try {
-      expect(() =>
-        getTool(env, "web_search", "test", { webSearch: { provider: "brave" }, env: {} }),
-      ).toThrow(/BRAVE_API_KEY/);
+      const unavailable = createBuiltinToolAssembly(env, "test", {
+        webSearch: { provider: "brave" },
+        env: {},
+      });
+      expect(unavailable.activeToolNames).not.toContain("web_search");
+      expect(unavailable.availability.find((entry) => entry.name === "web_search")).toMatchObject({
+        status: "unavailable",
+        reasonCode: "INITIALIZATION_FAILED",
+        reason: expect.stringMatching(/BRAVE_API_KEY/),
+      });
       mockedProviderJsonRequest.mockResolvedValue({
         status: 200,
         json: {

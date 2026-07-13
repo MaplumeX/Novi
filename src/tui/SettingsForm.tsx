@@ -20,7 +20,7 @@ interface SettingsFormProps {
   onReload: () => void;
 }
 
-type FieldType = "text" | "number" | "toggle" | "select";
+type FieldType = "text" | "number" | "toggle" | "select" | "readonly";
 
 interface FieldDef {
   key: string;
@@ -34,7 +34,6 @@ const TRUST_OPTIONS: readonly string[] = ["ask", "always", "never"];
 
 const TRANSPORT_OPTIONS: readonly string[] = ["sse", "websocket", "websocket-cached", "auto"];
 const QUEUE_MODE_OPTIONS: readonly string[] = ["one-at-a-time", "all"];
-const PERMISSION_LEVELS: readonly string[] = ["allow", "ask", "deny"];
 
 const FIELDS: readonly FieldDef[] = [
   { key: "defaultProvider", label: "defaultProvider", type: "text" },
@@ -56,10 +55,14 @@ const FIELDS: readonly FieldDef[] = [
   { key: "followUpMode", label: "followUpMode", type: "select", options: QUEUE_MODE_OPTIONS },
   { key: "scopedModels", label: "scopedModels (comma-sep)", type: "text" },
   {
-    key: "permissions.tools.bash",
-    label: "permissions.tools.bash",
-    type: "select",
-    options: PERMISSION_LEVELS,
+    key: "permissions.rules",
+    label: "permissions.rules (edit JSON)",
+    type: "readonly",
+  },
+  {
+    key: "permissions.externalWriteAllowlist",
+    label: "permissions.externalWriteAllowlist (global JSON only)",
+    type: "readonly",
   },
   { key: "compaction.enabled", label: "compaction.enabled", type: "toggle" },
   { key: "compaction.reserveTokens", label: "compaction.reserveTokens", type: "number" },
@@ -74,18 +77,21 @@ const FIELDS: readonly FieldDef[] = [
 ];
 
 function getFieldValue(settings: ResolvedSettings, key: string): string {
+  if (key === "permissions.rules") {
+    return `${settings.permissions?.rules?.length ?? 0} rule(s)`;
+  }
+  if (key === "permissions.externalWriteAllowlist") {
+    return settings.permissions?.externalWriteAllowlist?.join(", ") ?? "";
+  }
   const parts = key.split(".");
   let cursor: unknown = settings;
   for (const part of parts) {
     if (cursor === null || cursor === undefined || typeof cursor !== "object") {
-      // Built-in default for bash permission when unset.
-      if (key === "permissions.tools.bash") return "ask";
       return "";
     }
     cursor = (cursor as Record<string, unknown>)[part];
   }
   if (cursor === undefined || cursor === null) {
-    if (key === "permissions.tools.bash") return "ask";
     return "";
   }
   return String(cursor);
@@ -222,6 +228,10 @@ export function SettingsForm({
     }
     if (key.return) {
       const f = FIELDS[cursor];
+      if (f.type === "readonly") {
+        setMessage("Permission rules are edited in settings.json and applied with /reload.");
+        return;
+      }
       if (f.type === "toggle") {
         // Toggle directly: flip and commit (stay in browse mode).
         const cur = baseValue === "true";

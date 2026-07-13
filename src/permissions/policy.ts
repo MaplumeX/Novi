@@ -1,157 +1,232 @@
+import path from "node:path";
+import type { ToolDescriptor } from "../tools/contracts.js";
+import { TOOL_CAPABILITIES } from "../tools/contracts.js";
+import { containsPath } from "./scope.js";
 import type {
+  CanonicalPermissionIntent,
+  PermissionDecision,
   PermissionLevel,
+  PermissionRule,
+  ResolvedPermissionRule,
   ResolvedPermissions,
-  ToolPermissionMap,
 } from "./types.js";
 
-/**
- * Built-in defaults (not written to disk). Only `bash` asks; every other
- * tool is implicitly `allow` when unlisted.
- */
-export const DEFAULT_TOOL_PERMISSIONS: ToolPermissionMap = {
-  bash: "ask",
-};
+const CAPABILITIES = new Set<string>(TOOL_CAPABILITIES);
+const SCOPES = new Set(["file", "directory", "subtree", "command", "domain", "search", "session"]);
+const SEVERITY: Record<PermissionLevel, number> = { allow: 0, ask: 1, deny: 2 };
 
-/** Severity ordering for tighten-only project merge: higher = stricter. */
-const SEVERITY: Record<PermissionLevel, number> = {
-  allow: 0,
-  ask: 1,
-  deny: 2,
-};
+/** No implicit allow map: descriptor defaults own known-tool behavior. */
+export const DEFAULT_PERMISSION_RULES: readonly PermissionRule[] = [];
 
-/**
- * Resolve the effective level for one tool from a tools map.
- * Unlisted tools default to `allow`.
- */
-export function resolveToolPermission(
-  toolsMap: ToolPermissionMap,
-  toolName: string,
-): PermissionLevel {
-  return toolsMap[toolName] ?? "allow";
+export interface PermissionSettingsLike {
+  permissions?: {
+    rules?: unknown;
+    externalWriteAllowlist?: unknown;
+  };
 }
 
-/**
- * Merge project permissions onto a base map with **tighten-only** semantics:
- * a project value is accepted only when `severity(project) >= severity(base)`.
- * Project cannot relax `ask→allow` or change a `deny`.
- *
- * Tools present only in project (not in base) are accepted as-is (they
- * tighten the implicit default `allow`).
- */
-export function mergePermissionsTightenOnly(
-  base: ToolPermissionMap,
-  project: ToolPermissionMap,
-): ToolPermissionMap {
-  const out: ToolPermissionMap = { ...base };
-  for (const [tool, projectLevel] of Object.entries(project)) {
-    if (!isPermissionLevel(projectLevel)) continue;
-    const current = out[tool] ?? "allow";
-    if (SEVERITY[projectLevel] >= SEVERITY[current]) {
-      out[tool] = projectLevel;
-    }
-    // else: project tries to relax — ignore
-  }
-  return out;
-}
-
-function isPermissionLevel(value: unknown): value is PermissionLevel {
-  return value === "allow" || value === "ask" || value === "deny";
-}
-
-/**
- * Sanitize a raw tools map from settings (drop unknown values / non-strings).
- */
-export function sanitizeToolPermissions(
-  raw: Record<string, unknown> | undefined | null,
-): ToolPermissionMap {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
-  const out: ToolPermissionMap = {};
-  for (const [tool, level] of Object.entries(raw)) {
-    if (isPermissionLevel(level)) out[tool] = level;
-  }
-  return out;
-}
-
-/**
- * Resolve effective permissions from settings layers + CLI `--yes`.
- *
- * Algorithm:
- * 1. start from {@link DEFAULT_TOOL_PERMISSIONS}
- * 2. override with global.permissions.tools (full override per tool)
- * 3. merge project.permissions.tools with tighten-only
- * 4. if `yes`, convert every effective `ask` → `allow`
- *
- * When split layers are unavailable, pass the merged map as `globalTools`
- * and leave `projectTools` empty (tighten already applied during settings
- * merge is NOT assumed — prefer split layers).
- */
-export function resolvePermissions(opts: {
-  globalTools?: ToolPermissionMap;
-  projectTools?: ToolPermissionMap;
-  /** Already-merged tools map (used when layers are not split). */
-  mergedTools?: ToolPermissionMap;
-  yes?: boolean;
-}): ResolvedPermissions {
-  let tools: ToolPermissionMap = { ...DEFAULT_TOOL_PERMISSIONS };
-
-  if (opts.globalTools) {
-    tools = { ...tools, ...sanitizeToolPermissions(opts.globalTools) };
-  }
-  if (opts.projectTools) {
-    tools = mergePermissionsTightenOnly(
-      tools,
-      sanitizeToolPermissions(opts.projectTools),
-    );
-  } else if (opts.mergedTools) {
-    // Fallback path: treat merged as a full override of defaults (no
-    // tighten). Prefer split layers for correct project semantics.
-    tools = { ...tools, ...sanitizeToolPermissions(opts.mergedTools) };
-  }
-
-  if (opts.yes) {
-    const next: ToolPermissionMap = {};
-    for (const [tool, level] of Object.entries(tools)) {
-      next[tool] = level === "ask" ? "allow" : level;
-    }
-    tools = next;
-  }
-
-  return { tools };
-}
-
-/**
- * Convenience: resolve from a settings-like object with optional layers.
- *
- * `settings.permissions.tools` is the merged view; when `layers` is provided
- * the split global/project maps drive tighten-only merge.
- */
+/** Resolve global rules plus tighten-only project rules into one immutable policy. */
 export function resolvePermissionsFromSettings(
-  settings: {
-    permissions?: { tools?: Record<string, unknown> };
-  } | null | undefined,
+  settings: PermissionSettingsLike | null | undefined,
   opts: {
     yes?: boolean;
+    workspace?: string;
     layers?: {
-      global?: { permissions?: { tools?: Record<string, unknown> } } | null;
-      project?: { permissions?: { tools?: Record<string, unknown> } } | null;
+      global?: PermissionSettingsLike | null;
+      project?: PermissionSettingsLike | null;
     };
   } = {},
 ): ResolvedPermissions {
-  if (opts.layers) {
-    return resolvePermissions({
-      globalTools: sanitizeToolPermissions(
-        opts.layers.global?.permissions?.tools as ToolPermissionMap | undefined,
-      ),
-      projectTools: sanitizeToolPermissions(
-        opts.layers.project?.permissions?.tools as ToolPermissionMap | undefined,
-      ),
-      yes: opts.yes,
-    });
-  }
-  return resolvePermissions({
-    mergedTools: sanitizeToolPermissions(
-      settings?.permissions?.tools as ToolPermissionMap | undefined,
-    ),
-    yes: opts.yes,
+  const diagnostics: string[] = [];
+  const workspace = opts.workspace ?? process.cwd();
+  const globalRaw = opts.layers
+    ? opts.layers.global?.permissions?.rules
+    : settings?.permissions?.rules;
+  const projectRaw = opts.layers?.project?.permissions?.rules;
+  const globalRules = sanitizePermissionRules(globalRaw, "global", workspace, diagnostics);
+  const projectRules = sanitizePermissionRules(
+    projectRaw,
+    "project",
+    workspace,
+    diagnostics,
+  ).filter((rule) => {
+    if (rule.effect !== "allow") return true;
+    diagnostics.push("permissions: project allow rule ignored (project is tighten-only)");
+    return false;
   });
+
+  const allowlistRaw = opts.layers
+    ? opts.layers.global?.permissions?.externalWriteAllowlist
+    : settings?.permissions?.externalWriteAllowlist;
+  const externalWriteAllowlist = sanitizeAllowlist(allowlistRaw, workspace, diagnostics);
+  if (opts.layers?.project?.permissions?.externalWriteAllowlist !== undefined) {
+    diagnostics.push("permissions: project externalWriteAllowlist ignored (global settings only)");
+  }
+
+  return {
+    rules: [...globalRules, ...projectRules],
+    externalWriteAllowlist,
+    autoApproveAsks: opts.yes === true,
+    diagnostics,
+  };
+}
+
+/** Whole-tool/capability rules only; scoped rules must not hide a descriptor. */
+export function resolveWholeToolPermission(
+  permissions: ResolvedPermissions,
+  descriptor: Pick<ToolDescriptor, "name" | "capabilities" | "defaultPermission">,
+): PermissionDecision {
+  const matches = permissions.rules.filter(
+    (rule) =>
+      rule.target === undefined &&
+      rule.scope === undefined &&
+      ruleMatchesDescriptor(rule, descriptor),
+  );
+  return strongestDecision(matches, descriptor.defaultPermission);
+}
+
+/** Resolve one canonical intent; deny > ask > allow > descriptor default. */
+export function resolveIntentPermission(
+  permissions: ResolvedPermissions,
+  descriptor: Pick<ToolDescriptor, "name" | "capabilities" | "defaultPermission">,
+  intent: CanonicalPermissionIntent,
+): PermissionDecision {
+  const matches = permissions.rules.filter(
+    (rule) => ruleMatchesDescriptor(rule, descriptor) && ruleMatchesIntent(rule, intent),
+  );
+  return strongestDecision(matches, descriptor.defaultPermission);
+}
+
+function strongestDecision(
+  matches: readonly ResolvedPermissionRule[],
+  fallback: PermissionLevel,
+): PermissionDecision {
+  if (matches.length === 0) {
+    return { level: fallback, source: "default", reason: `descriptor default: ${fallback}` };
+  }
+  const strongest = matches.reduce((best, next) =>
+    SEVERITY[next.effect] > SEVERITY[best.effect] ? next : best,
+  );
+  return {
+    level: strongest.effect,
+    source: strongest.source,
+    reason: `${strongest.source} permission rule: ${strongest.effect}`,
+  };
+}
+
+function ruleMatchesDescriptor(
+  rule: ResolvedPermissionRule,
+  descriptor: Pick<ToolDescriptor, "name" | "capabilities">,
+): boolean {
+  if (rule.tool !== undefined && rule.tool !== descriptor.name) return false;
+  if (rule.capability !== undefined && !descriptor.capabilities.includes(rule.capability)) {
+    return false;
+  }
+  return true;
+}
+
+function ruleMatchesIntent(
+  rule: ResolvedPermissionRule,
+  intent: CanonicalPermissionIntent,
+): boolean {
+  if (rule.capability !== undefined && rule.capability !== intent.capability) return false;
+  if (rule.scope !== undefined && rule.scope !== intent.scope) return false;
+  if (rule.target === undefined) return true;
+
+  if (intent.scope === "subtree") {
+    return targetMatchesPath(rule.target, intent.lexicalTarget, intent.effectiveTarget, true);
+  }
+  if (intent.scope === "file" || intent.scope === "directory") {
+    return targetMatchesPath(rule.target, intent.lexicalTarget, intent.effectiveTarget, false);
+  }
+  if (intent.scope === "domain" && rule.target.startsWith("*.")) {
+    const suffix = rule.target.slice(1);
+    return intent.target.endsWith(suffix) && intent.target !== rule.target.slice(2);
+  }
+  return rule.target === intent.target;
+}
+
+function targetMatchesPath(
+  ruleTarget: string,
+  lexical: string | undefined,
+  effective: string | undefined,
+  subtree: boolean,
+): boolean {
+  if (!lexical || !effective) return false;
+  return subtree
+    ? containsPath(ruleTarget, lexical) || containsPath(ruleTarget, effective)
+    : ruleTarget === lexical || ruleTarget === effective;
+}
+
+function sanitizePermissionRules(
+  raw: unknown,
+  source: "global" | "project",
+  workspace: string,
+  diagnostics: string[],
+): ResolvedPermissionRule[] {
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw)) {
+    diagnostics.push(`permissions: ${source} rules must be an array; failing closed`);
+    return [{ effect: "deny", source }];
+  }
+  const out: ResolvedPermissionRule[] = [];
+  for (const [index, value] of raw.entries()) {
+    const parsed = parseRule(value, source, workspace);
+    if (parsed) {
+      out.push(parsed);
+    } else {
+      diagnostics.push(`permissions: invalid ${source} rule at index ${index}; failing closed`);
+      out.push({ effect: "deny", source });
+    }
+  }
+  return out;
+}
+
+function parseRule(
+  raw: unknown,
+  source: "global" | "project",
+  workspace: string,
+): ResolvedPermissionRule | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const value = raw as Record<string, unknown>;
+  const effect = value.effect;
+  if (effect !== "allow" && effect !== "ask" && effect !== "deny") return undefined;
+  const tool = typeof value.tool === "string" && value.tool.trim() ? value.tool.trim() : undefined;
+  const capability =
+    typeof value.capability === "string" && CAPABILITIES.has(value.capability)
+      ? (value.capability as ResolvedPermissionRule["capability"])
+      : undefined;
+  if (value.capability !== undefined && capability === undefined) return undefined;
+  const scope =
+    typeof value.scope === "string" && SCOPES.has(value.scope)
+      ? (value.scope as ResolvedPermissionRule["scope"])
+      : undefined;
+  if (value.scope !== undefined && scope === undefined) return undefined;
+  let target = typeof value.target === "string" && value.target ? value.target : undefined;
+  if (value.target !== undefined && target === undefined) return undefined;
+  if (!tool && !capability) return undefined;
+  if ((target === undefined) !== (scope === undefined)) return undefined;
+  if (target && (scope === "file" || scope === "directory" || scope === "subtree")) {
+    target = path.resolve(workspace, target);
+  } else if (target && scope === "domain") {
+    target = target.toLowerCase().replace(/\.$/, "");
+  }
+  return { effect, tool, capability, target, scope, source };
+}
+
+function sanitizeAllowlist(raw: unknown, workspace: string, diagnostics: string[]): string[] {
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw)) {
+    diagnostics.push("permissions: global externalWriteAllowlist must be an array; ignored");
+    return [];
+  }
+  const out: string[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== "string" || !entry || entry.includes("\0")) {
+      diagnostics.push("permissions: invalid external write allowlist entry ignored");
+      continue;
+    }
+    out.push(path.resolve(workspace, entry));
+  }
+  return [...new Set(out)];
 }

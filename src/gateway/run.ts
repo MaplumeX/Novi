@@ -126,7 +126,11 @@ export async function runGateway(options: RunGatewayOptions): Promise<void> {
   }
 
   // 3. One-time env preparation (env / credentials / settings / models / ...).
-  const gatewayEnv = await prepareGatewayEnv({ ...options, trusted });
+  const gatewayEnv = await prepareGatewayEnv({
+    ...options,
+    trusted,
+    toolMode: "gateway",
+  });
 
   // 4. Load gateway.json (user + project layers, project gated by trust).
   const { config, warnings } = await loadGatewayConfig(gatewayEnv.env, {

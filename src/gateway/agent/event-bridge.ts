@@ -1,5 +1,10 @@
-import type { AgentHarness, AgentHarnessEvent, AgentMessage } from "@earendil-works/pi-agent-core/node";
+import type {
+  AgentHarness,
+  AgentHarnessEvent,
+  AgentMessage,
+} from "@earendil-works/pi-agent-core/node";
 import { extractText } from "../../headless/events.js";
+import { findPermissionError } from "../../permissions/errors.js";
 import type { AgentProtocolTurnCallbacks } from "../core/types.js";
 
 /**
@@ -54,9 +59,15 @@ export function createEventBridge(
         callbacks.onToolCall?.(event.toolName, "running");
         break;
 
-      case "tool_execution_end":
-        callbacks.onToolCall?.(event.toolName, event.isError ? "error" : "done");
+      case "tool_execution_end": {
+        const permissionError = findPermissionError(event.result);
+        if (permissionError) {
+          callbacks.onToolCall?.(event.toolName, event.isError ? "error" : "done", permissionError);
+        } else {
+          callbacks.onToolCall?.(event.toolName, event.isError ? "error" : "done");
+        }
         break;
+      }
 
       case "message_end": {
         const message = event.message as AgentMessage as {

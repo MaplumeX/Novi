@@ -133,8 +133,17 @@ async function runTurn(
     onReasoningDelta: async (delta: string) => {
       await channel.sendEvent?.(chatId, { type: "reasoning-delta", delta });
     },
-    onToolCall: async (toolName: string, status?: string) => {
-      await channel.sendEvent?.(chatId, { type: "tool-call", toolName, status });
+    onToolCall: async (
+      toolName: string,
+      status?: string,
+      error?: { code: string; message: string },
+    ) => {
+      await channel.sendEvent?.(chatId, {
+        type: "tool-call",
+        toolName,
+        status,
+        ...(error ? { error } : {}),
+      });
     },
     onTyping: async () => {
       await channel.sendTyping?.(chatId);

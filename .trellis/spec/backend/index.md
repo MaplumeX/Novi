@@ -12,15 +12,16 @@ This directory contains guidelines for backend development. Fill in each file wi
 
 ## Guidelines Index
 
-| Guide | Description | Status |
-|-------|-------------|--------|
-| [Directory Structure](./directory-structure.md) | Module organization and file layout | ✅ Filled |
-| [Database Guidelines](./database-guidelines.md) | Persistence (JSONL sessions, in-memory todos, resource files) | ✅ Filled |
-| [Error Handling](./error-handling.md) | Error types, handling strategies | ✅ Filled |
-| [Quality Guidelines](./quality-guidelines.md) | Code standards, forbidden patterns | ✅ Filled |
-| [Logging Guidelines](./logging-guidelines.md) | Diagnostic output (stderr warnings, startup errors) | ✅ Filled |
-| [pi-agent-core API 契约](./pi-agent-core-api.md) | 已验证的 pi-agent-core / pi-ai 公开 API（Node 入口、session、models、harness 事件、hook 注册） | ✅ Filled |
-| [Web Tool Contracts](./web-tools.md) | Batch search/fetch contracts, providers, guarded network, cache, and continuation | ✅ Filled |
+| Guide                                                 | Description                                                                                    | Status    |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------------------------- | --------- |
+| [Directory Structure](./directory-structure.md)       | Module organization and file layout                                                            | ✅ Filled |
+| [Database Guidelines](./database-guidelines.md)       | Persistence (JSONL sessions, in-memory todos, resource files)                                  | ✅ Filled |
+| [Error Handling](./error-handling.md)                 | Error types, handling strategies                                                               | ✅ Filled |
+| [Quality Guidelines](./quality-guidelines.md)         | Code standards, forbidden patterns                                                             | ✅ Filled |
+| [Logging Guidelines](./logging-guidelines.md)         | Diagnostic output (stderr warnings, startup errors)                                            | ✅ Filled |
+| [pi-agent-core API 契约](./pi-agent-core-api.md)      | 已验证的 pi-agent-core / pi-ai 公开 API（Node 入口、session、models、harness 事件、hook 注册） | ✅ Filled |
+| [Web Tool Contracts](./web-tools.md)                  | Batch search/fetch contracts, providers, guarded network, cache, and continuation              | ✅ Filled |
+| [Tool Runtime Contracts](./tool-runtime-contracts.md) | Descriptor assembly, scoped permissions, workspace boundary, and stable denial codes           | ✅ Filled |
 
 ---
 

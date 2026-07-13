@@ -80,6 +80,8 @@ function App({
         trusted: initialHandle.trusted,
         permissionGate: initialHandle.permissionGate,
         permissionStore: initialHandle.permissionStore,
+        toolCatalog: initialHandle.toolCatalog,
+        toolMode: initialHandle.toolMode,
       },
       {
         env,
@@ -93,6 +95,7 @@ function App({
         permissionGate: initialHandle.permissionGate,
         settingsLayers,
         resolvedSettings,
+        toolMode: initialHandle.toolMode,
       },
     ),
   );
@@ -544,6 +547,8 @@ export function renderApp(
       trusted: bootstrapResult.trusted,
       permissionGate: bootstrapResult.permissionGate,
       permissionStore: bootstrapResult.permissionStore,
+      toolCatalog: bootstrapResult.toolCatalog,
+      toolMode: bootstrapResult.toolMode,
     },
     {
       env,
@@ -559,6 +564,7 @@ export function renderApp(
       permissionGate: bootstrapResult.permissionGate,
       settingsLayers: bootstrapResult.settingsLayers,
       resolvedSettings,
+      toolMode: bootstrapResult.toolMode,
     },
   );
 

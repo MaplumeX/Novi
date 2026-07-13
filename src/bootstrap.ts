@@ -1,11 +1,15 @@
 import path from "node:path";
-import { NodeExecutionEnv, AgentHarness, JsonlSessionRepo, uuidv7 } from "@earendil-works/pi-agent-core/node";
+import {
+  NodeExecutionEnv,
+  AgentHarness,
+  JsonlSessionRepo,
+  uuidv7,
+} from "@earendil-works/pi-agent-core/node";
 import type {
   JsonlSessionMetadata,
   Session,
   ExecutionEnv,
   ThinkingLevel,
-  AgentTool,
   AgentHarnessStreamOptions,
   QueueMode,
   AgentHarnessResources,
@@ -17,14 +21,18 @@ import type { LoadedResources } from "./resources.js";
 import type { HookConfig } from "./hooks/index.js";
 import { getNoviDir, getSessionsDir } from "./config.js";
 import { DEFAULT_SYSTEM_PROMPT } from "./default-system-prompt.js";
-import { createBuiltinTools } from "./tools/index.js";
+import { createBuiltinToolAssembly } from "./tools/index.js";
+import { getBuiltinToolDescriptor } from "./tools/index.js";
+import {
+  snapshotToolAssembly,
+  type ToolCatalogSnapshot,
+  type ToolRuntimeMode,
+} from "./tools/contracts.js";
+import type { WorkspaceScopeGuard } from "./permissions/scope.js";
 import { loadResources } from "./resources.js";
 import { loadCustomModels } from "./models-loader.js";
 import { loadHooks, registerHooks } from "./hooks/index.js";
-import {
-  loadCredentials,
-  injectCredentialsIntoEnv,
-} from "./credentials.js";
+import { loadCredentials, injectCredentialsIntoEnv } from "./credentials.js";
 import {
   loadSettings,
   resolveSettings,
@@ -81,6 +89,8 @@ export interface BootstrapOptions {
    * When omitted, a fresh store is created.
    */
   permissionStore?: SessionPermissionStore;
+  /** Internal caller mode used by descriptor availability resolution. */
+  toolMode?: ToolRuntimeMode;
 }
 
 export interface BootstrapResult {
@@ -96,10 +106,7 @@ export interface BootstrapResult {
   /** Resolved settings (merged + CLI overrides + provenance). */
   resolvedSettings: ResolvedSettings;
   /** System-prompt provider (reused when rebuilding the harness on /reload). */
-  systemPrompt: (ctx: {
-    env: ExecutionEnv;
-    resources: AgentHarnessResources;
-  }) => Promise<string>;
+  systemPrompt: (ctx: { env: ExecutionEnv; resources: AgentHarnessResources }) => Promise<string>;
   /** Raw CLI overrides (provider/model/thinking) for /settings re-resolution. */
   cliOverrides: { provider?: string; model?: string; thinkingLevel?: ThinkingLevel };
   /** Whether project-level resources were loaded (trust gate result). */
@@ -114,6 +121,9 @@ export interface BootstrapResult {
   permissionStore: SessionPermissionStore;
   /** Settings layers used for tighten-only permission re-resolve on reload. */
   settingsLayers: SettingsLayers;
+  /** Validated tool descriptors, availability, and active-set diagnostics. */
+  toolCatalog: ToolCatalogSnapshot;
+  toolMode: ToolRuntimeMode;
 }
 
 /**
@@ -130,10 +140,7 @@ export interface GatewayEnv {
   models: Models;
   model: Model<Api>;
   resolvedSettings: ResolvedSettings;
-  systemPrompt: (ctx: {
-    env: ExecutionEnv;
-    resources: AgentHarnessResources;
-  }) => Promise<string>;
+  systemPrompt: (ctx: { env: ExecutionEnv; resources: AgentHarnessResources }) => Promise<string>;
   trusted: boolean;
   /** Loaded skills + prompt templates (user + trusted project). */
   resources: LoadedResources;
@@ -160,6 +167,9 @@ export interface GatewayEnv {
    * Stored so createHarnessForSession / resume can build the gate.
    */
   approver: Approver | undefined;
+  /** Preflight catalog used for diagnostics before any Gateway session exists. */
+  toolCatalog: ToolCatalogSnapshot;
+  toolMode: ToolRuntimeMode;
 }
 
 /**
@@ -180,9 +190,9 @@ async function resolveModel(
   }
   const model = modelId
     ? (models.getModel(provider, modelId) ?? undefined)
-    : (provider === DEFAULT_PROVIDER
+    : ((provider === DEFAULT_PROVIDER
         ? (models.getModel(provider, DEFAULT_MODEL_ID) ?? undefined)
-        : undefined) ?? candidates[0];
+        : undefined) ?? candidates[0]);
   if (!model) {
     const requested = modelId ?? (provider === DEFAULT_PROVIDER ? DEFAULT_MODEL_ID : "");
     throw new Error(
@@ -196,9 +206,7 @@ async function resolveModel(
       provider === "anthropic"
         ? " Set ANTHROPIC_API_KEY (or ANTHROPIC_OAUTH_TOKEN) in your environment."
         : "";
-    throw new Error(
-      `provider "${provider}" is not configured (no API key found).${envHint}`,
-    );
+    throw new Error(`provider "${provider}" is not configured (no API key found).${envHint}`);
   }
   return model;
 }
@@ -220,10 +228,9 @@ async function resolveModel(
  *
  * Sections are joined with blank-line separators; empty sections are omitted.
  */
-function makeSystemPromptProvider(cwd: string): (ctx: {
-  env: ExecutionEnv;
-  resources: AgentHarnessResources;
-}) => Promise<string> {
+function makeSystemPromptProvider(
+  cwd: string,
+): (ctx: { env: ExecutionEnv; resources: AgentHarnessResources }) => Promise<string> {
   // Legacy system-prompt.md candidates (compat fallback, before SYSTEM.md).
   const noviDir = getNoviDir();
   const systemMdCandidates = [
@@ -239,7 +246,13 @@ function makeSystemPromptProvider(cwd: string): (ctx: {
   ];
   const agentsMdCandidates = getAgentsMdCandidates(cwd);
 
-  return async ({ env, resources }: { env: ExecutionEnv; resources: AgentHarnessResources }): Promise<string> => {
+  return async ({
+    env,
+    resources,
+  }: {
+    env: ExecutionEnv;
+    resources: AgentHarnessResources;
+  }): Promise<string> => {
     // 1. base prompt
     let base = DEFAULT_SYSTEM_PROMPT;
     for (const candidate of systemMdCandidates) {
@@ -294,6 +307,7 @@ async function ensureDir(env: ExecutionEnv, dir: string): Promise<void> {
 export async function prepareGatewayEnv(options: BootstrapOptions = {}): Promise<GatewayEnv> {
   const cwd = options.cwd ?? process.cwd();
   const trusted = options.trusted !== false;
+  const toolMode = options.toolMode ?? "tui";
 
   const env = new NodeExecutionEnv({ cwd, shellEnv: process.env });
 
@@ -308,23 +322,34 @@ export async function prepareGatewayEnv(options: BootstrapOptions = {}): Promise
   for (const diagnostic of loadResult.diagnostics) {
     process.stderr.write(`warning: ${diagnostic}\n`);
   }
-  const resolvedSettings = resolveSettings(
-    loadResult.merged,
-    loadResult.layers,
-    {
-      provider: options.provider,
-      model: options.model,
-      thinkingLevel: options.thinkingLevel,
-    },
-  );
+  const resolvedSettings = resolveSettings(loadResult.merged, loadResult.layers, {
+    provider: options.provider,
+    model: options.model,
+    thinkingLevel: options.thinkingLevel,
+  });
 
   const yes = options.yes === true;
   const permissions = resolvePermissionsFromSettings(resolvedSettings, {
     yes,
     layers: loadResult.layers,
+    workspace: cwd,
   });
+  for (const diagnostic of permissions.diagnostics) {
+    process.stderr.write(`warning: ${diagnostic}\n`);
+  }
   const permissionStore = options.permissionStore ?? new SessionPermissionStore();
   const approver = options.approver;
+
+  const toolPreflight = createBuiltinToolAssembly(env, "preflight", {
+    webSearch: resolvedSettings.webSearch,
+    fetchContent: resolvedSettings.fetchContent,
+    exposure: resolvedSettings.tools,
+    permissions,
+    mode: toolMode,
+  });
+  for (const diagnostic of toolPreflight.diagnostics) {
+    process.stderr.write(`warning: ${diagnostic}\n`);
+  }
 
   const models = builtinModels();
   const custom = await loadCustomModels(env, cwd, { includeProject: trusted });
@@ -378,6 +403,8 @@ export async function prepareGatewayEnv(options: BootstrapOptions = {}): Promise
     settingsLayers: loadResult.layers,
     permissionStore,
     approver,
+    toolCatalog: snapshotToolAssembly(toolPreflight),
+    toolMode,
   };
 }
 
@@ -387,6 +414,8 @@ export interface CreatedSession {
   session: Session<JsonlSessionMetadata>;
   sessionPath: string;
   permissionGate: PermissionGate;
+  toolCatalog: ToolCatalogSnapshot;
+  permissionStore: SessionPermissionStore;
 }
 
 /**
@@ -418,26 +447,30 @@ export async function createHarnessForSession(
     thinkingLevel,
   });
 
-  // Register the built-in tool set. Must pass all tool names explicitly,
-  // otherwise `setTools` reuses the (empty) initial `activeToolNames`.
-  const tools: AgentTool[] = createBuiltinTools(env, metadata.id, {
+  const toolAssembly = createBuiltinToolAssembly(env, metadata.id, {
     webSearch: gatewayEnv.resolvedSettings.webSearch,
     fetchContent: gatewayEnv.resolvedSettings.fetchContent,
+    exposure: gatewayEnv.resolvedSettings.tools,
+    permissions: gatewayEnv.permissions,
+    mode: gatewayEnv.toolMode,
+    workspace: cwd,
   });
-  await harness.setTools(tools, tools.map((t) => t.name));
+  await harness.setTools(toolAssembly.tools, toolAssembly.activeToolNames);
 
   await harness.setResources({
     skills: resources.skills,
     promptTemplates: resources.promptTemplates,
   });
 
-  const permissionGate = buildPermissionGate(gatewayEnv);
-  registerHooks(
-    harness,
-    hookConfig,
-    { env, cwd, sessionId: metadata.id },
-    { permissionGate },
+  const permissionStore = permissionStoreForHarness(
+    gatewayEnv.toolMode,
+    gatewayEnv.permissionStore,
   );
+  const permissionGate = buildPermissionGate(
+    { ...gatewayEnv, permissionStore },
+    toolAssembly.scopeGuard,
+  );
+  registerHooks(harness, hookConfig, { env, cwd, sessionId: metadata.id }, { permissionGate });
 
   // Apply stream options when any are set (avoids a no-op setStreamOptions).
   const so = gatewayEnv.streamOptions;
@@ -452,26 +485,46 @@ export async function createHarnessForSession(
     await harness.setFollowUpMode(gatewayEnv.followUpMode);
   }
 
-  return { harness, session, sessionPath, permissionGate };
+  return {
+    harness,
+    session,
+    sessionPath,
+    permissionGate,
+    toolCatalog: snapshotToolAssembly(toolAssembly),
+    permissionStore,
+  };
+}
+
+/** Gateway chats never share grants; interactive rebuilds retain one store. */
+export function permissionStoreForHarness(
+  mode: ToolRuntimeMode,
+  shared: SessionPermissionStore,
+): SessionPermissionStore {
+  return mode === "gateway" ? new SessionPermissionStore() : shared;
 }
 
 /** Build a PermissionGate from GatewayEnv (interactive or fail-closed). */
-export function buildPermissionGate(gatewayEnv: {
-  permissions: ResolvedPermissions;
-  permissionStore: SessionPermissionStore;
-  approver: Approver | undefined;
-}): PermissionGate {
-  if (gatewayEnv.approver) {
-    return createPermissionGate({
-      permissions: gatewayEnv.permissions,
-      approver: gatewayEnv.approver,
-      store: gatewayEnv.permissionStore,
-    });
-  }
-  return createNonInteractivePermissionGate({
+export function buildPermissionGate(
+  gatewayEnv: {
+    permissions: ResolvedPermissions;
+    permissionStore: SessionPermissionStore;
+    approver: Approver | undefined;
+  },
+  scopeGuard: WorkspaceScopeGuard,
+): PermissionGate {
+  const common = {
     permissions: gatewayEnv.permissions,
     store: gatewayEnv.permissionStore,
-  });
+    scopeGuard,
+    resolveDescriptor: getBuiltinToolDescriptor,
+  };
+  if (gatewayEnv.approver) {
+    return createPermissionGate({
+      ...common,
+      approver: gatewayEnv.approver,
+    });
+  }
+  return createNonInteractivePermissionGate(common);
 }
 
 /**
@@ -490,6 +543,8 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
   let sessionPath: string;
   let harness: AgentHarness;
   let permissionGate: PermissionGate;
+  let permissionStore = gatewayEnv.permissionStore;
+  let toolCatalog: ToolCatalogSnapshot;
 
   if (options.resumePath) {
     const { env } = gatewayEnv;
@@ -511,16 +566,21 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
       thinkingLevel: gatewayEnv.thinkingLevel,
     });
 
-    const tools: AgentTool[] = createBuiltinTools(env, metadata.id, {
+    const toolAssembly = createBuiltinToolAssembly(env, metadata.id, {
       webSearch: gatewayEnv.resolvedSettings.webSearch,
       fetchContent: gatewayEnv.resolvedSettings.fetchContent,
+      exposure: gatewayEnv.resolvedSettings.tools,
+      permissions: gatewayEnv.permissions,
+      mode: gatewayEnv.toolMode,
+      workspace: gatewayEnv.cwd,
     });
-    await harness.setTools(tools, tools.map((t) => t.name));
+    await harness.setTools(toolAssembly.tools, toolAssembly.activeToolNames);
+    toolCatalog = snapshotToolAssembly(toolAssembly);
     await harness.setResources({
       skills: gatewayEnv.resources.skills,
       promptTemplates: gatewayEnv.resources.promptTemplates,
     });
-    permissionGate = buildPermissionGate(gatewayEnv);
+    permissionGate = buildPermissionGate(gatewayEnv, toolAssembly.scopeGuard);
     registerHooks(
       harness,
       gatewayEnv.hookConfig,
@@ -543,6 +603,8 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
     session = created.session;
     sessionPath = created.sessionPath;
     permissionGate = created.permissionGate;
+    permissionStore = created.permissionStore;
+    toolCatalog = created.toolCatalog;
   }
 
   return {
@@ -564,7 +626,9 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
     scopedModels: gatewayEnv.resolvedSettings.scopedModels ?? [],
     yes: gatewayEnv.yes,
     permissionGate,
-    permissionStore: gatewayEnv.permissionStore,
+    permissionStore,
     settingsLayers: gatewayEnv.settingsLayers,
+    toolCatalog,
+    toolMode: gatewayEnv.toolMode,
   };
 }

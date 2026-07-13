@@ -48,7 +48,7 @@ const session = await repo.open({ path } as JsonlSessionMetadata);
 in-memory `Map<string, Todo[]>` as a write-through cache. Each session gets
 its own list; `createTodoTool(sessionId)` closes over the sessionId and scopes
 all operations to `getSessionTodos(sessionId)` (cache-first, lazy-loads from
-disk on cache miss). `createBuiltinTools(env, sessionId)` threads the session id
+disk on cache miss). `createBuiltinToolAssembly(env, sessionId)` threads the session id
 through to the tool factory.
 
 Persistence is best-effort: if the directory cannot be created or the file
@@ -102,6 +102,12 @@ Novi loads settings from `~/.novi/settings.json` (global) and
 - Precedence: CLI flag > project settings > global settings > built-in default.
 - Parse failures degrade to an empty layer + `stderr` warning; startup is
   never blocked.
+- `tools.enabled` and `tools.sources` are tighten-only at project scope:
+  project settings may disable, never enable.
+- `permissions.rules` concatenate global rules with project `ask`/`deny`
+  rules. Project `allow` rules are removed. Runtime parsing remains fail-closed.
+- `permissions.externalWriteAllowlist` comes only from global settings;
+  project values are ignored and diagnosed. See `tool-runtime-contracts.md`.
 
 `ResolvedSettings` carries `_sources: Record<string, SettingSource>` so the
 `/settings` form can display per-leaf provenance (`"global" | "project" |
@@ -124,9 +130,9 @@ leak secrets.
 // Format: flat { "<ENV_VAR_NAME>": "<api_key>" } JSON object.
 import { loadCredentials, writeCredentials, injectCredentialsIntoEnv } from "./credentials.js";
 
-const creds = await loadCredentials(env);             // missing/corrupt → {}
+const creds = await loadCredentials(env); // missing/corrupt → {}
 await writeCredentials(env, { ANTHROPIC_API_KEY: "sk-..." }); // shallow-merge + chmod 0600
-injectCredentialsIntoEnv(creds, process.env);          // only fills UNDEFINED vars
+injectCredentialsIntoEnv(creds, process.env); // only fills UNDEFINED vars
 ```
 
 - **File**: `~/.novi/credentials.json`, JSON object `{ "ENV_VAR": "value" }`,

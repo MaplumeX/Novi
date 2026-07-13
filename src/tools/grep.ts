@@ -3,7 +3,15 @@ import * as Type from "typebox";
 import { minimatch } from "minimatch";
 import type { AgentTool } from "@earendil-works/pi-agent-core/node";
 import type { ExecutionEnv } from "@earendil-works/pi-agent-core/node";
-import { resolveAbsolutePath, shellQuote, truncateLine, truncateWithFooter, GREP_MAX_LINE_LENGTH, walkFiles } from "./shared.js";
+import type { WorkspaceScopeGuard } from "../permissions/scope.js";
+import {
+  resolveAbsolutePath,
+  shellQuote,
+  truncateLine,
+  truncateWithFooter,
+  GREP_MAX_LINE_LENGTH,
+  walkFiles,
+} from "./shared.js";
 import type { TruncationInfo } from "./shared.js";
 
 const Parameters = Type.Object({
@@ -27,21 +35,53 @@ export interface GrepMatch {
  * Prefers ripgrep (`rg`); if `rg` is unavailable (spawn error / exit 127) falls
  * back to a recursive `env.listDir` + `readTextFile` + `RegExp` scan.
  */
-export function createGrepTool(env: ExecutionEnv): AgentTool<typeof Parameters, { matches: GrepMatch[]; engine: "ripgrep" | "fallback"; truncation?: TruncationInfo }> {
+export function createGrepTool(
+  env: ExecutionEnv,
+  scopeGuard?: WorkspaceScopeGuard,
+): AgentTool<
+  typeof Parameters,
+  { matches: GrepMatch[]; engine: "ripgrep" | "fallback"; truncation?: TruncationInfo }
+> {
   return {
     name: "grep",
     label: "Grep",
-    description: "Search file contents for a regex pattern. Prefers ripgrep, falls back to a tree scan.",
+    description:
+      "Search file contents for a regex pattern. Prefers ripgrep, falls back to a tree scan.",
     parameters: Parameters,
-    execute: async (_toolCallId, params, signal) => {
+    execute: async (toolCallId, params, signal) => {
+      await scopeGuard?.assertNativeFileAccess(
+        toolCallId,
+        "filesystem.read",
+        params.path ?? ".",
+        "subtree",
+        signal,
+      );
       const base = await resolveAbsolutePath(env, params.path ?? ".");
       const ignoreCase = params.ignoreCase ?? false;
       const literal = params.literal ?? false;
       const context = params.context ?? 0;
-      const rg = await tryRipgrep(env, params.pattern, base, params.glob, ignoreCase, literal, context, signal);
+      const rg = await tryRipgrep(
+        env,
+        params.pattern,
+        base,
+        params.glob,
+        ignoreCase,
+        literal,
+        context,
+        signal,
+      );
       if (rg) return rg;
 
-      const matches = await grepFallback(env, params.pattern, base, params.glob, ignoreCase, literal, context, signal);
+      const matches = await grepFallback(
+        env,
+        params.pattern,
+        base,
+        params.glob,
+        ignoreCase,
+        literal,
+        context,
+        signal,
+      );
       const { text, truncation } = truncateWithFooter(formatMatches(matches), "head");
       return {
         content: [{ type: "text", text }],
@@ -60,11 +100,25 @@ async function tryRipgrep(
   literal: boolean,
   context: number,
   signal: AbortSignal | undefined,
-): Promise<{ content: { type: "text"; text: string }[]; details: { matches: GrepMatch[]; engine: "ripgrep"; truncation: TruncationInfo } } | undefined> {
+): Promise<
+  | {
+      content: { type: "text"; text: string }[];
+      details: { matches: GrepMatch[]; engine: "ripgrep"; truncation: TruncationInfo };
+    }
+  | undefined
+> {
   // --with-filename forces the path prefix even for single-file searches.
   // --null separates the file path from the rest with a NUL byte, making
   // parsing robust against colons in file paths.
-  const parts = ["rg", "--line-number", "--no-heading", "--color", "never", "--with-filename", "--null"];
+  const parts = [
+    "rg",
+    "--line-number",
+    "--no-heading",
+    "--color",
+    "never",
+    "--with-filename",
+    "--null",
+  ];
   if (ignoreCase) parts.push("-i");
   if (literal) parts.push("--fixed-strings");
   if (glob) parts.push("--glob", shellQuote(glob));
@@ -131,7 +185,9 @@ async function grepFallback(
     const patternStr = literal ? escapeRegex(pattern) : pattern;
     re = new RegExp(patternStr, flags);
   } catch (e) {
-    throw new Error(`invalid regex pattern "${pattern}": ${e instanceof Error ? e.message : String(e)}`);
+    throw new Error(
+      `invalid regex pattern "${pattern}": ${e instanceof Error ? e.message : String(e)}`,
+    );
   }
   const contextN = context > 0 ? context : 0;
   const files = await walkFiles(env, base, signal);
@@ -149,7 +205,11 @@ async function grepFallback(
     const seen = new Set<number>();
     for (let i = 0; i < lines.length; i++) {
       if (re.test(lines[i])) {
-        for (let j = Math.max(0, i - contextN); j <= Math.min(lines.length - 1, i + contextN); j++) {
+        for (
+          let j = Math.max(0, i - contextN);
+          j <= Math.min(lines.length - 1, i + contextN);
+          j++
+        ) {
           if (!seen.has(j)) {
             seen.add(j);
             matches.push({ file: f.path, line: j + 1, text: lines[j] });
@@ -165,8 +225,10 @@ async function grepFallback(
 
 function formatMatches(matches: GrepMatch[]): string {
   if (matches.length === 0) return "(no matches)";
-  return matches.map((m) => {
-    const { text: line } = truncateLine(m.text, GREP_MAX_LINE_LENGTH);
-    return `${m.file}:${m.line}:${line}`;
-  }).join("\n");
+  return matches
+    .map((m) => {
+      const { text: line } = truncateLine(m.text, GREP_MAX_LINE_LENGTH);
+      return `${m.file}:${m.line}:${line}`;
+    })
+    .join("\n");
 }

@@ -28,8 +28,9 @@ src/
 ├── compaction.ts           # AutoCompactor: turn debounce + threshold check
 ├── *.test.ts               # Co-located tests alongside their source
 ├── tools/                  # Built-in tool set, one file per tool
-│   ├── index.ts            # createBuiltinTools(env, sessionId) — thin wrapper over registry
-│   ├── registry.ts         # BuiltinToolRegistry: add/buildAll/names
+│   ├── contracts.ts        # Descriptor/catalog/capability/availability contracts
+│   ├── index.ts            # createBuiltinToolAssembly + built-in descriptors
+│   ├── registry.ts         # ToolRegistry: validated descriptor assembly
 │   ├── shared.ts           # Shared helpers (unwrap / textResult / sliceLines …)
 │   ├── bash.ts             # Each tool: createXxxTool(env): AgentTool
 │   ├── read-file.ts
@@ -49,11 +50,12 @@ src/
 │   │   ├── providers/       # DuckDuckGo, Brave, Tavily normalization
 │   │   └── extractors/      # HTML, text, JSON, PDF
 │   └── __tests__/          # Tool tests + helpers.ts (setupEnv / getTool / writeFixture)
-├── permissions/           # Built-in tool permission model (static policy + Approver)
-│   ├── types.ts            # PermissionLevel / Approver / ApprovalChoice
-│   ├── policy.ts           # defaults + global override + project tighten-only + --yes
-│   ├── gate.ts             # PermissionGate + SessionPermissionStore + NonInteractive
-│   ├── summary.ts          # summarizeToolInput for confirmation UI
+├── permissions/           # Scoped capability policy + native workspace boundary
+│   ├── types.ts            # Rules, canonical intents, grants, approval/error contracts
+│   ├── policy.ts           # Descriptor defaults + global/project rule resolution
+│   ├── gate.ts             # Deny-first PermissionGate + minimal SessionPermissionStore
+│   ├── scope.ts            # Lexical/effective path, domain, and command normalization
+│   ├── errors.ts           # NOVI_ERROR codec + shared result decoder
 │   ├── tui-approver.ts     # Queued TUI Approver (once/session/deny)
 │   └── index.ts            # Public barrel exports
 ├── images/                # Multimodal image encode + clipboard adapters (TUI pending attachments)
@@ -91,16 +93,18 @@ src/
 - **One file = one module.** Each file exports its factory function / types /
   constants directly. Do not add a barrel `index.ts` unless a sub-directory
   needs a single public entry (existing: `tools/index.ts` with
-  `createBuiltinTools`, `hooks/index.ts`, `permissions/index.ts`).
+  `createBuiltinToolAssembly`, `hooks/index.ts`, `permissions/index.ts`).
 - **Single entry point.** `cli.ts` is the process entry (`#!/usr/bin/env node`
-  + `package.json` `bin`). Other modules must not call `process.exit` or write
-  `process.stderr` directly, except for top-level startup error paths.
+  - `package.json` `bin`). Other modules must not call `process.exit` or write
+    `process.stderr` directly, except for top-level startup error paths.
 - **Tool files.** One file exports one `createXxxTool`, closing over
   `ExecutionEnv`, returning `AgentTool<typeof Parameters>`. The parameter
   schema is defined with typebox in the same file. Tools are registered
-  centrally via `BuiltinToolRegistry.add()` in `tools/index.ts` (see
-  `tools/registry.ts`); to add a new built-in tool, add one `.add()` call
-  there — there is no array literal to edit. The `web/` sub-directory owns
+  centrally as validated descriptors in `tools/index.ts` (see
+  `tools/contracts.ts` and `tools/registry.ts`). Every descriptor declares its
+  capability, risk, default permission, supported modes, factory, and intent
+  resolver. See `tool-runtime-contracts.md` before changing this boundary. The
+  `web/` sub-directory owns
   normalized contracts, provider resolution, cache, guarded network access,
   URL/IP policy, and media extractors. See `web-tools.md` before changing it.
 - **Co-located tests.** `foo.ts` → `foo.test.ts`; `tools/` tests live under

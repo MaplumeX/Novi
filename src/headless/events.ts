@@ -1,4 +1,6 @@
 import type { AgentHarnessEvent } from "@earendil-works/pi-agent-core/node";
+import type { ToolCatalogSnapshot } from "../tools/contracts.js";
+import { findPermissionError } from "../permissions/errors.js";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 
 /**
@@ -12,16 +14,18 @@ export function extractText(content: string | readonly unknown[]): string {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
   return content
-    .filter((c): c is { type: "text"; text: string } =>
-      typeof c === "object" && c !== null && (c as { type?: string }).type === "text")
+    .filter(
+      (c): c is { type: "text"; text: string } =>
+        typeof c === "object" && c !== null && (c as { type?: string }).type === "text",
+    )
     .map((c) => c.text)
     .join("");
 }
 
 /** Project the usage stats of an assistant message, or `undefined`. */
-function projectUsage(message: unknown):
-  | { input: number; output: number; cacheRead: number; cacheWrite: number }
-  | undefined {
+function projectUsage(
+  message: unknown,
+): { input: number; output: number; cacheRead: number; cacheWrite: number } | undefined {
   const usage = (message as AssistantMessage)?.usage;
   if (!usage || typeof usage !== "object") return undefined;
   return {
@@ -43,7 +47,38 @@ function projectUsage(message: unknown):
  * of `--mode json` read the projected output, never raw events (see
  * cross-layer-thinking-guide.md).
  */
-export function projectEvent(event: AgentHarnessEvent): Record<string, unknown> {
+export function projectToolCatalog(
+  catalog: ToolCatalogSnapshot,
+  source: string,
+  activeToolNames: readonly string[] = catalog.activeToolNames,
+): Record<string, unknown> {
+  const availability = new Map(catalog.availability.map((entry) => [entry.name, entry]));
+  return {
+    type: "tools_update",
+    source,
+    activeToolNames: [...activeToolNames],
+    tools: catalog.descriptors.map((descriptor) => {
+      const state = availability.get(descriptor.name);
+      return {
+        name: descriptor.name,
+        label: descriptor.label,
+        source: descriptor.source,
+        capabilities: descriptor.capabilities,
+        risk: descriptor.risk,
+        modes: descriptor.modes,
+        status: state?.status ?? "unavailable",
+        ...(state?.reasonCode ? { reasonCode: state.reasonCode } : {}),
+        ...(state?.reason ? { reason: state.reason } : {}),
+      };
+    }),
+    diagnostics: catalog.diagnostics,
+  };
+}
+
+export function projectEvent(
+  event: AgentHarnessEvent,
+  toolCatalog?: ToolCatalogSnapshot,
+): Record<string, unknown> {
   const base: Record<string, unknown> = { type: event.type };
   switch (event.type) {
     case "agent_start":
@@ -64,9 +99,7 @@ export function projectEvent(event: AgentHarnessEvent): Record<string, unknown> 
       return {
         ...base,
         role: event.message.role,
-        text: extractText(
-          (event.message as { content?: string | unknown[] }).content ?? "",
-        ),
+        text: extractText((event.message as { content?: string | unknown[] }).content ?? ""),
         usage: projectUsage(event.message),
       };
     case "tool_execution_start":
@@ -82,13 +115,18 @@ export function projectEvent(event: AgentHarnessEvent): Record<string, unknown> 
         toolCallId: event.toolCallId,
         toolName: event.toolName,
       };
-    case "tool_execution_end":
+    case "tool_execution_end": {
+      const executionError = findPermissionError(event.result);
       return {
         ...base,
         toolCallId: event.toolCallId,
         toolName: event.toolName,
         isError: event.isError,
+        ...(executionError
+          ? { errorCode: executionError.code, errorMessage: executionError.message }
+          : {}),
       };
+    }
     case "queue_update":
       return {
         ...base,
@@ -110,8 +148,7 @@ export function projectEvent(event: AgentHarnessEvent): Record<string, unknown> 
       return {
         ...base,
         prompt: event.prompt,
-        systemPrompt:
-          typeof event.systemPrompt === "string" ? event.systemPrompt : undefined,
+        systemPrompt: typeof event.systemPrompt === "string" ? event.systemPrompt : undefined,
       };
     case "context":
       return { ...base, messageCount: event.messages.length };
@@ -133,14 +170,19 @@ export function projectEvent(event: AgentHarnessEvent): Record<string, unknown> 
         toolName: event.toolName,
         input: event.input,
       };
-    case "tool_result":
+    case "tool_result": {
+      const permissionError = findPermissionError(event.content);
       return {
         ...base,
         toolCallId: event.toolCallId,
         toolName: event.toolName,
         isError: event.isError,
         contentCount: Array.isArray(event.content) ? event.content.length : 0,
+        ...(permissionError
+          ? { errorCode: permissionError.code, errorMessage: permissionError.message }
+          : {}),
       };
+    }
     case "session_compact":
       return {
         ...base,
@@ -171,6 +213,9 @@ export function projectEvent(event: AgentHarnessEvent): Record<string, unknown> 
         promptTemplates: (event.resources?.promptTemplates ?? []).map((t) => t.name),
       };
     case "tools_update":
+      if (toolCatalog) {
+        return projectToolCatalog(toolCatalog, event.source, event.activeToolNames);
+      }
       return {
         ...base,
         toolNames: event.toolNames,

@@ -1,14 +1,16 @@
-import type {
-  ApprovalChoice,
-  ApprovalRequest,
-  Approver,
-} from "./types.js";
+import type { ApprovalChoice, ApprovalRequest, Approver } from "./types.js";
 
 /** Snapshot of the currently displayed permission prompt (for React state). */
 export interface PermissionPromptState {
   toolName: string;
   toolCallId: string;
   summary: string;
+  capability: ApprovalRequest["capability"];
+  target: string;
+  scope: ApprovalRequest["scope"];
+  reason: string;
+  shellBoundaryWarning: boolean;
+  sessionGrantAvailable: boolean;
 }
 
 type Listener = (prompt: PermissionPromptState | null) => void;
@@ -52,6 +54,12 @@ export class TuiApprover implements Approver {
       toolName: this.active.req.toolName,
       toolCallId: this.active.req.toolCallId,
       summary: this.active.req.summary,
+      capability: this.active.req.capability,
+      target: this.active.req.target,
+      scope: this.active.req.scope,
+      reason: this.active.req.reason,
+      shellBoundaryWarning: this.active.req.shellBoundaryWarning,
+      sessionGrantAvailable: this.active.req.sessionGrantAvailable,
     };
   }
 

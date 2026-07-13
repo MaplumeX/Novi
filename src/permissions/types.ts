@@ -1,56 +1,79 @@
-/**
- * Shared types for the built-in tool permission model.
- *
- * Static policy levels (`allow`/`ask`/`deny`) + interactive approval choices
- * for the TUI Approver. See `policy.ts` for resolution and `gate.ts` for
- * runtime evaluation.
- */
+import type { ToolCapability, ToolPermissionIntent, ToolScopeKind } from "../tools/contracts.js";
 
-/** Static permission level for a tool. */
 export type PermissionLevel = "allow" | "ask" | "deny";
+export type PermissionSource = "default" | "global" | "project" | "cli" | "session";
 
-/** Where an effective level came from (for diagnostics / future UI). */
-export type PermissionSource =
-  | "default"
-  | "global"
-  | "project"
-  | "cli"
-  | "session";
+export type PermissionErrorCode =
+  | "PERMISSION_DENIED"
+  | "PERMISSION_INTERACTION_REQUIRED"
+  | "WORKSPACE_EXTERNAL_WRITE_DENIED"
+  | "TOOL_DISABLED"
+  | "PERMISSION_INTENT_INVALID";
 
-/** Resolved decision for one tool name (pre-approver). */
+/** Settings-owned rule. Missing target/scope means a whole tool/capability rule. */
+export interface PermissionRule {
+  effect: PermissionLevel;
+  tool?: string;
+  capability?: ToolCapability;
+  target?: string;
+  scope?: ToolScopeKind;
+}
+
+export interface ResolvedPermissionRule extends PermissionRule {
+  source: "global" | "project";
+}
+
+export interface ResolvedPermissions {
+  rules: ResolvedPermissionRule[];
+  /** Only global settings may populate this list. */
+  externalWriteAllowlist: string[];
+  /** CLI --yes turns an ask decision into an allow after deny/boundary checks. */
+  autoApproveAsks: boolean;
+  diagnostics: string[];
+}
+
 export interface PermissionDecision {
   level: PermissionLevel;
   source: PermissionSource;
-  reason?: string;
+  reason: string;
 }
 
-/** User (or non-interactive) choice when level is `ask`. */
+export interface CanonicalPermissionIntent extends ToolPermissionIntent {
+  /** Normalized matching/grant key shown to the user. */
+  target: string;
+  /** Addressed absolute spelling before symlink resolution. */
+  lexicalTarget?: string;
+  /** Effective target after resolving the deepest existing ancestor. */
+  effectiveTarget?: string;
+  workspaceExternal?: boolean;
+}
+
+export interface PermissionGrant {
+  capability: ToolCapability;
+  scope: ToolScopeKind;
+  target: string;
+  lexicalTarget?: string;
+  effectiveTarget?: string;
+}
+
 export type ApprovalChoice = "once" | "session" | "deny";
 
-/** Payload passed to an Approver when a tool needs confirmation. */
 export interface ApprovalRequest {
   toolName: string;
   toolCallId: string;
   input: unknown;
-  /** Short human-readable summary of key args (e.g. bash command). */
   summary: string;
+  capability: ToolCapability;
+  target: string;
+  scope: ToolScopeKind;
+  reason: string;
+  intents: readonly CanonicalPermissionIntent[];
+  /** Shell permission is not a filesystem sandbox. */
+  shellBoundaryWarning: boolean;
+  /** External native writes never receive process-memory grants. */
+  sessionGrantAvailable: boolean;
 }
 
-/**
- * Interactive (or fail-closed headless) approval surface.
- *
- * TUI: shows an overlay and resolves with the user's choice.
- * Non-interactive: resolves `"deny"` immediately (defensive; normal path
- * converts `ask→allow` via `--yes` before the Approver is consulted).
- */
 export interface Approver {
   request(req: ApprovalRequest): Promise<ApprovalChoice>;
-}
-
-/** Map of tool name → permission level (unlisted tools = allow). */
-export type ToolPermissionMap = Record<string, PermissionLevel>;
-
-/** Fully resolved permissions ready for the gate. */
-export interface ResolvedPermissions {
-  tools: ToolPermissionMap;
 }

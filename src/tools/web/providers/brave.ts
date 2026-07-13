@@ -54,6 +54,7 @@ export const braveProvider: SearchProvider = {
       },
       signal: context.signal,
       timeoutMs: context.timeoutMs,
+      env: context.env,
     });
     providerStatus(response.status, "Brave");
     const results = (response.json as BraveResponse).web?.results ?? [];

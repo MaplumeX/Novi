@@ -47,6 +47,7 @@ export const tavilyProvider: SearchProvider = {
       }),
       signal: context.signal,
       timeoutMs: context.timeoutMs,
+      env: context.env,
     });
     if (response.status === 401 || response.status === 403)
       throw new WebToolError("PROVIDER_AUTH", "Tavily rejected the API key");

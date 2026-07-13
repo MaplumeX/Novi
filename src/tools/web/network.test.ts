@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Dispatcher, request } from "undici";
-import { guardedRequest } from "./network.js";
+import { guardedRequest, providerJsonRequest } from "./network.js";
 
 describe("guarded network policy", () => {
   const publicDns = async () => [{ address: "1.1.1.1", family: 4 as const }];
@@ -93,5 +93,36 @@ describe("guarded network policy", () => {
       }),
     ).rejects.toMatchObject({ name: "AbortError" });
     expect(requestMock).not.toHaveBeenCalled();
+  });
+
+  it("uses HTTPS_PROXY from the supplied tool environment", async () => {
+    const requestSpy = vi.fn().mockResolvedValue({
+      statusCode: 200,
+      headers: { "content-type": "text/plain" },
+      body: body(["ok"]),
+    });
+    const requestMock = requestSpy as unknown as typeof request;
+    await guardedRequest("https://example.com", {
+      resolve: publicDns,
+      request: requestMock,
+      env: { HTTPS_PROXY: "http://proxy.example:8080", NO_PROXY: "localhost" },
+    });
+    const requestOptions = requestSpy.mock.calls[0][1] as { dispatcher?: Dispatcher };
+    expect(requestOptions?.dispatcher?.constructor.name).toBe("EnvHttpProxyAgent");
+  });
+
+  it("uses HTTPS_PROXY for API-provider requests", async () => {
+    const requestSpy = vi.fn().mockResolvedValue({
+      statusCode: 200,
+      headers: { "content-type": "application/json" },
+      body: body(['{"ok":true}']),
+    });
+    const requestMock = requestSpy as unknown as typeof request;
+    await providerJsonRequest("https://api.example.com/search", {
+      request: requestMock,
+      env: { HTTPS_PROXY: "http://proxy.example:8080" },
+    });
+    const requestOptions = requestSpy.mock.calls[0][1] as { dispatcher?: Dispatcher };
+    expect(requestOptions?.dispatcher?.constructor.name).toBe("EnvHttpProxyAgent");
   });
 });

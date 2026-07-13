@@ -27,7 +27,8 @@ describe("web_search batch contract", () => {
       redirectCount: 0,
     });
     try {
-      const tool = getTool(env, "web_search", "test", { cacheRoot });
+      const proxyEnv = { HTTPS_PROXY: "http://proxy.example:8080" };
+      const tool = getTool(env, "web_search", "test", { cacheRoot, env: proxyEnv });
       const first = await tool.execute("1", { queries: [{ query: "alpha" }] });
       const second = await tool.execute("2", { queries: [{ query: "alpha" }] });
       expect((first.content[0] as { text: string }).text).toContain(
@@ -39,6 +40,10 @@ describe("web_search batch contract", () => {
       });
       expect(second.details).toMatchObject({ outcomes: [{ ok: true, cache: "hit" }] });
       expect(mockedGuardedRequest).toHaveBeenCalledTimes(1);
+      expect(mockedGuardedRequest).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ env: proxyEnv }),
+      );
     } finally {
       await cleanup();
       await rm(cacheRoot, { recursive: true, force: true });
@@ -113,6 +118,9 @@ describe("web_search batch contract", () => {
       const requestUrl = new URL(mockedProviderJsonRequest.mock.calls[0][0]);
       expect(requestUrl.searchParams.get("search_lang")).toBe("en");
       expect(requestUrl.searchParams.get("country")).toBe("US");
+      expect(mockedProviderJsonRequest.mock.calls[0][1].env).toMatchObject({
+        BRAVE_API_KEY: "secret",
+      });
     } finally {
       await cleanup();
       await rm(cacheRoot, { recursive: true, force: true });

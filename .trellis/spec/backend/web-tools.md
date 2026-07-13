@@ -39,6 +39,10 @@ interface FetchContentInput {
   max_chars_per_item?: number;      // 2,000..50,000, default 20,000
   force_refresh?: boolean;
 }
+
+interface NetworkOptions {
+  env?: NodeJS.ProcessEnv;           // defaults to process.env
+}
 ```
 
 Every call site (bootstrap, resumed bootstrap, gateway session, and TUI
@@ -72,6 +76,11 @@ settings are replayed from the old harness.
   Validate all DNS answers, pin validated answers into Undici, revalidate every
   redirect, reject URL credentials/private/reserved/test/metadata addresses,
   and apply total timeout, redirect, and byte limits.
+- All search providers and content-fetch paths pass the resolved tool environment
+  into the shared network layer. Undici does not inherit proxy variables by
+  itself, so the network layer must explicitly honor `HTTP_PROXY`, `HTTPS_PROXY`,
+  and `NO_PROXY`, including lowercase variants. Direct and `NO_PROXY` requests
+  retain the guarded DNS lookup.
 
 ### 4. Validation & Error Matrix
 
@@ -88,6 +97,7 @@ settings are replayed from the old harness.
 | malformed JSON / unextractable HTML | `EXTRACTION_FAILED` |
 | malformed PDF / no text layer | `PDF_INVALID` / `OCR_UNSUPPORTED` |
 | Provider auth/rate/server failure | `PROVIDER_AUTH` / `PROVIDER_RATE_LIMIT` / `PROVIDER_ERROR` |
+| malformed or unreachable configured proxy | per-item/provider network error; never silently retry direct |
 | caller AbortSignal | throw cancellation; do not normalize into an item error |
 
 All public item errors include `{ code, message, retryable }` and exclude
@@ -100,9 +110,12 @@ credentials, raw authorization data, provider payloads, and internal stacks.
   cache entries.
 - Base: one-element `queries` / `urls` arrays represent a single operation;
   DuckDuckGo and local extraction need no credential.
+- Good: a Novi process with `HTTPS_PROXY` routes DuckDuckGo, API-provider, and
+  content requests through that proxy while respecting `NO_PROXY`.
 - Bad: exporting `BRAVE_API_KEY` silently changes the default provider, a
-  Provider drops unsupported filters, a fetch follows redirects with global
-  `fetch`, or truncation discards the only full copy.
+  Provider drops unsupported filters, a web request ignores the process proxy,
+  a fetch follows redirects with global `fetch`, or truncation discards the
+  only full copy.
 
 ### 6. Tests Required
 
@@ -115,7 +128,9 @@ credentials, raw authorization data, provider payloads, and internal stacks.
   corrupt-entry recovery, exact document persistence, and no credentials.
 - Network tests assert private IPv4/IPv6 ranges, mixed DNS answers, DNS timeout,
   pinned lookup, redirect revalidation/loops, byte limits, credentials, and
-  abort behavior without public internet access.
+  abort behavior without public internet access. They also assert that guarded
+  public requests and fixed API-provider requests select an environment-aware
+  dispatcher when `HTTPS_PROXY` is supplied.
 - Extractor tests assert hostile/relative-link HTML, charset text, stable JSON,
   text PDF page boundaries, invalid/scanned PDF, and unsupported binary media.
 - Tool tests assert batch ordering, bounded concurrency, partial success,
@@ -142,10 +157,13 @@ the exact source, and gives siblings no independent error model.
 ```ts
 const provider = resolveSearchProvider(resolvedOptions); // unset => DuckDuckGo
 validateCapabilities(provider, normalizedQuery);
-const response = await guardedRequest(publicUrl, networkLimits);
+const response = await guardedRequest(publicUrl, { ...networkLimits, env });
 const documentPath = await writeDocument(cacheRoot, key, format, fullContent);
 return renderNormalizedOutcomes(orderedOutcomes, documentPath);
 ```
 
 Provider choice is explicit, the public-network boundary is centralized, and
 the normalized outcome owns both model Markdown and structured details.
+The shared network boundary also receives the tool environment and constructs
+an environment-aware Undici dispatcher; passing proxy variables only to
+provider-key validation is insufficient because Undici ignores them by default.

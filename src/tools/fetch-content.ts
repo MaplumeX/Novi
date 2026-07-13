@@ -86,6 +86,7 @@ export function createFetchContentTool(
             maxBytes,
             maxRedirects,
             fallbackProvider: options.fetchContent?.fallbackProvider,
+            env,
             signal,
           }),
         signal,
@@ -98,6 +99,7 @@ export function createFetchContentTool(
           cacheRoot,
           options.fetchContent?.fallbackProvider,
           env.TAVILY_API_KEY ?? "",
+          env,
           timeoutMs,
           signal,
         );
@@ -120,6 +122,7 @@ async function fetchOne(
     maxBytes: number;
     maxRedirects: number;
     fallbackProvider?: "tavily";
+    env: NodeJS.ProcessEnv;
     signal?: AbortSignal;
   },
 ): Promise<LocalResult> {
@@ -151,6 +154,7 @@ async function fetchOne(
       timeoutMs: runtime.timeoutMs,
       maxRedirects: runtime.maxRedirects,
       maxBytes: runtime.maxBytes,
+      env: runtime.env,
     });
     if (response.status < 200 || response.status >= 300) {
       throw new WebToolError(
@@ -268,6 +272,7 @@ async function applyTavilyFallback(
   cacheRoot: string,
   fallbackProvider: "tavily" | undefined,
   apiKey: string,
+  env: NodeJS.ProcessEnv,
   timeoutMs: number,
   signal?: AbortSignal,
 ): Promise<void> {
@@ -286,6 +291,7 @@ async function applyTavilyFallback(
       body: JSON.stringify({ urls, extract_depth: "basic", format }),
       signal,
       timeoutMs,
+      env,
     });
     if (response.status === 401 || response.status === 403)
       throw new WebToolError("PROVIDER_AUTH", "Tavily rejected the API key");

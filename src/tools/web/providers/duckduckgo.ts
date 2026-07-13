@@ -21,6 +21,7 @@ export const duckDuckGoProvider: SearchProvider = {
       signal: context.signal,
       timeoutMs: context.timeoutMs,
       maxBytes: 2 * 1024 * 1024,
+      env: context.env,
     });
     if (response.status === 429)
       throw new WebToolError("PROVIDER_RATE_LIMIT", "DuckDuckGo rate limited the request", true);

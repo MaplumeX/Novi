@@ -38,6 +38,9 @@ Brave requires `BRAVE_API_KEY`; Tavily search and the explicitly enabled
 Tavily Extract fallback require `TAVILY_API_KEY`. Credentials are never
 persisted in settings or web caches.
 
+Web requests inherit `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` (including
+their lowercase variants) from the Novi process environment.
+
 | Filter | DuckDuckGo | Brave | Tavily |
 | --- | --- | --- | --- |
 | include/exclude domains | no | yes | yes |

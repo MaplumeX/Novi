@@ -1,6 +1,6 @@
 import { lookup as dnsLookup } from "node:dns/promises";
 import { isIP } from "node:net";
-import { Agent, request as undiciRequest, type Dispatcher } from "undici";
+import { Agent, EnvHttpProxyAgent, request as undiciRequest, type Dispatcher } from "undici";
 import { WebToolError, throwIfAborted } from "./errors.js";
 import { isPublicIp, parsePublicUrl } from "./urls.js";
 
@@ -19,6 +19,8 @@ export interface NetworkOptions {
   maxRedirects?: number;
   maxBytes?: number;
   headers?: Record<string, string>;
+  /** Process environment used to resolve HTTP(S)_PROXY and NO_PROXY. */
+  env?: NodeJS.ProcessEnv;
   resolve?: (hostname: string) => Promise<Array<{ address: string; family: 4 | 6 }>>;
   /** Request injection for deterministic network-policy tests; runtime leaves this unset. */
   request?: typeof undiciRequest;
@@ -86,6 +88,30 @@ function pinnedAgent(records: Array<{ address: string; family: 4 | 6 }>): Agent 
   });
 }
 
+function requestDispatcher(
+  records: Array<{ address: string; family: 4 | 6 }>,
+  env: NodeJS.ProcessEnv = process.env,
+): Dispatcher {
+  const httpProxy = env.http_proxy ?? env.HTTP_PROXY;
+  const httpsProxy = env.https_proxy ?? env.HTTPS_PROXY;
+  if (!httpProxy && !httpsProxy) return pinnedAgent(records);
+  return new EnvHttpProxyAgent({
+    httpProxy,
+    httpsProxy,
+    noProxy: env.no_proxy ?? env.NO_PROXY,
+    connect: {
+      lookup: (_hostname, options, callback) => {
+        if (typeof options === "object" && options.all === true) {
+          callback(null, records);
+          return;
+        }
+        const entry = records[0];
+        callback(null, entry.address, entry.family);
+      },
+    },
+  });
+}
+
 async function consume(
   body: Dispatcher.ResponseData["body"],
   maxBytes: number,
@@ -137,7 +163,7 @@ export async function guardedRequest(
       }
       throw error;
     }
-    const dispatcher = pinnedAgent(records);
+    const dispatcher = requestDispatcher(records, options.env);
     try {
       const response = await (options.request ?? undiciRequest)(url, {
         dispatcher,
@@ -207,16 +233,31 @@ export async function providerJsonRequest(
     signal?: AbortSignal;
     timeoutMs?: number;
     maxBytes?: number;
+    env?: NodeJS.ProcessEnv;
+    /** Request injection for deterministic proxy tests; runtime leaves this unset. */
+    request?: typeof undiciRequest;
   },
 ): Promise<{ status: number; json: unknown }> {
   const timeout = AbortSignal.timeout(init.timeoutMs ?? 15_000);
   const signal = init.signal ? AbortSignal.any([init.signal, timeout]) : timeout;
+  const env = init.env ?? process.env;
+  const httpProxy = env.http_proxy ?? env.HTTP_PROXY;
+  const httpsProxy = env.https_proxy ?? env.HTTPS_PROXY;
+  const dispatcher =
+    httpProxy || httpsProxy
+      ? new EnvHttpProxyAgent({
+          httpProxy,
+          httpsProxy,
+          noProxy: env.no_proxy ?? env.NO_PROXY,
+        })
+      : undefined;
   try {
-    const response = await undiciRequest(url, {
+    const response = await (init.request ?? undiciRequest)(url, {
       method: init.method ?? "GET",
       headers: init.headers,
       body: init.body,
       signal,
+      ...(dispatcher ? { dispatcher } : {}),
     });
     const bytes = await consume(response.body, init.maxBytes ?? 2 * 1024 * 1024);
     let json: unknown;
@@ -230,5 +271,7 @@ export async function providerJsonRequest(
     if (init.signal?.aborted) throw init.signal.reason ?? new DOMException("Aborted", "AbortError");
     if (signal.aborted) throw new WebToolError("TIMEOUT", "Provider request timed out", true);
     throw error;
+  } finally {
+    await dispatcher?.close();
   }
 }

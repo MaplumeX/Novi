@@ -32,7 +32,8 @@ describe("fetch_content batch contract", () => {
         response("https://example.com/data.json", '{"b":2,"a":1}', "application/json"),
       );
     try {
-      const tool = getTool(env, "fetch_content", "test", { cacheRoot });
+      const proxyEnv = { HTTPS_PROXY: "http://proxy.example:8080" };
+      const tool = getTool(env, "fetch_content", "test", { cacheRoot, env: proxyEnv });
       const result = await tool.execute("1", {
         urls: [
           "https://example.com/a.txt",
@@ -48,6 +49,10 @@ describe("fetch_content batch contract", () => {
         ],
       });
       expect((result.content[0] as { text: string }).text).toContain('"a": 1');
+      expect(mockedGuardedRequest).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ env: proxyEnv }),
+      );
     } finally {
       await cleanup();
       await rm(cacheRoot, { recursive: true, force: true });

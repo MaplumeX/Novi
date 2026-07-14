@@ -92,9 +92,10 @@ src/
 │   ├── agent/
 │   │   ├── event-bridge.ts   # createEventBridge — single raw-event → callbacks projector (N2 boundary)
 │   │   └── novi-agent-adapter.ts  # NoviAgentAdapter wraps AgentHarness behind AgentProtocolAdapter
-│   └── channels/
-│       ├── index.ts          # createChannel factory (type switch, MVP telegram)
-│       └── telegram.ts       # TelegramChannel (telegraf long-polling + edit-stream)
+│   ├── channels/
+│   │   ├── index.ts          # createChannel factory (type switch, MVP telegram)
+│   │   └── telegram.ts       # TelegramChannel (telegraf long-polling + edit-stream)
+│   └── jobs/                 # Durable proactive execution (store/service/scheduler/runner/delivery/heartbeat)
 └── tui/                    # Frontend layer (see frontend/directory-structure.md)
 ```
 

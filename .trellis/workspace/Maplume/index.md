@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 44
-- **Last Active**: 2026-07-13
+- **Total Sessions**: 45
+- **Last Active**: 2026-07-14
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1495 | Active |
+| `journal-1.md` | ~1528 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 45 | 2026-07-14 | Novi agent architecture documentation | `27698db` | `main` |
 | 44 | 2026-07-13 | Refine TUI thinking and answer markers | `ef67cb7`, `2dcccdb` | `main` |
 | 43 | 2026-07-13 | Analyze Novi agent tool system | `78608f8` | `main` |
 | 42 | 2026-07-13 | Enable external tool sources parent integration | `3996c3a`, `71ad4ee`, `41afd8f` | `main` |

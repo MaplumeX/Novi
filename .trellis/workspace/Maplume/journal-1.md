@@ -1493,3 +1493,36 @@ Switched thinking indicators to Braille at 100ms, aligned the assistant marker w
 ### Next Steps
 
 - None - task complete
+
+
+## Session 45: Novi agent architecture documentation
+
+**Date**: 2026-07-14
+**Task**: Novi agent architecture documentation
+**Branch**: `main`
+
+### Summary
+
+Rewrote root ARCHITECTURE.md as a Chinese implementation-level architecture map (Mermaid, three runtime surfaces, bootstrap/tools/MCP/gateway boundaries, links to docs/spec). Pure docs; no README/spec/TS changes. Task 07-14-novi-agent-architecture-docs planned, implemented, checked, archived.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `27698db` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

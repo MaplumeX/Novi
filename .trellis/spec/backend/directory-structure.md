@@ -85,8 +85,9 @@ src/
 │   │   ├── gateway-app.ts    # GatewayApp orchestration: authorization, group gating, dedupe, commands → lanes
 │   │   ├── session-lane.ts   # per-sessionKey queue + steer/followup/interrupt dispatch
 │   │   ├── session-manager.ts# lazy harness creation + idle timeout + maxConcurrent eviction
+│   │   ├── session-store.ts  # strict atomic channel/account/chat/thread → JSONL binding store
 │   │   └── commands.ts      # CommandRegistry: /new /stop /help /status
-│   │   ├── routing.ts        # pure session-key, silent-reply and bounded inbound-dedup helpers
+│   │   ├── routing.ts        # structured locator/canonical route, silence and inbound dedupe
 │   │   └── pairing-store.ts  # fail-closed persistent DM pairing authorization
 │   ├── agent/
 │   │   ├── event-bridge.ts   # createEventBridge — single raw-event → callbacks projector (N2 boundary)
@@ -136,8 +137,14 @@ src/
   group mention/reply gates, and command bypass; only already-authorized,
   non-command text reaches `SessionManager`. Pairing approval is direct-chat
   only and must never be forwarded to the agent from a group. Use
-  `routing.ts` for session keys so a forum topic cannot share a harness with
-  its parent chat.
+  `routing.ts` for `GatewaySessionRoute` so channel type/account/chat/thread
+  identity is unambiguous and a forum topic cannot share a harness with its
+  parent chat.
+- **Gateway session ownership.** `session-manager.ts` owns lanes and the
+  `/new` barrier; `session-store.ts` owns durable route-to-JSONL bindings;
+  `novi-agent-adapter.ts` owns disposable harness/MCP caches and generation
+  guards. Eviction must not mutate the store. Binding writes must complete
+  before a new cache entry becomes visible. See `database-guidelines.md`.
 - **Gateway streaming.** A final explicit silence marker (`SILENT`,
   `[SILENT]`, `NO_REPLY`, or `NO REPLY`) must produce no delivery. Because
   the final text arrives after deltas, `session-lane.ts` buffers a possible

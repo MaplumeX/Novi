@@ -189,25 +189,28 @@ await harness.setTools(assembled.tools, assembled.activeToolNames);
 
 ## bootstrap 拆分契约（prepareGatewayEnv + createHarnessForSession）
 
-`bootstrap()` 原本一次性完成「env/credentials/settings/models/tools/resources 准备 + session/harness 创建」。多渠道网关任务将其拆成两层，支持 per-sessionKey 懒创建多个 harness，同时保持 TUI/print/json 路径的 `BootstrapResult` 契约不变。
+`bootstrap()` 原本一次性完成「env/credentials/settings/models/tools/resources 准备 + session/harness 创建」。多渠道网关将其拆成两层，支持按 durable route 懒创建或恢复多个 harness，同时保持 TUI/print/json 路径的 `BootstrapResult` 契约不变。
 
 - **`prepareGatewayEnv(options: BootstrapOptions): Promise<GatewayEnv>`**（一次）：步骤 1-4,6-8,11（env / credentials / settings / models+custom providers / systemPrompt provider / resources / hooks config / 派生的 streamOptions+steeringMode+followUpMode+thinkingLevel）。**不含** session/harness 创建。返回可复用的 `GatewayEnv`。
-- **`createHarnessForSession(gatewayEnv, sessionKey): Promise<CreatedSession>`**（多次）：步骤 5,9-10,12-14（`repo.create({ cwd, id: uuidv7() })` → `new AgentHarness({ env, session, models, model, systemPrompt, thinkingLevel })` → `setTools(tools, tools.map(t => t.name))` → `setResources` → `registerHooks` → `setStreamOptions` → `setSteeringMode/setFollowUpMode`）。返回 `{ harness, session, sessionPath }`。
-- **`bootstrap()`** 仍是 TUI/print/json 的唯一入口，内部委托 `prepareGatewayEnv` + `createHarnessForSession(env, "tui")`，返回值与历史完全一致。
+- **`createHarnessForSession(gatewayEnv, target): Promise<CreatedSession>`**（多次）：`target` 为 `{kind:"new"}` 或 `{kind:"resume", metadata}`；分别调用公开 `repo.create` / `repo.open`，之后走同一条 harness/tools/resources/hooks/stream/queue 装配路径。返回值包含 `metadata = await session.getMetadata()`，以及 `{harness, session, sessionPath, ...}`。
+- **`bootstrap()`** 仍是 TUI/print/json 的唯一入口；new 与 `options.resumePath` 都委托同一 `createHarnessForSession` 装配路径，返回值与历史完全一致。
 
 ### 关键约束
 
 - `setTools` **必须显式传 `activeToolNames`**（见上「setTools 与 activeToolNames 的非显然行为」）。`createHarnessForSession` 每次都传 `tools.map(t => t.name)`。
-- resume 路径（`options.resumePath`）仍由 `bootstrap()` 自己处理（`repo.open` + harness 装配），不走 `createHarnessForSession`。
-- `GatewayEnv` 是「一次性准备结果」的载体，不含可变运行时状态；网关的 `NoviAgentAdapter` 持有它并在每个 sessionKey 上调用 `createHarnessForSession`。
+- resume 必须通过 helper 的 `{kind:"resume"}` 分支，禁止复制第二套 tools/hooks/MCP 装配流程。
+- `GatewayEnv` 是「一次性准备结果」的载体，不含可变运行时状态；网关的 `NoviAgentAdapter` 持有它，并根据 durable binding 选择 new/resume target。
 
 ### 网关侧 harness 多实例使用模式
 
-网关一个进程内按 `channelId:chatId` 维护多个独立 `AgentHarness` 实例（`NoviAgentAdapter.sessions: Map<string, { harness, session }>`）。关键 API 映射：
+网关按结构化 `GatewaySessionRoute` 维护多个独立 `AgentHarness` 实例。`sessions` Map 只是可淘汰缓存；`GatewaySessionStore` 中的 route→metadata binding 才是跨重启的来源。关键 API 映射：
 
 - idle 时收到消息 → `harness.prompt(text)`（需 `phase==="idle"`，由 `session-lane` 的 per-sessionKey 串行保证）。
 - 运行中收到消息，按 `queueMode`：`steer` → `harness.steer(text)`；`followup` → `harness.followUp(text)`；`interrupt` → `harness.abort()` 后重新 `prompt`。三者都可在 turn 中调用。
-- 关闭 session → `harness.waitForIdle()` → 移除缓存。
+- idle/capacity 关闭 → `harness.waitForIdle()` → 关闭 MCP → 只移除缓存；下次由 binding `repo.open`。
+- `/new` → generation 失效（阻止旧 event bridge 输出）→ `abort`/`waitForIdle` → create → 原子 rotate binding → 发布新缓存。rotate 失败不得替换旧 binding。
+
+恢复后必须比较 binding 与 `session.getMetadata()` 的 `id/cwd/path`。open 失败或字段不一致必须把错误送到 channel，并保留 binding，不能 fallback create；用户可用 `/new` 明确替换。
 
 > **网关层 vs harness 层队列模式是正交的**：harness 的 `steeringMode`/`followUpMode`（`"one-at-a-time"|"all"`）是 harness 内部队列交付模式；网关的 steer/followup/interrupt 是网关对「运行中收到新消息」的整体策略。两者分层独立。
 

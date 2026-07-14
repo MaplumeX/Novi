@@ -10,6 +10,8 @@ Novi has **no database**. All persistence is file-based via the
 `@earendil-works/pi-agent-core` APIs:
 
 - **Sessions** → JSONL files on disk, managed by `JsonlSessionRepo`.
+- **Gateway session bindings** → strict versioned JSON at
+  `~/.novi/gateway-sessions.json` (`NOVI_HOME` respected).
 - **TODOs** → file-based persistence at `~/.novi/todos/<sessionId>.json` with an in-memory cache (`tools/todo.ts`).
 - **Skills / prompt templates** → YAML / markdown files loaded from disk at
   startup (`resources.ts`).
@@ -62,6 +64,101 @@ files accepted; data is small).
 export function createTodoTool(sessionId: string): AgentTool<typeof Parameters, TodoDetails> { … }
 /** Reset the store (in-memory cache + disk files). Test-only escape hatch. */
 export function __resetTodoStoreForTests(): void { store.clear(); rmSync(…, { recursive: true, force: true }); }
+```
+
+## Scenario: Durable Gateway Session Binding
+
+### 1. Scope / Trigger
+
+- Trigger: any change to Gateway routing, cache eviction, `/new`, JSONL resume,
+  or cross-channel identity representation.
+- The in-memory harness cache is disposable. Conversation continuity is owned
+  by `GatewaySessionStore`, not by `NoviAgentAdapter.sessions`.
+
+### 2. Signatures
+
+```ts
+interface GatewaySessionLocator {
+  channel: string;
+  account: string;
+  chat: { type: ChatType; id: string };
+  thread?: string;
+}
+interface GatewaySessionRoute { key: string; locator: GatewaySessionLocator }
+
+GatewaySessionStore.open(filePath?): Promise<GatewaySessionStore>
+store.getBinding(route): GatewaySessionBinding | undefined
+store.bind(route, metadata): Promise<void>
+store.rotate(route, metadata): Promise<void>
+
+createHarnessForSession(env, { kind: "new" | "resume", ... }): Promise<CreatedSession>
+```
+
+`CreatedSession.metadata` is the canonical metadata returned by
+`session.getMetadata()`. JSONL creation/open/deletion still goes only through
+the public `JsonlSessionRepo` API.
+
+### 3. Contracts
+
+- File: `$NOVI_HOME/gateway-sessions.json`, otherwise
+  `~/.novi/gateway-sessions.json`.
+- V1 root: `{version:1, bindings: Record<routeKey, Binding>, archives: Archive[]}`.
+- Binding: `{locator, session:{id,createdAt,cwd,path}, boundAt, updatedAt}`.
+- Archive: `{locator, session, archivedAt, reason:"new"}`.
+- Canonical route fields are URI-encoded and include channel type, account,
+  chat type/id, and optional thread id. A stored key must recompute exactly
+  from its locator.
+- Writes serialize through one Promise chain, write a same-directory `0600`
+  temporary file, then rename. Publish the new in-memory snapshot only after
+  rename succeeds.
+- Multiple locators may reference the same metadata at schema level. The
+  current product does not expose linking or concurrent shared-session use.
+- Idle/capacity eviction closes runtime/MCP resources only; it never removes
+  the binding. `/new` aborts the old generation, discards its queued messages,
+  suppresses late events, creates a new session, and rotates binding+archive
+  in one store commit. Old JSONL/TODO files remain.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required behavior |
+|---|---|
+| Mapping file missing | Start with an empty in-memory V1 store |
+| Invalid JSON / fields / route-key mismatch | Fail Gateway startup; preserve file |
+| Unsupported `version` | Fail Gateway startup; preserve file |
+| Bound JSONL missing or metadata id/cwd/path mismatch | Fail the message visibly; preserve binding; require explicit `/new` |
+| First bind write fails | Do not publish cache/binding; best-effort close and delete the unbound JSONL |
+| `/new` rotate write fails | Keep old durable binding; do not publish new cache; best-effort delete unbound JSONL |
+
+### 5. Good/Base/Bad Cases
+
+- Good: restart or eviction → look up binding → `repo.open(metadata)` → verify
+  id/cwd/path → publish harness cache.
+- Base: first message → `repo.create` → persist binding → publish cache.
+- Bad: catch resume failure and silently call `repo.create`; this loses context
+  while leaving the old JSONL/TODO bucket undiscoverable.
+
+### 6. Tests Required
+
+- Store: missing-file round trip, many locators/one metadata, rotate archive,
+  corrupt/unsupported/mismatched input, write failure leaves snapshot unchanged.
+- Adapter: first bind, cold resume after close, concurrent initialization
+  dedupe, dangling target, metadata mismatch, rotate rollback, late-event guard.
+- Manager/command: reset barrier, old queue cutoff, later-message wait, and
+  success/failure channel acknowledgement.
+
+### 7. Wrong vs Correct
+
+```ts
+// Wrong: cache eviction or restart silently starts a new conversation.
+const session = await repo.create({ cwd, id: uuidv7() });
+sessions.set(route.key, session);
+
+// Correct: the durable binding chooses resume vs create; publish after commit.
+const binding = store.getBinding(route);
+const created = await createHarnessForSession(env,
+  binding ? { kind: "resume", metadata: binding.session } : { kind: "new" });
+if (!binding) await store.bind(route, created.metadata);
+sessions.set(route.key, created);
 ```
 
 ---
@@ -208,5 +305,7 @@ injectCredentialsIntoEnv(creds, process.env); // only fills UNDEFINED vars
 - Do not introduce a database (SQLite, Prisma, etc.) without an explicit task.
 - Do not read/write session JSONL files directly; use `JsonlSessionRepo` /
   `Session` public APIs.
+- Do not treat the Gateway harness `Map` as persistence, silently recover a
+  dangling binding by creating a new session, or overwrite an invalid mapping.
 - TODO files at `~/.novi/todos/<sessionId>.json` are write-through cached; do not bypass `persistToDisk` / `getSessionTodos`.
 - Do not throw from resource loaders; collect diagnostics and continue.

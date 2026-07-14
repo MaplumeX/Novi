@@ -1660,3 +1660,36 @@ Added durable channel/account/chat/thread to JSONL session bindings, cold resume
 ### Next Steps
 
 - None - task complete
+
+
+## Session 50: Explain scheduled jobs design
+
+**Date**: 2026-07-14
+**Task**: Explain scheduled jobs design
+**Branch**: `main`
+
+### Summary
+
+使用 explain-code-design 产出 docs/scheduled-jobs-design.md：讲解 Gateway 主动闭环（JobStore/Service/Scheduler/Runner/Delivery/Heartbeat），覆盖执行·投递分离、确定性 occurrence claim、漏跑与重启恢复、route 所有权与无人值守边界；Heartbeat 作次要合成任务设计点。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `95dadcc` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

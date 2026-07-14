@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 49
+- **Total Sessions**: 50
 - **Last Active**: 2026-07-14
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1662 | Active |
+| `journal-1.md` | ~1695 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 50 | 2026-07-14 | Explain scheduled jobs design | `95dadcc` | `main` |
 | 49 | 2026-07-14 | Explain Novi agent tool system design | `082cebc` | `main` |
 | 48 | 2026-07-14 | Explain Novi agent gateway design | `4ac3a29` | `main` |
 | 47 | 2026-07-14 | 实现 Novi 主动任务与提醒闭环 | `e490775`, `da63fc2` | `main` |

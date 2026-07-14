@@ -2,14 +2,29 @@ import { describe, expect, it, vi } from "vitest";
 import type { AgentProtocolAdapter } from "./types.js";
 import type { ChannelAdapter, ChannelMessage } from "./types.js";
 import type { QueueMode } from "../config.js";
-import { createSessionLane, enqueueMessage } from "./session-lane.js";
+import { createSessionLane as createRouteLane, enqueueMessage } from "./session-lane.js";
+
+function route(key: string) {
+  return {
+    key,
+    locator: {
+      channel: "telegram" as const,
+      account: "tg",
+      chat: { type: "direct" as const, id: key },
+    },
+  };
+}
+
+function createSessionLane(key: string) {
+  return createRouteLane(route(key));
+}
 
 /** Build a mock AgentProtocolAdapter with vi.fn for every method. */
 function makeAgentMock(): AgentProtocolAdapter {
   // Simulate the real adapter: runTurn invokes onTurnEnd with the final text.
   const runTurn = vi.fn().mockImplementation(
     async (input: {
-      sessionKey: string;
+      route: ReturnType<typeof route>;
       text: string;
       callbacks?: {
         onTurnEnd?(text: string): Promise<void>;
@@ -71,7 +86,7 @@ describe("enqueueMessage (idle state)", () => {
 
     expect(agent.runTurn).toHaveBeenCalledTimes(1);
     expect(agent.runTurn).toHaveBeenCalledWith(
-      expect.objectContaining({ sessionKey: "tg:123", text: "hi" }),
+      expect.objectContaining({ route: expect.objectContaining({ key: "tg:123" }), text: "hi" }),
     );
     // onTurnEnd callback → channel.send with final text.
     expect(channel.send).toHaveBeenCalledWith("123", "reply");
@@ -176,7 +191,7 @@ describe("enqueueMessage (running + steer mode)", () => {
 
     await enqueueMessage(lane, agent, makeEntry(channel, makeMsg("more"), "steer"));
 
-    expect(agent.steer).toHaveBeenCalledWith("tg:123", "more");
+    expect(agent.steer).toHaveBeenCalledWith(route("tg:123"), "more");
     expect(agent.runTurn).not.toHaveBeenCalled();
     // Steer messages are not enqueued locally.
     expect(lane.queue).toHaveLength(0);
@@ -193,7 +208,7 @@ describe("enqueueMessage (running + steer mode)", () => {
     await enqueueMessage(lane, agent, makeEntry(channel, makeMsg("msg"), "steer"));
 
     expect(agent.steer).toHaveBeenCalled();
-    expect(agent.followUp).toHaveBeenCalledWith("tg:123", "msg");
+    expect(agent.followUp).toHaveBeenCalledWith(route("tg:123"), "msg");
     // Both failed → queued as interrupt for after the run.
     expect(lane.queue).toHaveLength(1);
     expect(lane.queue[0].mode).toBe("interrupt");
@@ -208,7 +223,7 @@ describe("enqueueMessage (running + steer mode)", () => {
 
     await enqueueMessage(lane, agent, makeEntry(channel, makeMsg("msg"), "steer"));
 
-    expect(agent.followUp).toHaveBeenCalledWith("tg:123", "msg");
+    expect(agent.followUp).toHaveBeenCalledWith(route("tg:123"), "msg");
     expect(lane.queue).toHaveLength(0);
   });
 });
@@ -222,7 +237,7 @@ describe("enqueueMessage (running + followup mode)", () => {
 
     await enqueueMessage(lane, agent, makeEntry(channel, makeMsg("msg"), "followup"));
 
-    expect(agent.followUp).toHaveBeenCalledWith("tg:123", "msg");
+    expect(agent.followUp).toHaveBeenCalledWith(route("tg:123"), "msg");
     expect(lane.queue).toHaveLength(0);
   });
 
@@ -249,7 +264,7 @@ describe("enqueueMessage (running + interrupt mode)", () => {
 
     await enqueueMessage(lane, agent, makeEntry(channel, makeMsg("new"), "interrupt"));
 
-    expect(agent.abort).toHaveBeenCalledWith("tg:123");
+    expect(agent.abort).toHaveBeenCalledWith(route("tg:123"));
     expect(lane.queue).toHaveLength(1);
     expect(lane.queue[0].msg.text).toBe("new");
   });

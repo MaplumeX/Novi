@@ -1,150 +1,303 @@
+import { JsonlSessionRepo } from "@earendil-works/pi-agent-core/node";
 import type {
   AgentHarness,
   JsonlSessionMetadata,
   Session,
 } from "@earendil-works/pi-agent-core/node";
-import type { GatewayEnv, CreatedSession } from "../../bootstrap.js";
+import type { GatewayEnv, CreatedSession, HarnessSessionTarget } from "../../bootstrap.js";
 import { createHarnessForSession } from "../../bootstrap.js";
+import { getSessionsDir } from "../../config.js";
 import { createEventBridge } from "./event-bridge.js";
 import type {
   AgentProtocolAdapter,
+  AgentProtocolTurnCallbacks,
   AgentProtocolTurnInput,
   AgentProtocolTurnResult,
+  GatewaySessionRoute,
 } from "../core/types.js";
+import type { GatewaySessionStore } from "../core/session-store.js";
 import type { ToolCatalogSnapshot } from "../../tools/contracts.js";
 import type { McpRuntimeHandle } from "../../tools/assembly.js";
 
-/** Cached harness + session for one session key. */
+/** Cached harness + canonical metadata for one route generation. */
 interface SessionEntry {
+  route: GatewaySessionRoute;
+  generation: number;
   harness: AgentHarness;
   session: Session<JsonlSessionMetadata>;
-  sessionPath: string;
+  metadata: JsonlSessionMetadata;
   toolCatalog: ToolCatalogSnapshot;
   mcp?: McpRuntimeHandle;
 }
 
-/**
- * In-process `AgentProtocolAdapter` wrapping `AgentHarness`.
- *
- * Each session key (`channelId:chatId`) gets a lazily-created, independent
- * `AgentHarness` + `JsonlSession` reusing the one-time {@link GatewayEnv}
- * preparation. Turns are run via `harness.prompt()`; steer/followUp/abort
- * are forwarded to the harness public API (callable mid-turn).
- *
- * This is the MVP in-process implementation of the
- * {@link AgentProtocolAdapter} boundary. A future `RemoteAgentAdapter` can
- * replace it without touching the orchestrator (design.md §8).
- */
-export class NoviAgentAdapter implements AgentProtocolAdapter {
-  private readonly gatewayEnv: GatewayEnv;
-  private readonly sessions = new Map<string, SessionEntry>();
+type HarnessFactory = (
+  gatewayEnv: GatewayEnv,
+  target: HarnessSessionTarget,
+) => Promise<CreatedSession>;
 
-  constructor(gatewayEnv: GatewayEnv) {
-    this.gatewayEnv = gatewayEnv;
+/** In-process agent adapter with durable gateway route bindings. */
+export class NoviAgentAdapter implements AgentProtocolAdapter {
+  private readonly sessions = new Map<string, SessionEntry>();
+  private readonly pending = new Map<string, Promise<SessionEntry>>();
+  private readonly closing = new Map<string, Promise<void>>();
+  private readonly generations = new Map<string, number>();
+
+  constructor(
+    private readonly gatewayEnv: GatewayEnv,
+    private readonly store: GatewaySessionStore,
+    private readonly createHarness: HarnessFactory = createHarnessForSession,
+  ) {}
+
+  /** Get or initialize one route. Concurrent first messages share the promise. */
+  private async getOrCreateHarness(route: GatewaySessionRoute): Promise<SessionEntry> {
+    const closing = this.closing.get(route.key);
+    if (closing) {
+      await closing;
+      return this.getOrCreateHarness(route);
+    }
+    const cached = this.sessions.get(route.key);
+    if (cached) return cached;
+    const existing = this.pending.get(route.key);
+    if (existing) return existing;
+
+    const operation = this.initialize(route);
+    this.pending.set(route.key, operation);
+    try {
+      return await operation;
+    } finally {
+      if (this.pending.get(route.key) === operation) this.pending.delete(route.key);
+    }
   }
 
-  /** Get or lazily create the harness+session for a session key. */
-  private async getOrCreateHarness(sessionKey: string): Promise<SessionEntry> {
-    let entry = this.sessions.get(sessionKey);
-    if (entry) return entry;
+  private async initialize(route: GatewaySessionRoute): Promise<SessionEntry> {
+    const binding = this.store.getBinding(route);
+    const target: HarnessSessionTarget = binding
+      ? { kind: "resume", metadata: binding.session }
+      : { kind: "new" };
+    let created: CreatedSession;
+    try {
+      created = await this.createHarness(this.gatewayEnv, target);
+    } catch (error) {
+      if (binding) {
+        throw new Error(
+          `Gateway session "${route.key}" could not resume ${binding.session.path}. ` +
+            `The binding was preserved; use /new to replace it explicitly. ${errorMessage(error)}`,
+          { cause: error },
+        );
+      }
+      throw error;
+    }
 
-    const created: CreatedSession = await createHarnessForSession(this.gatewayEnv, sessionKey);
-    entry = {
-      harness: created.harness,
-      session: created.session,
-      sessionPath: created.sessionPath,
-      toolCatalog: created.toolCatalog,
-      mcp: created.mcp,
-    };
-    this.sessions.set(sessionKey, entry);
+    if (binding) {
+      try {
+        assertSameMetadata(binding.session, created.metadata, route.key);
+      } catch (error) {
+        await this.disposeCreated(created);
+        throw error;
+      }
+    } else {
+      try {
+        await this.store.bind(route, created.metadata);
+      } catch (error) {
+        await this.cleanupUnbound(created);
+        throw new Error(`Failed to persist gateway session binding: ${errorMessage(error)}`, {
+          cause: error,
+        });
+      }
+    }
+
+    const entry = this.toEntry(route, created, this.generation(route.key));
+    this.sessions.set(route.key, entry);
     return entry;
   }
 
-  /** {@inheritDoc AgentProtocolAdapter.runTurn} */
   async runTurn(input: AgentProtocolTurnInput): Promise<AgentProtocolTurnResult> {
-    const { sessionKey, text, callbacks } = input;
-    const entry = await this.getOrCreateHarness(sessionKey);
-    const { harness } = entry;
-
+    const { route, text, callbacks } = input;
+    const entry = await this.getOrCreateHarness(route);
     let finalText = "";
-    const bridgedCallbacks = callbacks
-      ? {
-          ...callbacks,
-          onTurnEnd: (text: string): Promise<void> => {
-            finalText = text;
-            return callbacks.onTurnEnd?.(text) ?? Promise.resolve();
-          },
-        }
+    const guarded = callbacks
+      ? this.guardCallbacks(entry, callbacks, (text) => {
+          finalText = text;
+        })
       : undefined;
-
-    const unsubscribe = callbacks
-      ? createEventBridge(harness, bridgedCallbacks!, entry.toolCatalog)
+    const unsubscribe = guarded
+      ? createEventBridge(entry.harness, guarded, entry.toolCatalog)
       : null;
 
     try {
-      // session-lane guarantees phase==="idle" before calling runTurn.
-      await harness.prompt(text);
+      await entry.harness.prompt(text);
+    } catch (error) {
+      // `/new` intentionally aborts and invalidates this generation. Its late
+      // rejection must not become a channel error for the newly-bound session.
+      if (!this.isCurrent(entry)) return { text: "" };
+      throw error;
     } finally {
       unsubscribe?.();
     }
-
     return { text: finalText };
   }
 
-  /** {@inheritDoc AgentProtocolAdapter.steer} */
-  async steer(sessionKey: string, text: string): Promise<void> {
-    const entry = this.sessions.get(sessionKey);
-    if (!entry) return;
-    await entry.harness.steer(text);
+  async steer(route: GatewaySessionRoute, text: string): Promise<void> {
+    await this.sessions.get(route.key)?.harness.steer(text);
   }
 
-  /** {@inheritDoc AgentProtocolAdapter.followUp} */
-  async followUp(sessionKey: string, text: string): Promise<void> {
-    const entry = this.sessions.get(sessionKey);
-    if (!entry) return;
-    await entry.harness.followUp(text);
+  async followUp(route: GatewaySessionRoute, text: string): Promise<void> {
+    await this.sessions.get(route.key)?.harness.followUp(text);
   }
 
-  /** {@inheritDoc AgentProtocolAdapter.abort} */
-  async abort(sessionKey: string): Promise<void> {
-    const entry = this.sessions.get(sessionKey);
-    if (!entry) return;
-    await entry.harness.abort();
+  async abort(route: GatewaySessionRoute): Promise<void> {
+    await this.sessions.get(route.key)?.harness.abort();
   }
 
-  /** {@inheritDoc AgentProtocolAdapter.resetSession} */
-  async resetSession(sessionKey: string): Promise<void> {
-    await this.closeSession(sessionKey);
-  }
+  /** Force-create a new session and atomically rotate the durable binding. */
+  async resetSession(route: GatewaySessionRoute): Promise<void> {
+    await this.closing.get(route.key)?.catch(() => {});
+    await this.pending.get(route.key)?.catch(() => {});
 
-  /** {@inheritDoc AgentProtocolAdapter.closeSession} */
-  async closeSession(sessionKey: string): Promise<void> {
-    const entry = this.sessions.get(sessionKey);
-    if (!entry) return;
+    const oldEntry = this.sessions.get(route.key);
+    const generation = this.generation(route.key) + 1;
+    this.generations.set(route.key, generation);
+    this.sessions.delete(route.key);
+
+    if (oldEntry) {
+      await oldEntry.harness.abort().catch(() => {});
+      await oldEntry.harness.waitForIdle().catch(() => {});
+      await this.closeMcp(oldEntry.mcp);
+    }
+
+    const created = await this.createHarness(this.gatewayEnv, { kind: "new" });
     try {
-      await entry.harness.waitForIdle();
-    } catch (e) {
-      // Best-effort: even if waitForIdle throws, still drop the cache so the
-      // next getOrCreate rebuilds a fresh harness.
-      process.stderr.write(
-        `warning: closeSession("${sessionKey}"): waitForIdle failed: ${
-          e instanceof Error ? e.message : String(e)
-        }\n`,
+      await this.store.rotate(route, created.metadata);
+    } catch (error) {
+      await this.cleanupUnbound(created);
+      throw new Error(`Failed to rotate gateway session binding: ${errorMessage(error)}`, {
+        cause: error,
+      });
+    }
+
+    this.sessions.set(route.key, this.toEntry(route, created, generation));
+  }
+
+  /** Eviction closes only runtime resources; the durable binding is retained. */
+  async closeSession(route: GatewaySessionRoute): Promise<void> {
+    const inProgress = this.closing.get(route.key);
+    if (inProgress) return inProgress;
+    const entry = this.sessions.get(route.key);
+    if (!entry) return;
+    if (this.sessions.get(route.key) === entry) this.sessions.delete(route.key);
+    const operation = (async () => {
+      try {
+        await entry.harness.waitForIdle();
+      } catch (error) {
+        process.stderr.write(
+          `warning: closeSession("${route.key}"): waitForIdle failed: ${errorMessage(error)}\n`,
+        );
+      }
+      await this.closeMcp(entry.mcp);
+    })();
+    this.closing.set(route.key, operation);
+    try {
+      await operation;
+    } finally {
+      if (this.closing.get(route.key) === operation) this.closing.delete(route.key);
+    }
+  }
+
+  async stop(): Promise<void> {
+    await Promise.allSettled([...this.pending.values()]);
+    const routes = [...this.sessions.values()].map((entry) => entry.route);
+    await Promise.allSettled(routes.map((route) => this.closeSession(route)));
+    await Promise.allSettled([...this.closing.values()]);
+  }
+
+  private guardCallbacks(
+    entry: SessionEntry,
+    callbacks: AgentProtocolTurnCallbacks,
+    captureFinal: (text: string) => void,
+  ): AgentProtocolTurnCallbacks {
+    return {
+      onTextDelta: async (delta) => {
+        if (this.isCurrent(entry)) await callbacks.onTextDelta?.(delta);
+      },
+      onReasoningDelta: async (delta) => {
+        if (this.isCurrent(entry)) await callbacks.onReasoningDelta?.(delta);
+      },
+      onToolEvent: async (event) => {
+        if (this.isCurrent(entry)) await callbacks.onToolEvent?.(event);
+      },
+      onTyping: async () => {
+        if (this.isCurrent(entry)) await callbacks.onTyping?.();
+      },
+      onTurnEnd: async (text) => {
+        if (!this.isCurrent(entry)) return;
+        captureFinal(text);
+        await callbacks.onTurnEnd?.(text);
+      },
+    };
+  }
+
+  private isCurrent(entry: SessionEntry): boolean {
+    return (
+      this.sessions.get(entry.route.key) === entry &&
+      this.generation(entry.route.key) === entry.generation
+    );
+  }
+
+  private generation(key: string): number {
+    return this.generations.get(key) ?? 0;
+  }
+
+  private toEntry(
+    route: GatewaySessionRoute,
+    created: CreatedSession,
+    generation: number,
+  ): SessionEntry {
+    return {
+      route,
+      generation,
+      harness: created.harness,
+      session: created.session,
+      metadata: created.metadata,
+      toolCatalog: created.toolCatalog,
+      mcp: created.mcp,
+    };
+  }
+
+  private async cleanupUnbound(created: CreatedSession): Promise<void> {
+    await this.disposeCreated(created);
+    const repo = new JsonlSessionRepo({
+      fs: this.gatewayEnv.env,
+      sessionsRoot: getSessionsDir(),
+    });
+    await repo.delete(created.metadata).catch(() => {});
+  }
+
+  private async disposeCreated(created: CreatedSession): Promise<void> {
+    await created.harness.abort().catch(() => {});
+    await created.harness.waitForIdle().catch(() => {});
+    await this.closeMcp(created.mcp);
+  }
+
+  private async closeMcp(mcp: McpRuntimeHandle | undefined): Promise<void> {
+    await mcp?.close().catch(() => {});
+  }
+}
+
+function assertSameMetadata(
+  expected: JsonlSessionMetadata,
+  actual: JsonlSessionMetadata,
+  routeKey: string,
+): void {
+  for (const field of ["id", "cwd", "path"] as const) {
+    if (expected[field] !== actual[field]) {
+      throw new Error(
+        `Gateway session "${routeKey}" resumed mismatched ${field}; ` +
+          `binding=${expected[field]} actual=${actual[field]}. The binding was preserved; use /new to replace it explicitly.`,
       );
     }
-    if (entry.mcp) {
-      try {
-        await entry.mcp.close();
-      } catch {
-        // best-effort
-      }
-    }
-    this.sessions.delete(sessionKey);
   }
+}
 
-  /** {@inheritDoc AgentProtocolAdapter.stop} */
-  async stop(): Promise<void> {
-    const keys = [...this.sessions.keys()];
-    await Promise.allSettled(keys.map((key) => this.closeSession(key)));
-  }
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

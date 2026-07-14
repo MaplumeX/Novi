@@ -4,7 +4,7 @@ import type { GatewaySessionManager } from "./session-manager.js";
 import type { CommandRegistry } from "./commands.js";
 import { runCommand } from "./commands.js";
 import type { GatewayEnv } from "../../bootstrap.js";
-import { InboundDeduper, sessionKey } from "./routing.js";
+import { InboundDeduper, sessionRoute } from "./routing.js";
 import { PairingStore } from "./pairing-store.js";
 
 /** Constructor options for {@link GatewayApp}. */
@@ -97,7 +97,7 @@ export class GatewayApp {
         return;
       }
       if (!(await this.isAuthorized(channel, msg))) return;
-      const key = sessionKey(channel.id, msg);
+      const route = sessionRoute(channel, msg);
 
       // Pair approval has a dedicated administrator boundary. The legacy
       // allowlist remains a DM access list and must not grant administration.
@@ -108,17 +108,18 @@ export class GatewayApp {
           : "unavailable";
         await channel.send(
           msg.remoteChatId,
-          `channel: ${channel.id}\nsession: ${key}\nmodel: ${model}\nauthorized: yes\nqueue: ${stats.queuedMessages}\nactiveSessions: ${stats.activeSessions}`,
+          `channel: ${channel.id}\nsession: ${route.key}\nmodel: ${model}\nauthorized: yes\nqueue: ${stats.queuedMessages}\nactiveSessions: ${stats.activeSessions}`,
         );
         return;
       }
       if (msg.text.startsWith("/")) {
         const handled = await runCommand(
           channel,
-          key,
+          route,
           msg.remoteChatId,
           msg.text,
           agent,
+          sessionManager,
           commands,
           gatewayEnv,
         );
@@ -126,7 +127,7 @@ export class GatewayApp {
       }
 
       const mode = queueModeByChannel?.[channel.type] ?? this.options.queueMode;
-      await sessionManager.enqueue(key, channel, msg, mode);
+      await sessionManager.enqueue(route, channel, msg, mode);
     } catch (e) {
       process.stderr.write(
         `warning: inbound message handling failed for channel "${channel.id}": ${e instanceof Error ? e.message : String(e)}\n`,

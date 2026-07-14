@@ -2,6 +2,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GatewaySessionManager } from "./session-manager.js";
 import type { AgentProtocolAdapter, ChannelAdapter, ChannelMessage } from "./types.js";
 
+function route(key: string) {
+  return {
+    key,
+    locator: {
+      channel: "telegram" as const,
+      account: "tg",
+      chat: { type: "direct" as const, id: key },
+    },
+  };
+}
+
 function makeAgentMock(): AgentProtocolAdapter {
   return {
     runTurn: vi.fn().mockImplementation(async () => {
@@ -67,14 +78,14 @@ describe("GatewaySessionManager", () => {
   it("lazily creates a lane on first enqueue", async () => {
     const { manager, agent } = makeManager();
     const channel = makeChannelMock();
-    await manager.enqueue("tg:chat-1", channel, makeMsg());
+    await manager.enqueue(route("tg:chat-1"), channel, makeMsg());
     expect(agent.runTurn).toHaveBeenCalledTimes(1);
   });
 
   it("evicts idle lanes past the idle timeout on cleanup tick", async () => {
     const { manager, agent } = makeManager({ idleTimeoutMs: 1000 });
     const channel = makeChannelMock();
-    await manager.enqueue("tg:chat-1", channel, makeMsg());
+    await manager.enqueue(route("tg:chat-1"), channel, makeMsg());
     expect(agent.runTurn).toHaveBeenCalledTimes(1);
 
     manager.startCleanupTimer();
@@ -83,14 +94,14 @@ describe("GatewaySessionManager", () => {
     await vi.advanceTimersByTimeAsync(130_000);
 
     // closeSession should have been called for the evicted lane.
-    expect(agent.closeSession).toHaveBeenCalledWith("tg:chat-1");
+    expect(agent.closeSession).toHaveBeenCalledWith(route("tg:chat-1"));
   });
 
   it("does not evict a lane that is still running", async () => {
     const { manager, agent } = makeManager({ idleTimeoutMs: 1000 });
 
     // Create a lane and mark it as running (past idle timeout).
-    const lane = manager.getOrCreate("tg:chat-1");
+    const lane = manager.getOrCreate(route("tg:chat-1"));
     lane.status = "running";
     lane.lastActivity = 0; // long ago, past timeout
 
@@ -105,33 +116,33 @@ describe("GatewaySessionManager", () => {
     const { manager, agent } = makeManager({ maxConcurrentSessions: 2 });
 
     // Create two lanes directly via getOrCreate (no runTurn involved).
-    const lane1 = manager.getOrCreate("tg:chat-1");
-    const lane2 = manager.getOrCreate("tg:chat-2");
+    const lane1 = manager.getOrCreate(route("tg:chat-1"));
+    const lane2 = manager.getOrCreate(route("tg:chat-2"));
     // Simulate lane2 still running (so it can't be evicted), lane1 idle.
     lane2.status = "running";
     lane1.lastActivity = 1000; // older than lane2
     lane2.lastActivity = 2000;
 
     // At capacity=2, getOrCreate a third → should evict lane1 (oldest idle).
-    manager.getOrCreate("tg:chat-3");
+    manager.getOrCreate(route("tg:chat-3"));
 
-    expect(agent.closeSession).toHaveBeenCalledWith("tg:chat-1");
+    expect(agent.closeSession).toHaveBeenCalledWith(route("tg:chat-1"));
     // chat-2 should not be evicted (it's running).
-    expect(agent.closeSession).not.toHaveBeenCalledWith("tg:chat-2");
+    expect(agent.closeSession).not.toHaveBeenCalledWith(route("tg:chat-2"));
   });
 
   it("stop() closes all open sessions and clears the timer", async () => {
     const { manager, agent } = makeManager();
     const channel = makeChannelMock();
-    await manager.enqueue("tg:chat-1", channel, makeMsg());
-    await manager.enqueue("tg:chat-2", channel, makeMsg());
+    await manager.enqueue(route("tg:chat-1"), channel, makeMsg());
+    await manager.enqueue(route("tg:chat-2"), channel, makeMsg());
 
     manager.startCleanupTimer();
     await manager.stop();
 
     expect(agent.closeSession).toHaveBeenCalledTimes(2);
-    expect(agent.closeSession).toHaveBeenCalledWith("tg:chat-1");
-    expect(agent.closeSession).toHaveBeenCalledWith("tg:chat-2");
+    expect(agent.closeSession).toHaveBeenCalledWith(route("tg:chat-1"));
+    expect(agent.closeSession).toHaveBeenCalledWith(route("tg:chat-2"));
   });
 
   it("startCleanupTimer is idempotent", () => {
@@ -139,5 +150,41 @@ describe("GatewaySessionManager", () => {
     manager.startCleanupTimer();
     manager.startCleanupTimer(); // should not throw or create a second timer
     // No assertion needed beyond not throwing; the timer is internal.
+  });
+
+  it("publishes a reset barrier, discards the old queue, and releases later messages", async () => {
+    const { manager, agent } = makeManager();
+    const current = route("tg:chat-1");
+    const lane = manager.getOrCreate(current);
+    lane.status = "running";
+    lane.queue.push({ channel: makeChannelMock(), msg: makeMsg("old queued"), mode: "interrupt" });
+
+    let releaseReset!: () => void;
+    (agent.resetSession as ReturnType<typeof vi.fn>).mockImplementation(
+      () => new Promise<void>((resolve) => (releaseReset = resolve)),
+    );
+    const reset = manager.reset(current);
+    const later = manager.enqueue(current, makeChannelMock(), makeMsg("after reset"));
+
+    expect(lane.queue).toHaveLength(0);
+    expect(agent.runTurn).not.toHaveBeenCalled();
+    releaseReset();
+    await Promise.all([reset, later]);
+    expect(agent.runTurn).toHaveBeenCalledWith(
+      expect.objectContaining({ route: current, text: "after reset" }),
+    );
+  });
+
+  it("lets a later message continue after a failed reset", async () => {
+    const { manager, agent } = makeManager();
+    const current = route("tg:chat-1");
+    (agent.resetSession as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("disk full"));
+    const reset = manager.reset(current);
+    const later = manager.enqueue(current, makeChannelMock(), makeMsg("after failure"));
+    await expect(reset).rejects.toThrow("disk full");
+    await later;
+    expect(agent.runTurn).toHaveBeenCalledWith(
+      expect.objectContaining({ route: current, text: "after failure" }),
+    );
   });
 });

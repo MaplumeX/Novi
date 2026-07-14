@@ -54,6 +54,26 @@ export interface ChannelMessage {
   metadata?: Record<string, unknown>;
 }
 
+/** Durable identity of one channel conversation. */
+export interface GatewaySessionLocator {
+  /** Channel implementation type, for example `telegram`. */
+  channel: ChannelType;
+  /** Configured channel account/instance id. */
+  account: string;
+  chat: {
+    type: ChatType;
+    id: string;
+  };
+  /** Channel-native thread/topic id, when present. */
+  thread?: string;
+}
+
+/** Runtime route: a structured durable locator plus its canonical cache key. */
+export interface GatewaySessionRoute {
+  key: string;
+  locator: GatewaySessionLocator;
+}
+
 /** Outbound streaming events bridged from the agent harness to a channel. */
 export type ChannelEvent =
   | { type: "typing" }
@@ -107,7 +127,7 @@ export interface AgentProtocolTurnCallbacks {
 
 /** Input for a single agent turn. */
 export interface AgentProtocolTurnInput {
-  sessionKey: string;
+  route: GatewaySessionRoute;
   text: string;
   callbacks?: AgentProtocolTurnCallbacks;
 }
@@ -125,11 +145,11 @@ export interface AgentProtocolTurnResult {
  */
 export interface AgentProtocolAdapter {
   runTurn(input: AgentProtocolTurnInput): Promise<AgentProtocolTurnResult>;
-  steer(sessionKey: string, text: string): Promise<void>;
-  followUp(sessionKey: string, text: string): Promise<void>;
-  abort(sessionKey: string): Promise<void>;
-  resetSession(sessionKey: string): Promise<void>;
-  closeSession(sessionKey: string): Promise<void>;
+  steer(route: GatewaySessionRoute, text: string): Promise<void>;
+  followUp(route: GatewaySessionRoute, text: string): Promise<void>;
+  abort(route: GatewaySessionRoute): Promise<void>;
+  resetSession(route: GatewaySessionRoute): Promise<void>;
+  closeSession(route: GatewaySessionRoute): Promise<void>;
   /** Release all resources held by the adapter (called on gateway shutdown). */
   stop(): Promise<void>;
 }

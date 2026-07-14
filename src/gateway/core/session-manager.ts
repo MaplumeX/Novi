@@ -1,4 +1,9 @@
-import type { ChannelAdapter, ChannelMessage, AgentProtocolAdapter } from "./types.js";
+import type {
+  ChannelAdapter,
+  ChannelMessage,
+  AgentProtocolAdapter,
+  GatewaySessionRoute,
+} from "./types.js";
 import type { QueueMode } from "../config.js";
 import { createSessionLane, enqueueMessage, type SessionLane } from "./session-lane.js";
 
@@ -34,6 +39,7 @@ export class GatewaySessionManager {
   private readonly maxConcurrentSessions: number;
   private readonly queueMode: QueueMode;
   private readonly lanes = new Map<string, SessionLane>();
+  private readonly resets = new Map<string, Promise<void>>();
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(options: GatewaySessionManagerOptions) {
@@ -48,19 +54,21 @@ export class GatewaySessionManager {
    * if needed (with max-concurrent eviction).
    */
   async enqueue(
-    sessionKey: string,
+    route: GatewaySessionRoute,
     channel: ChannelAdapter,
     msg: ChannelMessage,
     queueMode?: QueueMode,
   ): Promise<void> {
-    const lane = this.getOrCreate(sessionKey);
+    const resetting = this.resets.get(route.key);
+    if (resetting) await resetting.catch(() => {});
+    const lane = this.getOrCreate(route);
     const mode = queueMode ?? this.queueMode;
     await enqueueMessage(lane, this.agent, { channel, msg, mode });
   }
 
   /** Get or lazily create the lane for a session key. */
-  getOrCreate(sessionKey: string): SessionLane {
-    let lane = this.lanes.get(sessionKey);
+  getOrCreate(route: GatewaySessionRoute): SessionLane {
+    let lane = this.lanes.get(route.key);
     if (lane) return lane;
 
     // Enforce max concurrent: evict oldest idle lane if at capacity.
@@ -68,9 +76,38 @@ export class GatewaySessionManager {
       this.evictOldestIdle();
     }
 
-    lane = createSessionLane(sessionKey);
-    this.lanes.set(sessionKey, lane);
+    lane = createSessionLane(route);
+    this.lanes.set(route.key, lane);
     return lane;
+  }
+
+  /**
+   * Force a fresh session for a route. The barrier is published before any
+   * asynchronous work, so later messages wait and can only enter the new
+   * session. Locally queued messages from the old generation are discarded.
+   */
+  async reset(route: GatewaySessionRoute): Promise<void> {
+    const previous = this.resets.get(route.key);
+    const operation = (async () => {
+      if (previous) await previous.catch(() => {});
+      const lane = this.lanes.get(route.key);
+      if (lane) lane.queue.length = 0;
+      try {
+        await this.agent.resetSession(route);
+      } finally {
+        if (lane) {
+          lane.queue.length = 0;
+          lane.status = "idle";
+          lane.lastActivity = Date.now();
+        }
+      }
+    })();
+    this.resets.set(route.key, operation);
+    try {
+      await operation;
+    } finally {
+      if (this.resets.get(route.key) === operation) this.resets.delete(route.key);
+    }
   }
 
   /** Start the periodic cleanup timer (2-min interval, unref'd). */
@@ -88,9 +125,10 @@ export class GatewaySessionManager {
       clearInterval(this.cleanupTimer);
       this.cleanupTimer = null;
     }
-    const keys = [...this.lanes.keys()];
+    await Promise.allSettled([...this.resets.values()]);
+    const routes = [...this.lanes.values()].map((lane) => lane.route);
     this.lanes.clear();
-    await Promise.allSettled(keys.map((key) => this.agent.closeSession(key)));
+    await Promise.allSettled(routes.map((route) => this.agent.closeSession(route)));
   }
 
   /** Safe state summary for gateway diagnostics. */
@@ -107,16 +145,16 @@ export class GatewaySessionManager {
   /** Close idle lanes that have exceeded the idle timeout. */
   private async evictIdle(): Promise<void> {
     const now = Date.now();
-    const toClose: string[] = [];
-    for (const [key, lane] of this.lanes) {
+    const toClose: GatewaySessionRoute[] = [];
+    for (const lane of this.lanes.values()) {
       if (lane.status === "running") continue;
       if (now - lane.lastActivity > this.idleTimeoutMs) {
-        toClose.push(key);
+        toClose.push(lane.route);
       }
     }
-    for (const key of toClose) {
-      this.lanes.delete(key);
-      await this.agent.closeSession(key).catch(() => {});
+    for (const route of toClose) {
+      this.lanes.delete(route.key);
+      await this.agent.closeSession(route).catch(() => {});
     }
   }
 
@@ -132,8 +170,9 @@ export class GatewaySessionManager {
       }
     }
     if (oldestKey) {
+      const route = this.lanes.get(oldestKey)?.route;
       this.lanes.delete(oldestKey);
-      void this.agent.closeSession(oldestKey).catch(() => {});
+      if (route) void this.agent.closeSession(route).catch(() => {});
     }
   }
 }

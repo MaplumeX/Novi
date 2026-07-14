@@ -22,11 +22,7 @@ import type { HookConfig } from "./hooks/index.js";
 import { getNoviDir, getSessionsDir } from "./config.js";
 import { DEFAULT_SYSTEM_PROMPT } from "./default-system-prompt.js";
 import { getBuiltinToolDescriptor } from "./tools/index.js";
-import {
-  assembleSessionTools,
-  type McpRuntimeHandle,
-  type ToolAssemblyWithMcp,
-} from "./tools/assembly.js";
+import { assembleSessionTools, type McpRuntimeHandle } from "./tools/assembly.js";
 import {
   snapshotToolAssembly,
   type ToolCatalogSnapshot,
@@ -450,6 +446,7 @@ export async function prepareGatewayEnv(options: BootstrapOptions = {}): Promise
 export interface CreatedSession {
   harness: AgentHarness;
   session: Session<JsonlSessionMetadata>;
+  metadata: JsonlSessionMetadata;
   sessionPath: string;
   permissionGate: PermissionGate;
   toolCatalog: ToolCatalogSnapshot;
@@ -457,23 +454,30 @@ export interface CreatedSession {
   mcp?: McpRuntimeHandle;
 }
 
+/** Select whether a harness owns a new JSONL session or resumes an existing one. */
+export type HarnessSessionTarget =
+  | { kind: "new" }
+  | { kind: "resume"; metadata: JsonlSessionMetadata | Pick<JsonlSessionMetadata, "path"> };
+
 /**
- * Create a fresh `AgentHarness` + session for one gateway session key.
+ * Create an `AgentHarness` + new or resumed JSONL session.
  *
- * Reuses the one-time {@link GatewayEnv} preparation. Each call creates a new
- * JSONL session and wires tools/resources/hooks/stream options/queue modes onto
- * a new harness instance.
+ * Reuses the one-time {@link GatewayEnv} preparation. Each call creates or
+ * opens the selected JSONL session and wires tools/resources/hooks/stream
+ * options/queue modes onto a new harness instance.
  */
 export async function createHarnessForSession(
   gatewayEnv: GatewayEnv,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- sessionKey will be used by gateway session-lane (Phase 4) for session routing/logging
-  _sessionKey: string,
+  target: HarnessSessionTarget = { kind: "new" },
 ): Promise<CreatedSession> {
   const { env, cwd, models, model, systemPrompt, thinkingLevel, resources, hookConfig } =
     gatewayEnv;
 
   const repo = new JsonlSessionRepo({ fs: env, sessionsRoot: getSessionsDir() });
-  const session = await repo.create({ cwd, id: uuidv7() });
+  const session =
+    target.kind === "new"
+      ? await repo.create({ cwd, id: uuidv7() })
+      : await repo.open(target.metadata as JsonlSessionMetadata);
   const metadata = await session.getMetadata();
   const sessionPath = metadata.path;
 
@@ -534,6 +538,7 @@ export async function createHarnessForSession(
   return {
     harness,
     session,
+    metadata,
     sessionPath,
     permissionGate,
     toolCatalog: snapshotToolAssembly(toolAssembly),
@@ -558,7 +563,9 @@ export function buildPermissionGate(
     approver: Approver | undefined;
   },
   scopeGuard: WorkspaceScopeGuard,
-  resolveDescriptor: (name: string) => Readonly<ToolDescriptor> | undefined = getBuiltinToolDescriptor,
+  resolveDescriptor: (
+    name: string,
+  ) => Readonly<ToolDescriptor> | undefined = getBuiltinToolDescriptor,
 ): PermissionGate {
   const common = {
     permissions: gatewayEnv.permissions,
@@ -585,101 +592,23 @@ export function buildPermissionGate(
 export async function bootstrap(options: BootstrapOptions = {}): Promise<BootstrapResult> {
   const gatewayEnv = await prepareGatewayEnv(options);
 
-  // Resume an existing session when requested; otherwise the gateway helper
-  // creates a fresh one (shared with the gateway path).
-  let session: Session<JsonlSessionMetadata>;
-  let sessionPath: string;
-  let harness: AgentHarness;
-  let permissionGate: PermissionGate;
-  let permissionStore = gatewayEnv.permissionStore;
-  let toolCatalog: ToolCatalogSnapshot;
-  let mcp: McpRuntimeHandle | undefined;
-
-  if (options.resumePath) {
-    const { env } = gatewayEnv;
-    const absResult = await env.absolutePath(options.resumePath);
+  let target: HarnessSessionTarget = { kind: "new" };
+  if (options.resumePath !== undefined) {
+    const absResult = await gatewayEnv.env.absolutePath(options.resumePath);
     if (!absResult.ok) {
       throw new Error(`invalid resume path ${options.resumePath}: ${absResult.error.message}`);
     }
-    const repo = new JsonlSessionRepo({ fs: env, sessionsRoot: getSessionsDir() });
-    session = await repo.open({ path: absResult.value } as JsonlSessionMetadata);
-    const metadata = await session.getMetadata();
-    sessionPath = metadata.path;
-
-    harness = new AgentHarness({
-      env: gatewayEnv.env,
-      session,
-      models: gatewayEnv.models,
-      model: gatewayEnv.model,
-      systemPrompt: gatewayEnv.systemPrompt,
-      thinkingLevel: gatewayEnv.thinkingLevel,
-    });
-
-    const toolAssembly: ToolAssemblyWithMcp = await assembleSessionTools(
-      env,
-      metadata.id,
-      gatewayEnv.cwd,
-      {
-        webSearch: gatewayEnv.resolvedSettings.webSearch,
-        fetchContent: gatewayEnv.resolvedSettings.fetchContent,
-        exposure: gatewayEnv.resolvedSettings.tools,
-        permissions: gatewayEnv.permissions,
-        mode: gatewayEnv.toolMode,
-        workspace: gatewayEnv.cwd,
-        budget: gatewayEnv.toolBudget.values,
-        artifactsEnabled: gatewayEnv.toolBudget.artifactsEnabled,
-        connectMcp: true,
-      },
-    );
-    for (const diagnostic of toolAssembly.diagnostics) {
-      process.stderr.write(`warning: ${diagnostic}\n`);
-    }
-    await harness.setTools(toolAssembly.tools, toolAssembly.activeToolNames);
-    toolCatalog = snapshotToolAssembly(toolAssembly);
-    mcp = toolAssembly.mcp;
-    await harness.setResources({
-      skills: gatewayEnv.resources.skills,
-      promptTemplates: gatewayEnv.resources.promptTemplates,
-    });
-    permissionGate = buildPermissionGate(
-      gatewayEnv,
-      toolAssembly.scopeGuard,
-      toolAssembly.resolveDescriptor,
-    );
-    registerHooks(
-      harness,
-      gatewayEnv.hookConfig,
-      { env, cwd: gatewayEnv.cwd, sessionId: metadata.id },
-      { permissionGate },
-    );
-    const so = gatewayEnv.streamOptions;
-    if (Object.keys(so).length > 0) {
-      await harness.setStreamOptions(so);
-    }
-    if (gatewayEnv.steeringMode) {
-      await harness.setSteeringMode(gatewayEnv.steeringMode);
-    }
-    if (gatewayEnv.followUpMode) {
-      await harness.setFollowUpMode(gatewayEnv.followUpMode);
-    }
-  } else {
-    const created = await createHarnessForSession(gatewayEnv, "tui");
-    harness = created.harness;
-    session = created.session;
-    sessionPath = created.sessionPath;
-    permissionGate = created.permissionGate;
-    permissionStore = created.permissionStore;
-    toolCatalog = created.toolCatalog;
-    mcp = created.mcp;
+    target = { kind: "resume", metadata: { path: absResult.value } };
   }
+  const created = await createHarnessForSession(gatewayEnv, target);
 
   return {
-    harness,
+    harness: created.harness,
     env: gatewayEnv.env,
     models: gatewayEnv.models,
     model: gatewayEnv.model,
-    session,
-    sessionPath,
+    session: created.session,
+    sessionPath: created.sessionPath,
     cwd: gatewayEnv.cwd,
     resolvedSettings: gatewayEnv.resolvedSettings,
     systemPrompt: gatewayEnv.systemPrompt,
@@ -692,12 +621,12 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
     trusted: gatewayEnv.trusted,
     scopedModels: gatewayEnv.resolvedSettings.scopedModels ?? [],
     yes: gatewayEnv.yes,
-    permissionGate,
-    permissionStore,
+    permissionGate: created.permissionGate,
+    permissionStore: created.permissionStore,
     settingsLayers: gatewayEnv.settingsLayers,
-    toolCatalog,
+    toolCatalog: created.toolCatalog,
     toolMode: gatewayEnv.toolMode,
     toolBudget: gatewayEnv.toolBudget,
-    mcp,
+    mcp: created.mcp,
   };
 }

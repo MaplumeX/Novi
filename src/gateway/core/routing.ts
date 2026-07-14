@@ -1,8 +1,35 @@
-import type { ChannelMessage } from "./types.js";
+import type {
+  ChannelAdapter,
+  ChannelMessage,
+  GatewaySessionLocator,
+  GatewaySessionRoute,
+} from "./types.js";
 
-/** Stable session identity; topics never share a harness with their parent chat. */
-export function sessionKey(channelId: string, msg: ChannelMessage): string {
-  return `${channelId}:${msg.chatType}:${msg.remoteChatId}${msg.threadId ? `:thread:${msg.threadId}` : ""}`;
+/** Canonical, unambiguous key for a durable gateway conversation locator. */
+export function sessionKeyForLocator(locator: GatewaySessionLocator): string {
+  const fields = [
+    "gateway",
+    locator.channel,
+    locator.account,
+    locator.chat.type,
+    locator.chat.id,
+  ].map(encodeURIComponent);
+  if (locator.thread !== undefined) fields.push("thread", encodeURIComponent(locator.thread));
+  return fields.join(":");
+}
+
+/** Build the durable route for one inbound channel message. */
+export function sessionRoute(
+  channel: Pick<ChannelAdapter, "id" | "type">,
+  msg: ChannelMessage,
+): GatewaySessionRoute {
+  const locator: GatewaySessionLocator = {
+    channel: channel.type,
+    account: channel.id,
+    chat: { type: msg.chatType, id: msg.remoteChatId },
+    ...(msg.threadId !== undefined ? { thread: msg.threadId } : {}),
+  };
+  return { key: sessionKeyForLocator(locator), locator };
 }
 
 export function isSilentReply(text: string): boolean {

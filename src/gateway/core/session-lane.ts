@@ -1,4 +1,9 @@
-import type { ChannelAdapter, ChannelMessage, AgentProtocolAdapter } from "./types.js";
+import type {
+  ChannelAdapter,
+  ChannelMessage,
+  AgentProtocolAdapter,
+  GatewaySessionRoute,
+} from "./types.js";
 import type { QueueMode } from "../config.js";
 import { isSilentReply } from "./routing.js";
 
@@ -17,7 +22,7 @@ export interface QueuedMessage {
  * before calling `enqueue`. The lane only deals with normal user messages.
  */
 export interface SessionLane {
-  readonly sessionKey: string;
+  readonly route: GatewaySessionRoute;
   status: "idle" | "running";
   /** Messages queued for after the current run (interrupt entries only). */
   queue: QueuedMessage[];
@@ -25,9 +30,9 @@ export interface SessionLane {
 }
 
 /** Create a fresh, idle lane for a session key. */
-export function createSessionLane(sessionKey: string): SessionLane {
+export function createSessionLane(route: GatewaySessionRoute): SessionLane {
   return {
-    sessionKey,
+    route,
     status: "idle",
     queue: [],
     lastActivity: Date.now(),
@@ -66,12 +71,12 @@ export async function enqueueMessage(
 
   if (mode === "steer") {
     try {
-      await agent.steer(lane.sessionKey, msg.text);
+      await agent.steer(lane.route, msg.text);
       return;
     } catch {
       // Steer not accepted — fall back to followUp.
       try {
-        await agent.followUp(lane.sessionKey, msg.text);
+        await agent.followUp(lane.route, msg.text);
       } catch {
         // Both failed — queue for after the run.
         lane.queue.push({ ...entry, mode: "interrupt" });
@@ -82,7 +87,7 @@ export async function enqueueMessage(
 
   if (mode === "followup") {
     try {
-      await agent.followUp(lane.sessionKey, msg.text);
+      await agent.followUp(lane.route, msg.text);
       return;
     } catch {
       // followUp failed — queue for after the run.
@@ -93,7 +98,7 @@ export async function enqueueMessage(
 
   // interrupt: abort the current run, then queue for a fresh turn.
   try {
-    await agent.abort(lane.sessionKey);
+    await agent.abort(lane.route);
   } catch {
     // Abort failed — still queue; the current run will end on its own.
   }
@@ -149,7 +154,7 @@ async function runTurn(
   };
 
   try {
-    await agent.runTurn({ sessionKey: lane.sessionKey, text: msg.text, callbacks });
+    await agent.runTurn({ route: lane.route, text: msg.text, callbacks });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     await channel.send(chatId, `Error: ${message}`).catch(() => {});

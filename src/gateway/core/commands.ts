@@ -1,6 +1,8 @@
 import type { ChannelAdapter } from "./types.js";
 import type { AgentProtocolAdapter } from "./types.js";
+import type { GatewaySessionRoute } from "./types.js";
 import type { GatewayEnv } from "../../bootstrap.js";
+import type { GatewaySessionManager } from "./session-manager.js";
 
 /** A registered slash command handler. */
 export interface CommandHandler {
@@ -17,8 +19,9 @@ export interface CommandHandler {
 export interface CommandContext {
   channel: ChannelAdapter;
   chatId: string;
-  sessionKey: string;
+  route: GatewaySessionRoute;
   agent: AgentProtocolAdapter;
+  sessionManager: GatewaySessionManager;
   gatewayEnv: GatewayEnv | undefined;
   /** Remaining text after the command word (may be empty). */
   arg: string;
@@ -53,15 +56,20 @@ export function createCommandRegistry(): CommandRegistry {
   registry.register("new", {
     description: "Start a fresh session (clears current context).",
     async run(ctx) {
-      await ctx.agent.resetSession(ctx.sessionKey);
-      await ctx.channel.send(ctx.chatId, "Started a fresh session.");
+      try {
+        await ctx.sessionManager.reset(ctx.route);
+        await ctx.channel.send(ctx.chatId, "Started a fresh session.");
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        await ctx.channel.send(ctx.chatId, `Failed to start a fresh session: ${message}`);
+      }
     },
   });
 
   registry.register("stop", {
     description: "Abort the current run.",
     async run(ctx) {
-      await ctx.agent.abort(ctx.sessionKey);
+      await ctx.agent.abort(ctx.route);
       await ctx.channel.send(ctx.chatId, "Stopped current run.");
     },
   });
@@ -83,12 +91,12 @@ export function createCommandRegistry(): CommandRegistry {
     async run(ctx) {
       const env = ctx.gatewayEnv;
       if (!env) {
-        await ctx.channel.send(ctx.chatId, `session: ${ctx.sessionKey}`);
+        await ctx.channel.send(ctx.chatId, `session: ${ctx.route.key}`);
         return;
       }
       await ctx.channel.send(
         ctx.chatId,
-        `session: ${ctx.sessionKey}\nmodel: ${env.model.provider}/${env.model.id}`,
+        `session: ${ctx.route.key}\nmodel: ${env.model.provider}/${env.model.id}`,
       );
     },
   });
@@ -105,10 +113,11 @@ export function createCommandRegistry(): CommandRegistry {
  */
 export async function runCommand(
   channel: ChannelAdapter,
-  sessionKey: string,
+  route: GatewaySessionRoute,
   chatId: string,
   text: string,
   agent: AgentProtocolAdapter,
+  sessionManager: GatewaySessionManager,
   registry: CommandRegistry,
   gatewayEnv?: GatewayEnv,
 ): Promise<boolean> {
@@ -121,6 +130,6 @@ export async function runCommand(
   const handler = registry.get(name);
   if (!handler) return false;
 
-  await handler.run({ channel, chatId, sessionKey, agent, gatewayEnv, arg });
+  await handler.run({ channel, chatId, route, agent, sessionManager, gatewayEnv, arg });
   return true;
 }

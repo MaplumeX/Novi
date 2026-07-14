@@ -7,6 +7,7 @@ import { loadSettings, resolveSettings } from "../settings.js";
 import { loadGatewayConfig } from "./config.js";
 import { createChannels } from "./channels/index.js";
 import { NoviAgentAdapter } from "./agent/novi-agent-adapter.js";
+import { GatewaySessionStore } from "./core/session-store.js";
 import { GatewaySessionManager } from "./core/session-manager.js";
 import { GatewayApp } from "./core/gateway-app.js";
 import { createCommandRegistry } from "./core/commands.js";
@@ -149,7 +150,8 @@ export async function runGateway(options: RunGatewayOptions): Promise<void> {
   const channels = createChannels(config.channels, {
     editIntervalMs: config.stream.editIntervalMs,
   });
-  const agent = new NoviAgentAdapter(gatewayEnv);
+  const sessionStore = await GatewaySessionStore.open();
+  const agent = new NoviAgentAdapter(gatewayEnv, sessionStore);
   const sessionManager = new GatewaySessionManager({
     agent,
     idleTimeoutMs: config.session.idleTimeoutMs,

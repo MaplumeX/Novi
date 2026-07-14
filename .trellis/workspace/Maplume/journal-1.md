@@ -1560,3 +1560,37 @@ Added durable channel/account/chat/thread to JSONL session bindings, cold resume
 ### Next Steps
 
 - None - task complete
+
+
+## Session 47: 实现 Novi 主动任务与提醒闭环
+
+**Date**: 2026-07-14
+**Task**: 实现 Novi 主动任务与提醒闭环
+**Branch**: `main`
+
+### Summary
+
+实现持久化提醒与 Cron、重启恢复、受限后台 Agent、Telegram 投递、Heartbeat、预算治理和任务管理入口；全量 748 条测试及类型、lint、构建检查通过。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e490775` | (see git log) |
+| `da63fc2` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

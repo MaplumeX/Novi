@@ -1627,3 +1627,36 @@ Added durable channel/account/chat/thread to JSONL session bindings, cold resume
 ### Next Steps
 
 - None - task complete
+
+
+## Session 49: Explain Novi agent tool system design
+
+**Date**: 2026-07-14
+**Task**: Explain Novi agent tool system design
+**Branch**: `main`
+
+### Summary
+
+基于当前源码用 explain-code-design 产出 docs/tool-system-design.md：覆盖 descriptor/registry/assembly/runtime/permissions/MCP/events 主线、1–2 张 Mermaid、系统级设计权衡；未读旧 docs/tool-system.md；spec 无契约变更故不更新。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `082cebc` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

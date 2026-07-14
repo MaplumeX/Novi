@@ -96,6 +96,48 @@ describe("loadGatewayConfig", () => {
     expect(config.security.dmPolicy).toBe("pairing");
     expect(config.security.groupPolicy).toBe("disabled");
     expect(config.channels).toEqual([]);
+    expect(config.automation.minCronIntervalMs).toBe(300_000);
+    expect(config.automation.allowedTools).toEqual([
+      "read_file",
+      "ls",
+      "glob",
+      "grep",
+      "web_search",
+      "fetch_content",
+    ]);
+    expect(config.heartbeat.enabled).toBe(false);
+  });
+
+  it("lets a trusted project tighten automation but not enable or retarget heartbeat", async () => {
+    const { env, cwd, home, cleanup } = await setupEnv();
+    cleanups.push(cleanup);
+    mockedHome = home;
+    await writeJson(path.join(home, "gateway.json"), {
+      automation: {
+        dailyTokenLimit: 1000,
+        minCronIntervalMs: 300_000,
+        allowedTools: ["read_file", "grep"],
+      },
+      heartbeat: {
+        enabled: false,
+        model: "anthropic/model",
+        target: { channel: "telegram", account: "tg", chat: { type: "direct", id: "1" } },
+      },
+    });
+    await writeJson(path.join(cwd, ".novi", "gateway.json"), {
+      automation: {
+        dailyTokenLimit: 5000,
+        minCronIntervalMs: 600_000,
+        allowedTools: ["read_file", "bash"],
+      },
+      heartbeat: { enabled: true, model: "other/model" },
+    });
+    const { config } = await loadGatewayConfig(env, { cwd });
+    expect(config.automation.dailyTokenLimit).toBe(1000);
+    expect(config.automation.minCronIntervalMs).toBe(600_000);
+    expect(config.automation.allowedTools).toEqual(["read_file"]);
+    expect(config.heartbeat.enabled).toBe(false);
+    expect(config.heartbeat.model).toBe("anthropic/model");
   });
 
   it("keeps legacy allowlist deployments in allowlist DM mode", async () => {

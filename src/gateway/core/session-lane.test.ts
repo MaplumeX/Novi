@@ -2,7 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 import type { AgentProtocolAdapter } from "./types.js";
 import type { ChannelAdapter, ChannelMessage } from "./types.js";
 import type { QueueMode } from "../config.js";
-import { createSessionLane as createRouteLane, enqueueMessage } from "./session-lane.js";
+import {
+  createSessionLane as createRouteLane,
+  enqueueMessage,
+  type QueuedMessage,
+} from "./session-lane.js";
 
 function route(key: string) {
   return {
@@ -40,6 +44,7 @@ function makeAgentMock(): AgentProtocolAdapter {
     followUp: vi.fn().mockResolvedValue(undefined),
     abort: vi.fn().mockResolvedValue(undefined),
     resetSession: vi.fn().mockResolvedValue(undefined),
+    appendScheduledDelivery: vi.fn().mockResolvedValue(undefined),
     closeSession: vi.fn().mockResolvedValue(undefined),
     stop: vi.fn().mockResolvedValue(undefined),
   };
@@ -89,7 +94,7 @@ describe("enqueueMessage (idle state)", () => {
       expect.objectContaining({ route: expect.objectContaining({ key: "tg:123" }), text: "hi" }),
     );
     // onTurnEnd callback → channel.send with final text.
-    expect(channel.send).toHaveBeenCalledWith("123", "reply");
+    expect(channel.send).toHaveBeenCalledWith({ chatId: "123" }, "reply");
     // Status should be idle after the turn completes.
     expect(lane.status).toBe("idle");
   });
@@ -102,7 +107,7 @@ describe("enqueueMessage (idle state)", () => {
 
     await enqueueMessage(lane, agent, makeEntry(channel, makeMsg("hi"), "steer"));
 
-    expect(channel.send).toHaveBeenCalledWith("123", expect.stringContaining("boom"));
+    expect(channel.send).toHaveBeenCalledWith({ chatId: "123" }, expect.stringContaining("boom"));
     expect(lane.status).toBe("idle");
   });
 
@@ -122,7 +127,7 @@ describe("enqueueMessage (idle state)", () => {
       makeEntry(channel, makeMsg("hi"), "steer"),
     );
     expect(channel.send).not.toHaveBeenCalled();
-    expect(channel.cancelStream).toHaveBeenCalledWith("123");
+    expect(channel.cancelStream).toHaveBeenCalledWith({ chatId: "123" });
   });
 
   it("buffers silent marker prefixes and releases ordinary text once in order", async () => {
@@ -167,18 +172,30 @@ describe("enqueueMessage (idle state)", () => {
       makeEntry(ordinaryChannel, makeMsg("hi"), "steer"),
     );
     expect(ordinaryChannel.sendEvent).toHaveBeenCalledTimes(3);
-    expect(ordinaryChannel.sendEvent).toHaveBeenNthCalledWith(1, "123", {
-      type: "text-delta",
-      delta: "So",
-    });
-    expect(ordinaryChannel.sendEvent).toHaveBeenNthCalledWith(2, "123", {
-      type: "text-delta",
-      delta: "!",
-    });
-    expect(ordinaryChannel.sendEvent).toHaveBeenNthCalledWith(3, "123", {
-      type: "text-delta",
-      delta: " more",
-    });
+    expect(ordinaryChannel.sendEvent).toHaveBeenNthCalledWith(
+      1,
+      { chatId: "123" },
+      {
+        type: "text-delta",
+        delta: "So",
+      },
+    );
+    expect(ordinaryChannel.sendEvent).toHaveBeenNthCalledWith(
+      2,
+      { chatId: "123" },
+      {
+        type: "text-delta",
+        delta: "!",
+      },
+    );
+    expect(ordinaryChannel.sendEvent).toHaveBeenNthCalledWith(
+      3,
+      { chatId: "123" },
+      {
+        type: "text-delta",
+        delta: " more",
+      },
+    );
   });
 });
 
@@ -211,7 +228,7 @@ describe("enqueueMessage (running + steer mode)", () => {
     expect(agent.followUp).toHaveBeenCalledWith(route("tg:123"), "msg");
     // Both failed → queued as interrupt for after the run.
     expect(lane.queue).toHaveLength(1);
-    expect(lane.queue[0].mode).toBe("interrupt");
+    expect((lane.queue[0] as QueuedMessage).mode).toBe("interrupt");
   });
 
   it("falls back to followUp when steer throws (followUp succeeds)", async () => {
@@ -251,7 +268,7 @@ describe("enqueueMessage (running + followup mode)", () => {
     await enqueueMessage(lane, agent, makeEntry(channel, makeMsg("msg"), "followup"));
 
     expect(lane.queue).toHaveLength(1);
-    expect(lane.queue[0].mode).toBe("interrupt");
+    expect((lane.queue[0] as QueuedMessage).mode).toBe("interrupt");
   });
 });
 
@@ -266,7 +283,7 @@ describe("enqueueMessage (running + interrupt mode)", () => {
 
     expect(agent.abort).toHaveBeenCalledWith(route("tg:123"));
     expect(lane.queue).toHaveLength(1);
-    expect(lane.queue[0].msg.text).toBe("new");
+    expect((lane.queue[0] as QueuedMessage).msg.text).toBe("new");
   });
 
   it("still queues when abort throws", async () => {

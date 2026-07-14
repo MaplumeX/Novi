@@ -74,6 +74,15 @@ export interface GatewaySessionRoute {
   locator: GatewaySessionLocator;
 }
 
+export interface ChannelSendTarget {
+  chatId: string;
+  threadId?: string;
+}
+
+export interface ChannelDeliveryReceipt {
+  messageIds: string[];
+}
+
 /** Outbound streaming events bridged from the agent harness to a channel. */
 export type ChannelEvent =
   | { type: "typing" }
@@ -99,13 +108,13 @@ export interface ChannelAdapter {
   start(): Promise<void>;
   stop(): Promise<void>;
   /** Send the final, complete reply text (may chunk on overflow). */
-  send(chatId: string, text: string): Promise<void>;
+  send(target: ChannelSendTarget, text: string): Promise<ChannelDeliveryReceipt>;
   /** Stream an incremental event (only channels with `capabilities.edit`). */
-  sendEvent?(chatId: string, event: ChannelEvent): Promise<void>;
+  sendEvent?(target: ChannelSendTarget, event: ChannelEvent): Promise<void>;
   /** Best-effort typing indicator. */
-  sendTyping?(chatId: string): Promise<void>;
+  sendTyping?(target: ChannelSendTarget): Promise<void>;
   /** Remove an in-progress streamed placeholder when the final reply is silent. */
-  cancelStream?(chatId: string): Promise<void>;
+  cancelStream?(target: ChannelSendTarget): Promise<void>;
   /** Acknowledge receipt of an inbound message back to the platform. */
   acknowledgeMessage?(msgId: string): Promise<void>;
   /** Lightweight connectivity check; must not start an agent turn. */
@@ -137,6 +146,13 @@ export interface AgentProtocolTurnResult {
   text: string;
 }
 
+export interface ScheduledDeliveryEntry {
+  runId: string;
+  jobId: string;
+  jobName: string;
+  text: string;
+}
+
 /**
  * Abstraction boundary over the agent backend. MVP is an in-process
  * `NoviAgentAdapter` wrapping `AgentHarness`; the signature is protocol-neutral
@@ -149,6 +165,7 @@ export interface AgentProtocolAdapter {
   followUp(route: GatewaySessionRoute, text: string): Promise<void>;
   abort(route: GatewaySessionRoute): Promise<void>;
   resetSession(route: GatewaySessionRoute): Promise<void>;
+  appendScheduledDelivery(route: GatewaySessionRoute, entry: ScheduledDeliveryEntry): Promise<void>;
   closeSession(route: GatewaySessionRoute): Promise<void>;
   /** Release all resources held by the adapter (called on gateway shutdown). */
   stop(): Promise<void>;

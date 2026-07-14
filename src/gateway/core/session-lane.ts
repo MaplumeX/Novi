@@ -6,13 +6,24 @@ import type {
 } from "./types.js";
 import type { QueueMode } from "../config.js";
 import { isSilentReply } from "./routing.js";
+import { channelTargetForMessage } from "./routing.js";
 
 /** A queued inbound message awaiting dispatch after the current run. */
 export interface QueuedMessage {
+  kind?: "message";
   channel: ChannelAdapter;
   msg: ChannelMessage;
   mode: QueueMode;
 }
+
+export interface QueuedSystemOperation {
+  kind: "system-operation";
+  run: () => Promise<void>;
+  resolve: () => void;
+  reject: (error: unknown) => void;
+}
+
+type QueuedLaneEntry = QueuedMessage | QueuedSystemOperation;
 
 /**
  * Per-sessionKey lane: guarantees serial harness execution (one run at a time)
@@ -25,8 +36,22 @@ export interface SessionLane {
   readonly route: GatewaySessionRoute;
   status: "idle" | "running";
   /** Messages queued for after the current run (interrupt entries only). */
-  queue: QueuedMessage[];
+  queue: QueuedLaneEntry[];
   lastActivity: number;
+}
+
+export async function enqueueSystemOperation(
+  lane: SessionLane,
+  operation: () => Promise<void>,
+): Promise<void> {
+  lane.lastActivity = Date.now();
+  if (lane.status === "idle") {
+    await runSystemOperation(lane, operation);
+    return;
+  }
+  await new Promise<void>((resolve, reject) => {
+    lane.queue.push({ kind: "system-operation", run: operation, resolve, reject });
+  });
 }
 
 /** Create a fresh, idle lane for a session key. */
@@ -121,7 +146,7 @@ async function runTurn(
   lane.status = "running";
   lane.lastActivity = Date.now();
 
-  const chatId = msg.remoteChatId;
+  const target = channelTargetForMessage(msg);
   let silentCandidate = "";
   let silentPending = true;
   const callbacks = {
@@ -130,26 +155,26 @@ async function runTurn(
         silentCandidate += delta;
         if (isSilentPrefix(silentCandidate)) return;
         silentPending = false;
-        await channel.sendEvent?.(chatId, { type: "text-delta", delta: silentCandidate });
+        await channel.sendEvent?.(target, { type: "text-delta", delta: silentCandidate });
         return;
       }
-      await channel.sendEvent?.(chatId, { type: "text-delta", delta });
+      await channel.sendEvent?.(target, { type: "text-delta", delta });
     },
     onReasoningDelta: async (delta: string) => {
-      await channel.sendEvent?.(chatId, { type: "reasoning-delta", delta });
+      await channel.sendEvent?.(target, { type: "reasoning-delta", delta });
     },
     onToolEvent: async (event: import("../../tools/events.js").NoviToolEvent) => {
-      await channel.sendEvent?.(chatId, {
+      await channel.sendEvent?.(target, {
         type: "tool-event",
         event,
       });
     },
     onTyping: async () => {
-      await channel.sendTyping?.(chatId);
+      await channel.sendTyping?.(target);
     },
     onTurnEnd: async (text: string) => {
-      if (isSilentReply(text)) await channel.cancelStream?.(chatId);
-      else await channel.send(chatId, text);
+      if (isSilentReply(text)) await channel.cancelStream?.(target);
+      else await channel.send(target, text);
     },
   };
 
@@ -157,7 +182,7 @@ async function runTurn(
     await agent.runTurn({ route: lane.route, text: msg.text, callbacks });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    await channel.send(chatId, `Error: ${message}`).catch(() => {});
+    await channel.send(target, `Error: ${message}`).catch(() => {});
   } finally {
     lane.lastActivity = Date.now();
   }
@@ -165,12 +190,55 @@ async function runTurn(
   // Drain queue: each queued (interrupt) message starts a fresh turn.
   if (lane.queue.length > 0) {
     const next = lane.queue.shift()!;
-    await runTurn(lane, agent, next);
+    if (next.kind === "system-operation") {
+      try {
+        await next.run();
+        next.resolve();
+      } catch (error) {
+        next.reject(error);
+      }
+      await drainQueue(lane, agent);
+    } else {
+      await runTurn(lane, agent, next);
+    }
     return;
   }
 
   lane.status = "idle";
   lane.lastActivity = Date.now();
+}
+
+async function runSystemOperation(
+  lane: SessionLane,
+  operation: () => Promise<void>,
+): Promise<void> {
+  lane.status = "running";
+  try {
+    await operation();
+  } finally {
+    lane.lastActivity = Date.now();
+    lane.status = "idle";
+  }
+}
+
+async function drainQueue(lane: SessionLane, agent: AgentProtocolAdapter): Promise<void> {
+  const next = lane.queue.shift();
+  if (!next) {
+    lane.status = "idle";
+    lane.lastActivity = Date.now();
+    return;
+  }
+  if (next.kind === "system-operation") {
+    try {
+      await next.run();
+      next.resolve();
+    } catch (error) {
+      next.reject(error);
+    }
+    await drainQueue(lane, agent);
+    return;
+  }
+  await runTurn(lane, agent, next);
 }
 
 const SILENT_MARKERS = ["SILENT", "[SILENT]", "NO_REPLY", "NO REPLY"];

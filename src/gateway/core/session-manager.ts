@@ -5,7 +5,12 @@ import type {
   GatewaySessionRoute,
 } from "./types.js";
 import type { QueueMode } from "../config.js";
-import { createSessionLane, enqueueMessage, type SessionLane } from "./session-lane.js";
+import {
+  createSessionLane,
+  enqueueMessage,
+  enqueueSystemOperation,
+  type SessionLane,
+} from "./session-lane.js";
 
 /** Constructor options for {@link GatewaySessionManager}. */
 export interface GatewaySessionManagerOptions {
@@ -64,6 +69,15 @@ export class GatewaySessionManager {
     const lane = this.getOrCreate(route);
     const mode = queueMode ?? this.queueMode;
     await enqueueMessage(lane, this.agent, { channel, msg, mode });
+  }
+
+  async enqueueSystemOperation(
+    route: GatewaySessionRoute,
+    operation: () => Promise<void>,
+  ): Promise<void> {
+    const resetting = this.resets.get(route.key);
+    if (resetting) await resetting.catch(() => undefined);
+    await enqueueSystemOperation(this.getOrCreate(route), operation);
   }
 
   /** Get or lazily create the lane for a session key. */

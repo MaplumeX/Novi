@@ -10,6 +10,7 @@ function agent(): AgentProtocolAdapter {
     followUp: vi.fn(),
     abort: vi.fn(),
     resetSession: vi.fn().mockResolvedValue(undefined),
+    appendScheduledDelivery: vi.fn().mockResolvedValue(undefined),
     closeSession: vi.fn(),
     stop: vi.fn(),
   };
@@ -55,7 +56,7 @@ describe("gateway /new command", () => {
       await runCommand(
         outbound,
         route,
-        "chat-1",
+        { chatId: "chat-1" },
         "/new",
         adapter,
         sessions,
@@ -63,7 +64,7 @@ describe("gateway /new command", () => {
       ),
     ).toBe(true);
     expect(reset).toHaveBeenCalledWith(route);
-    expect(outbound.send).toHaveBeenCalledWith("chat-1", "Started a fresh session.");
+    expect(outbound.send).toHaveBeenCalledWith({ chatId: "chat-1" }, "Started a fresh session.");
   });
 
   it("surfaces reset persistence failures to the channel", async () => {
@@ -71,8 +72,22 @@ describe("gateway /new command", () => {
     const sessions = manager(adapter);
     vi.spyOn(sessions, "reset").mockRejectedValue(new Error("disk full"));
     const outbound = channel();
-    await runCommand(outbound, route, "chat-1", "/new", adapter, sessions, createCommandRegistry());
-    expect(outbound.send).toHaveBeenCalledWith("chat-1", expect.stringContaining("disk full"));
-    expect(outbound.send).not.toHaveBeenCalledWith("chat-1", "Started a fresh session.");
+    await runCommand(
+      outbound,
+      route,
+      { chatId: "chat-1" },
+      "/new",
+      adapter,
+      sessions,
+      createCommandRegistry(),
+    );
+    expect(outbound.send).toHaveBeenCalledWith(
+      { chatId: "chat-1" },
+      expect.stringContaining("disk full"),
+    );
+    expect(outbound.send).not.toHaveBeenCalledWith(
+      { chatId: "chat-1" },
+      "Started a fresh session.",
+    );
   });
 });

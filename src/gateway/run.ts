@@ -11,6 +11,13 @@ import { GatewaySessionStore } from "./core/session-store.js";
 import { GatewaySessionManager } from "./core/session-manager.js";
 import { GatewayApp } from "./core/gateway-app.js";
 import { createCommandRegistry } from "./core/commands.js";
+import { JobStore } from "./jobs/store.js";
+import { JobService } from "./jobs/service.js";
+import { AutomationAgentRunner } from "./jobs/agent-runner.js";
+import { DeliveryService } from "./jobs/delivery.js";
+import { GatewayScheduler } from "./jobs/scheduler.js";
+import { localDayKey } from "./jobs/schedule.js";
+import { HeartbeatService } from "./jobs/heartbeat.js";
 
 /** Options for `runGateway`, mirroring the relevant CLI flags. */
 export interface RunGatewayOptions extends BootstrapOptions {
@@ -66,7 +73,7 @@ export async function runGateway(options: RunGatewayOptions): Promise<void> {
           .map((channel) => `${channel.id} (${channel.type}): configured`)
           .join("\n");
         process.stdout.write(
-          `channels: ${channels.length}\n${configured}${configured ? "\n" : ""}dmPolicy: ${config.security.dmPolicy}\ngroupPolicy: ${config.security.groupPolicy}\nactiveSessions: 0\n`,
+          `channels: ${channels.length}\n${configured}${configured ? "\n" : ""}dmPolicy: ${config.security.dmPolicy}\ngroupPolicy: ${config.security.groupPolicy}\nactiveSessions: 0\nscheduler: disconnected\n`,
         );
       }
     } finally {
@@ -151,14 +158,32 @@ export async function runGateway(options: RunGatewayOptions): Promise<void> {
     editIntervalMs: config.stream.editIntervalMs,
   });
   const sessionStore = await GatewaySessionStore.open();
-  const agent = new NoviAgentAdapter(gatewayEnv, sessionStore);
+  const jobStore = await JobStore.open(
+    undefined,
+    localDayKey(new Date(), config.automation.timezone),
+  );
+  const jobService = new JobService(jobStore, sessionStore, config, gatewayEnv.models);
+  const schedulerRef: { current?: GatewayScheduler } = {};
+  const wakeScheduler = () => schedulerRef.current?.kick();
+  const agent = new NoviAgentAdapter(
+    gatewayEnv,
+    sessionStore,
+    undefined,
+    jobService,
+    wakeScheduler,
+  );
   const sessionManager = new GatewaySessionManager({
     agent,
     idleTimeoutMs: config.session.idleTimeoutMs,
     maxConcurrentSessions: config.session.maxConcurrent,
     queueMode: config.queue.mode,
   });
-  const commands = createCommandRegistry();
+  const commands = createCommandRegistry({ jobService, onJobsMutated: wakeScheduler });
+  const runner = new AutomationAgentRunner(gatewayEnv, jobStore, config);
+  const delivery = new DeliveryService(channels, jobStore, sessionStore, sessionManager, agent);
+  const heartbeat = new HeartbeatService(gatewayEnv, jobStore, runner, delivery, config);
+  const scheduler = new GatewayScheduler(jobStore, runner, delivery, config, undefined, heartbeat);
+  schedulerRef.current = scheduler;
 
   // 6. Start the gateway app.
   const app = new GatewayApp({
@@ -170,9 +195,18 @@ export async function runGateway(options: RunGatewayOptions): Promise<void> {
     config,
     commands,
     gatewayEnv,
+    schedulerStats: () => scheduler.getStats(),
   });
 
-  await app.start();
+  try {
+    await scheduler.prepare();
+    await app.start();
+    await scheduler.start();
+  } catch (error) {
+    await scheduler.stop();
+    await app.stop();
+    throw error;
+  }
 
   const reload = () => {
     void loadGatewayConfig(gatewayEnv.env, { filePath: options.configPath, cwd, trusted })
@@ -204,8 +238,9 @@ export async function runGateway(options: RunGatewayOptions): Promise<void> {
   const shutdown = () => {
     if (shuttingDown) return;
     shuttingDown = true;
-    void app
+    void scheduler
       .stop()
+      .then(() => app.stop())
       .catch((e) => {
         process.stderr.write(
           `warning: gateway shutdown error: ${e instanceof Error ? e.message : String(e)}\n`,

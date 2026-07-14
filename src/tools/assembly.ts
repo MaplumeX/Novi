@@ -13,10 +13,7 @@ import {
   type CreateBuiltinToolAssemblyOptions,
 } from "./index.js";
 import { ToolRegistry } from "./registry.js";
-import {
-  DEFAULT_TOOL_EXECUTION_BUDGET,
-  ToolExecutionRuntime,
-} from "./runtime/index.js";
+import { DEFAULT_TOOL_EXECUTION_BUDGET, ToolExecutionRuntime } from "./runtime/index.js";
 
 /** Lifecycle handle for MCP connections owned by a tool assembly. */
 export interface McpRuntimeHandle {
@@ -74,7 +71,11 @@ export async function createToolAssembly(
     return {
       ...builtin,
       mcp: handle,
-      diagnostics: [...builtin.diagnostics, ...plan.diagnostics, ...formatPlanStatusDiagnostics(plan)],
+      diagnostics: [
+        ...builtin.diagnostics,
+        ...plan.diagnostics,
+        ...formatPlanStatusDiagnostics(plan),
+      ],
     };
   }
 
@@ -113,9 +114,7 @@ export async function createMcpToolDescriptors(
   descriptors: ToolDescriptor[];
   diagnostics: string[];
 }> {
-  const manager =
-    options.manager ??
-    new McpClientManager(options.managerOptions ?? {});
+  const manager = options.manager ?? new McpClientManager(options.managerOptions ?? {});
   await manager.connectPlan(plan, { enabledSources: options.enabledSources });
   const diagnostics = manager.getDiagnostics();
   const adapted = adaptMcpTools(manager, {
@@ -160,7 +159,10 @@ async function buildMergedAssembly(
   });
 
   const builtinDescriptors = getBuiltinToolDescriptors();
-  const reservedNames = new Set(builtinDescriptors.map((descriptor) => descriptor.name));
+  const internalDescriptors = options.additionalDescriptors ?? [];
+  const reservedNames = new Set(
+    [...builtinDescriptors, ...internalDescriptors].map((descriptor) => descriptor.name),
+  );
 
   const manager = new McpClientManager({
     workspaceCwd: options.workspace ?? env.cwd,
@@ -181,6 +183,9 @@ async function buildMergedAssembly(
   for (const descriptor of builtinDescriptors) {
     registry.add(descriptor);
   }
+  for (const descriptor of internalDescriptors) {
+    registry.add(descriptor);
+  }
   for (const item of adapted) {
     try {
       registry.add(item.descriptor);
@@ -190,7 +195,11 @@ async function buildMergedAssembly(
     }
   }
 
-  const allDescriptors = [...builtinDescriptors, ...adapted.map((item) => item.descriptor)];
+  const allDescriptors = [
+    ...builtinDescriptors,
+    ...internalDescriptors,
+    ...adapted.map((item) => item.descriptor),
+  ];
   const wholeToolPermissions = permissions
     ? Object.fromEntries(
         allDescriptors.map((descriptor) => [

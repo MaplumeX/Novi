@@ -2,6 +2,7 @@ import path from "node:path";
 import type { ExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import { getNoviDir } from "../config.js";
 import type { ChannelType } from "./core/types.js";
+import type { GatewaySessionLocator } from "./core/types.js";
 
 // ---------------------------------------------------------------------------
 // Schema types
@@ -25,6 +26,29 @@ export type ChannelConfig = TelegramChannelConfig;
 export type QueueMode = "steer" | "followup" | "interrupt";
 export type DmPolicy = "pairing" | "allowlist" | "open" | "disabled";
 export type GroupPolicy = "allowlist" | "open" | "disabled";
+
+export interface RawAutomationConfig {
+  timezone?: string;
+  allowedTools?: string[];
+  minCronIntervalMs?: number;
+  runTimeoutMs?: number;
+  maxExecutionRetries?: number;
+  maxDeliveryRetries?: number;
+  maxConcurrentLlmRuns?: number;
+  dailyTokenLimit?: number;
+  dailyCostUsd?: number;
+  retentionDays?: number;
+  maxRunsPerJob?: number;
+  maxResultBytes?: number;
+}
+
+export interface RawHeartbeatConfig {
+  enabled?: boolean;
+  everyMs?: number;
+  model?: string;
+  activeHours?: { start?: string; end?: string; timezone?: string };
+  target?: GatewaySessionLocator;
+}
 
 /** Raw `gateway.json` shape — all fields optional, validated before use. */
 export interface RawGatewayConfig {
@@ -57,6 +81,8 @@ export interface RawGatewayConfig {
     };
   };
   channels?: ChannelConfig[];
+  automation?: RawAutomationConfig;
+  heartbeat?: RawHeartbeatConfig;
 }
 
 /** Resolved gateway config with defaults applied. */
@@ -89,6 +115,27 @@ export interface ResolvedGatewayConfig {
     };
   };
   channels: ChannelConfig[];
+  automation: {
+    timezone: string;
+    allowedTools: string[];
+    minCronIntervalMs: number;
+    runTimeoutMs: number;
+    maxExecutionRetries: number;
+    maxDeliveryRetries: number;
+    maxConcurrentLlmRuns: number;
+    dailyTokenLimit: number;
+    dailyCostUsd: number;
+    retentionDays: number;
+    maxRunsPerJob: number;
+    maxResultBytes: number;
+  };
+  heartbeat: {
+    enabled: boolean;
+    everyMs: number;
+    model?: string;
+    activeHours?: { start: string; end: string; timezone: string };
+    target?: GatewaySessionLocator;
+  };
 }
 
 /** Load result: resolved config + non-fatal warnings (stderr by caller). */
@@ -108,6 +155,19 @@ const DEFAULTS = {
   maxConcurrent: 10,
   pairingTtlMs: 3_600_000,
   pairingMaxPending: 3,
+  automationTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+  allowedTools: ["read_file", "ls", "glob", "grep", "web_search", "fetch_content"],
+  minCronIntervalMs: 300_000,
+  runTimeoutMs: 120_000,
+  maxExecutionRetries: 1,
+  maxDeliveryRetries: 3,
+  maxConcurrentLlmRuns: 2,
+  dailyTokenLimit: 200_000,
+  dailyCostUsd: 1,
+  retentionDays: 30,
+  maxRunsPerJob: 100,
+  maxResultBytes: 65_536,
+  heartbeatEveryMs: 1_800_000,
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -197,6 +257,68 @@ function mergeLayers(global: RawGatewayConfig, project: RawGatewayConfig): RawGa
     }
   }
   return out as RawGatewayConfig;
+}
+
+/** Project automation policy may only reduce unattended authority/cost. */
+function mergeTrustedLayers(
+  global: RawGatewayConfig,
+  project: RawGatewayConfig,
+  warnings: string[],
+): RawGatewayConfig {
+  const merged = mergeLayers(global, project);
+  const globalAutomation = global.automation ?? {};
+  const projectAutomation = project.automation ?? {};
+  const globalAllowed = globalAutomation.allowedTools ?? [...DEFAULTS.allowedTools];
+  const projectAllowed = projectAutomation.allowedTools;
+  const tightenLower = (key: keyof RawAutomationConfig, fallback: number): number => {
+    const base = typeof globalAutomation[key] === "number" ? globalAutomation[key] : fallback;
+    const candidate = projectAutomation[key];
+    return typeof candidate === "number" ? Math.min(base, candidate) : base;
+  };
+  merged.automation = {
+    ...globalAutomation,
+    timezone: globalAutomation.timezone,
+    allowedTools: projectAllowed
+      ? globalAllowed.filter((tool) => projectAllowed.includes(tool))
+      : globalAllowed,
+    minCronIntervalMs: Math.max(
+      typeof globalAutomation.minCronIntervalMs === "number"
+        ? globalAutomation.minCronIntervalMs
+        : DEFAULTS.minCronIntervalMs,
+      typeof projectAutomation.minCronIntervalMs === "number"
+        ? projectAutomation.minCronIntervalMs
+        : 0,
+    ),
+    runTimeoutMs: tightenLower("runTimeoutMs", DEFAULTS.runTimeoutMs),
+    maxExecutionRetries: tightenLower("maxExecutionRetries", DEFAULTS.maxExecutionRetries),
+    maxDeliveryRetries: tightenLower("maxDeliveryRetries", DEFAULTS.maxDeliveryRetries),
+    maxConcurrentLlmRuns: tightenLower("maxConcurrentLlmRuns", DEFAULTS.maxConcurrentLlmRuns),
+    dailyTokenLimit: tightenLower("dailyTokenLimit", DEFAULTS.dailyTokenLimit),
+    dailyCostUsd: tightenLower("dailyCostUsd", DEFAULTS.dailyCostUsd),
+    retentionDays: tightenLower("retentionDays", DEFAULTS.retentionDays),
+    maxRunsPerJob: tightenLower("maxRunsPerJob", DEFAULTS.maxRunsPerJob),
+    maxResultBytes: tightenLower("maxResultBytes", DEFAULTS.maxResultBytes),
+  };
+  if (projectAutomation.timezone !== undefined) {
+    warnings.push("gateway: project automation.timezone ignored (project policy is tighten-only)");
+  }
+
+  if (global.heartbeat) {
+    merged.heartbeat = {
+      ...global.heartbeat,
+      enabled: global.heartbeat.enabled === true && project.heartbeat?.enabled !== false,
+    };
+    const changed =
+      project.heartbeat && Object.keys(project.heartbeat).some((key) => key !== "enabled");
+    if (changed)
+      warnings.push("gateway: project heartbeat fields other than enabled=false are ignored");
+  } else {
+    merged.heartbeat = undefined;
+    if (project.heartbeat?.enabled === true) {
+      warnings.push("gateway: project heartbeat cannot enable unattended execution");
+    }
+  }
+  return merged;
 }
 
 // ---------------------------------------------------------------------------
@@ -298,6 +420,8 @@ function resolveConfig(merged: RawGatewayConfig, warnings: string[]): ResolvedGa
     }
   }
   const channels = validateChannels(merged.channels, warnings);
+  const automation = resolveAutomationConfig(merged.automation, warnings);
+  const heartbeat = resolveHeartbeatConfig(merged.heartbeat, automation.timezone, warnings);
 
   if (channels.length === 0) {
     warnings.push("gateway: no channels configured — the gateway will have no inbound sources");
@@ -318,7 +442,213 @@ function resolveConfig(merged: RawGatewayConfig, warnings: string[]): ResolvedGa
       },
     },
     channels,
+    automation,
+    heartbeat,
   };
+}
+
+function resolveAutomationConfig(
+  raw: RawAutomationConfig | undefined,
+  warnings: string[],
+): ResolvedGatewayConfig["automation"] {
+  const timezone = validTimezone(
+    raw?.timezone,
+    DEFAULTS.automationTimezone,
+    "automation.timezone",
+    warnings,
+  );
+  const allowedTools = Array.isArray(raw?.allowedTools)
+    ? [
+        ...new Set(
+          raw.allowedTools.filter(
+            (value): value is string => typeof value === "string" && value.length > 0,
+          ),
+        ),
+      ]
+    : [...DEFAULTS.allowedTools];
+  return {
+    timezone,
+    allowedTools,
+    minCronIntervalMs: positiveNumber(
+      raw?.minCronIntervalMs,
+      DEFAULTS.minCronIntervalMs,
+      "automation.minCronIntervalMs",
+      warnings,
+    ),
+    runTimeoutMs: positiveNumber(
+      raw?.runTimeoutMs,
+      DEFAULTS.runTimeoutMs,
+      "automation.runTimeoutMs",
+      warnings,
+    ),
+    maxExecutionRetries: nonNegativeInteger(
+      raw?.maxExecutionRetries,
+      DEFAULTS.maxExecutionRetries,
+      "automation.maxExecutionRetries",
+      warnings,
+    ),
+    maxDeliveryRetries: nonNegativeInteger(
+      raw?.maxDeliveryRetries,
+      DEFAULTS.maxDeliveryRetries,
+      "automation.maxDeliveryRetries",
+      warnings,
+    ),
+    maxConcurrentLlmRuns: positiveInteger(
+      raw?.maxConcurrentLlmRuns,
+      DEFAULTS.maxConcurrentLlmRuns,
+      "automation.maxConcurrentLlmRuns",
+      warnings,
+    ),
+    dailyTokenLimit: positiveInteger(
+      raw?.dailyTokenLimit,
+      DEFAULTS.dailyTokenLimit,
+      "automation.dailyTokenLimit",
+      warnings,
+    ),
+    dailyCostUsd: positiveNumber(
+      raw?.dailyCostUsd,
+      DEFAULTS.dailyCostUsd,
+      "automation.dailyCostUsd",
+      warnings,
+    ),
+    retentionDays: positiveInteger(
+      raw?.retentionDays,
+      DEFAULTS.retentionDays,
+      "automation.retentionDays",
+      warnings,
+    ),
+    maxRunsPerJob: positiveInteger(
+      raw?.maxRunsPerJob,
+      DEFAULTS.maxRunsPerJob,
+      "automation.maxRunsPerJob",
+      warnings,
+    ),
+    maxResultBytes: positiveInteger(
+      raw?.maxResultBytes,
+      DEFAULTS.maxResultBytes,
+      "automation.maxResultBytes",
+      warnings,
+    ),
+  };
+}
+
+function resolveHeartbeatConfig(
+  raw: RawHeartbeatConfig | undefined,
+  defaultTimezone: string,
+  warnings: string[],
+): ResolvedGatewayConfig["heartbeat"] {
+  const enabled = raw?.enabled === true;
+  const everyMs = positiveNumber(
+    raw?.everyMs,
+    DEFAULTS.heartbeatEveryMs,
+    "heartbeat.everyMs",
+    warnings,
+  );
+  const model =
+    typeof raw?.model === "string" && /^[^/\s]+\/[^/\s]+$/.test(raw.model) ? raw.model : undefined;
+  if (raw?.model !== undefined && !model)
+    warnings.push("gateway: invalid heartbeat.model, expected provider/model");
+  const target = decodeHeartbeatTarget(raw?.target, warnings);
+  let activeHours: ResolvedGatewayConfig["heartbeat"]["activeHours"];
+  if (raw?.activeHours !== undefined) {
+    const { start, end } = raw.activeHours;
+    if (isClockTime(start) && isClockTime(end) && start !== end) {
+      activeHours = {
+        start,
+        end,
+        timezone: validTimezone(
+          raw.activeHours.timezone,
+          defaultTimezone,
+          "heartbeat.activeHours.timezone",
+          warnings,
+        ),
+      };
+    } else {
+      warnings.push("gateway: invalid heartbeat.activeHours, expected distinct HH:MM start/end");
+    }
+  }
+  if (enabled && !model) warnings.push("gateway: heartbeat.enabled requires heartbeat.model");
+  if (enabled && !target) warnings.push("gateway: heartbeat.enabled requires heartbeat.target");
+  return {
+    enabled: enabled && model !== undefined && target !== undefined,
+    everyMs,
+    model,
+    activeHours,
+    target,
+  };
+}
+
+function decodeHeartbeatTarget(
+  value: GatewaySessionLocator | undefined,
+  warnings: string[],
+): GatewaySessionLocator | undefined {
+  if (value === undefined) return undefined;
+  if (
+    value.channel !== "telegram" ||
+    typeof value.account !== "string" ||
+    value.account.length === 0 ||
+    !value.chat ||
+    typeof value.chat.id !== "string" ||
+    value.chat.id.length === 0 ||
+    !["direct", "group", "channel", "thread"].includes(value.chat.type) ||
+    (value.thread !== undefined && (typeof value.thread !== "string" || value.thread.length === 0))
+  ) {
+    warnings.push("gateway: invalid heartbeat.target");
+    return undefined;
+  }
+  return {
+    channel: value.channel,
+    account: value.account,
+    chat: { ...value.chat },
+    ...(value.thread !== undefined ? { thread: value.thread } : {}),
+  };
+}
+
+function isClockTime(value: unknown): value is string {
+  return typeof value === "string" && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value);
+}
+
+function validTimezone(
+  value: unknown,
+  fallback: string,
+  label: string,
+  warnings: string[],
+): string {
+  if (value === undefined) return fallback;
+  if (typeof value === "string") {
+    try {
+      new Intl.DateTimeFormat("en-US", { timeZone: value }).format();
+      return value;
+    } catch {
+      // handled below
+    }
+  }
+  warnings.push(`gateway: invalid ${label}, using ${fallback}`);
+  return fallback;
+}
+
+function positiveInteger(
+  value: unknown,
+  fallback: number,
+  label: string,
+  warnings: string[],
+): number {
+  if (value === undefined) return fallback;
+  if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) return value;
+  warnings.push(`gateway: invalid ${label}, using ${fallback}`);
+  return fallback;
+}
+
+function nonNegativeInteger(
+  value: unknown,
+  fallback: number,
+  label: string,
+  warnings: string[],
+): number {
+  if (value === undefined) return fallback;
+  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) return value;
+  warnings.push(`gateway: invalid ${label}, using ${fallback}`);
+  return fallback;
 }
 
 function positiveNumber(
@@ -383,7 +713,7 @@ export async function loadGatewayConfig(
         ? null
         : await readLayer(env, path.join(cwd, ".novi", "gateway.json"), "project", warnings);
     if (global && project) {
-      merged = mergeLayers(global, project);
+      merged = mergeTrustedLayers(global, project, warnings);
     } else {
       merged = global ?? project ?? {};
     }

@@ -3,6 +3,7 @@ import type {
   ChannelMessage,
   GatewaySessionLocator,
   GatewaySessionRoute,
+  ChannelSendTarget,
 } from "./types.js";
 
 /** Canonical, unambiguous key for a durable gateway conversation locator. */
@@ -16,6 +17,20 @@ export function sessionKeyForLocator(locator: GatewaySessionLocator): string {
   ].map(encodeURIComponent);
   if (locator.thread !== undefined) fields.push("thread", encodeURIComponent(locator.thread));
   return fields.join(":");
+}
+
+export function channelTargetForLocator(locator: GatewaySessionLocator): ChannelSendTarget {
+  return {
+    chatId: locator.chat.id,
+    ...(locator.thread !== undefined ? { threadId: locator.thread } : {}),
+  };
+}
+
+export function channelTargetForMessage(message: ChannelMessage): ChannelSendTarget {
+  return {
+    chatId: message.remoteChatId,
+    ...(message.threadId !== undefined ? { threadId: message.threadId } : {}),
+  };
 }
 
 /** Build the durable route for one inbound channel message. */

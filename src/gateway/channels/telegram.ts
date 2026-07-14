@@ -2,7 +2,14 @@ import { Telegraf, TelegramError } from "telegraf";
 import { message } from "telegraf/filters";
 import type { Chat as TgChat, User as TgUser } from "@telegraf/types";
 import { AbstractChannel } from "../core/abstract-channel.js";
-import type { ChannelCapabilities, ChannelEvent, ChannelMessage, ChatType } from "../core/types.js";
+import type {
+  ChannelCapabilities,
+  ChannelDeliveryReceipt,
+  ChannelEvent,
+  ChannelMessage,
+  ChannelSendTarget,
+  ChatType,
+} from "../core/types.js";
 
 /** Constructor options for {@link TelegramChannel}. */
 export interface TelegramChannelOptions {
@@ -82,68 +89,73 @@ export class TelegramChannel extends AbstractChannel {
   }
 
   /** Send the final, complete reply text (chunking on overflow). */
-  async send(chatId: string, text: string): Promise<void> {
-    const buf = this.streamBuffers.get(chatId);
+  async send(target: ChannelSendTarget, text: string): Promise<ChannelDeliveryReceipt> {
+    const key = targetKey(target);
+    const ids: string[] = [];
+    const buf = this.streamBuffers.get(key);
     if (buf) {
       // Edit the streaming placeholder to the final text.
-      await this.editOrRetry(chatId, buf.messageId, text.slice(0, TELEGRAM_TEXT_LIMIT));
+      await this.editOrRetry(target.chatId, buf.messageId, text.slice(0, TELEGRAM_TEXT_LIMIT));
+      ids.push(String(buf.messageId));
       // Flush any overflow beyond the first message.
       const overflow = text.slice(TELEGRAM_TEXT_LIMIT);
       if (overflow.length > 0) {
         for (const chunk of chunkText(overflow, TELEGRAM_TEXT_LIMIT)) {
-          await this.sendOrRetry(chatId, chunk);
+          ids.push(String(await this.sendOrRetry(target, chunk)));
         }
       }
-      this.streamBuffers.delete(chatId);
-      return;
+      this.streamBuffers.delete(key);
+      return { messageIds: ids };
     }
 
     // No streaming buffer — chunk the whole text.
     for (const chunk of chunkText(text, TELEGRAM_TEXT_LIMIT)) {
-      await this.sendOrRetry(chatId, chunk);
+      ids.push(String(await this.sendOrRetry(target, chunk)));
     }
+    return { messageIds: ids };
   }
 
   /** Stream an incremental event. Only `text-delta`/`typing` are handled. */
-  async sendEvent(chatId: string, event: ChannelEvent): Promise<void> {
+  async sendEvent(target: ChannelSendTarget, event: ChannelEvent): Promise<void> {
     switch (event.type) {
       case "typing":
-        await this.sendTyping(chatId);
+        await this.sendTyping(target);
         break;
       case "text-delta":
-        await this.handleStreamDelta(chatId, event.delta);
+        await this.handleStreamDelta(target, event.delta);
         break;
       case "tool-event":
         // Keep channel rendering minimal while retaining the shared contract.
         if (event.event.type === "tool.start") {
-          await this.sendOrRetry(chatId, `🔧 ${event.event.tool.label}…`).catch(() => {});
+          await this.sendOrRetry(target, `🔧 ${event.event.tool.label}…`).catch(() => {});
         }
         break;
       case "reasoning-delta":
         // Reasoning is not surfaced to the channel in MVP.
         break;
       case "error":
-        await this.sendOrRetry(chatId, `⚠️ ${event.message}`).catch(() => {});
+        await this.sendOrRetry(target, `⚠️ ${event.message}`).catch(() => {});
         break;
     }
   }
 
   /** Best-effort typing indicator. */
-  async sendTyping(chatId: string): Promise<void> {
+  async sendTyping(target: ChannelSendTarget): Promise<void> {
     await this.callWithRetry("sendChatAction", () =>
-      this.bot.telegram.sendChatAction(chatId, "typing"),
+      this.bot.telegram.sendChatAction(target.chatId, "typing", telegramThreadExtra(target)),
     ).catch((e) => {
       process.stderr.write(`warning: telegram sendChatAction failed: ${telegramErrorSummary(e)}\n`);
     });
   }
 
-  async cancelStream(chatId: string): Promise<void> {
-    const buffer = this.streamBuffers.get(chatId);
+  async cancelStream(target: ChannelSendTarget): Promise<void> {
+    const key = targetKey(target);
+    const buffer = this.streamBuffers.get(key);
     if (!buffer) return;
-    this.streamBuffers.delete(chatId);
+    this.streamBuffers.delete(key);
     if (!buffer.messageId) return;
     await this.callWithRetry("deleteMessage", () =>
-      this.bot.telegram.deleteMessage(chatId, buffer.messageId),
+      this.bot.telegram.deleteMessage(target.chatId, buffer.messageId),
     ).catch((e) => {
       process.stderr.write(`warning: telegram deleteMessage failed: ${telegramErrorSummary(e)}\n`);
     });
@@ -209,16 +221,17 @@ export class TelegramChannel extends AbstractChannel {
    * {@link editIntervalMs}. The first delta sends a placeholder message to
    * obtain a message id; subsequent deltas edit it.
    */
-  private async handleStreamDelta(chatId: string, delta: string): Promise<void> {
-    let buf = this.streamBuffers.get(chatId);
+  private async handleStreamDelta(target: ChannelSendTarget, delta: string): Promise<void> {
+    const key = targetKey(target);
+    let buf = this.streamBuffers.get(key);
     if (!buf) {
       buf = { messageId: 0, text: "", lastEdit: 0 };
-      this.streamBuffers.set(chatId, buf);
+      this.streamBuffers.set(key, buf);
     }
     buf.text += delta;
 
     if (!buf.messageId) {
-      const sent = await this.sendOrRetry(chatId, buf.text.slice(0, TELEGRAM_TEXT_LIMIT));
+      const sent = await this.sendOrRetry(target, buf.text.slice(0, TELEGRAM_TEXT_LIMIT));
       buf.messageId = sent;
       buf.lastEdit = Date.now();
       return;
@@ -226,7 +239,7 @@ export class TelegramChannel extends AbstractChannel {
 
     const now = Date.now();
     if (now - buf.lastEdit >= this.editIntervalMs) {
-      await this.editOrRetry(chatId, buf.messageId, buf.text.slice(0, TELEGRAM_TEXT_LIMIT));
+      await this.editOrRetry(target.chatId, buf.messageId, buf.text.slice(0, TELEGRAM_TEXT_LIMIT));
       buf.lastEdit = now;
     }
   }
@@ -235,9 +248,9 @@ export class TelegramChannel extends AbstractChannel {
    * Send a message, retrying once after a FloodWait delay. Returns the
    * Telegram message id (needed for edit-stream bookkeeping).
    */
-  private async sendOrRetry(chatId: string, text: string): Promise<number> {
+  private async sendOrRetry(target: ChannelSendTarget, text: string): Promise<number> {
     const sent = await this.callWithRetry("sendMessage", () =>
-      this.bot.telegram.sendMessage(chatId, text),
+      this.bot.telegram.sendMessage(target.chatId, text, telegramThreadExtra(target)),
     );
     return sent.message_id;
   }
@@ -273,6 +286,15 @@ export class TelegramChannel extends AbstractChannel {
     if (last instanceof Error) throw last;
     throw new Error(`telegram ${name} failed: ${telegramErrorSummary(last)}`);
   }
+}
+
+function targetKey(target: ChannelSendTarget): string {
+  return `${target.chatId}:${target.threadId ?? ""}`;
+}
+
+function telegramThreadExtra(target: ChannelSendTarget): { message_thread_id?: number } {
+  const thread = target.threadId === undefined ? undefined : Number(target.threadId);
+  return Number.isSafeInteger(thread) ? { message_thread_id: thread } : {};
 }
 
 // ---------------------------------------------------------------------------

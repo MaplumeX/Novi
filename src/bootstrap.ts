@@ -459,6 +459,16 @@ export type HarnessSessionTarget =
   | { kind: "new" }
   | { kind: "resume"; metadata: JsonlSessionMetadata | Pick<JsonlSessionMetadata, "path"> };
 
+export interface HarnessSessionOptions {
+  model?: Model<Api>;
+  systemPrompt?: GatewayEnv["systemPrompt"];
+  resources?: AgentHarnessResources;
+  connectMcp?: boolean;
+  registerUserHooks?: boolean;
+  activeToolAllowlist?: readonly string[];
+  additionalToolDescriptors?: readonly ToolDescriptor[];
+}
+
 /**
  * Create an `AgentHarness` + new or resumed JSONL session.
  *
@@ -469,6 +479,7 @@ export type HarnessSessionTarget =
 export async function createHarnessForSession(
   gatewayEnv: GatewayEnv,
   target: HarnessSessionTarget = { kind: "new" },
+  options: HarnessSessionOptions = {},
 ): Promise<CreatedSession> {
   const { env, cwd, models, model, systemPrompt, thinkingLevel, resources, hookConfig } =
     gatewayEnv;
@@ -485,8 +496,8 @@ export async function createHarnessForSession(
     env,
     session,
     models,
-    model,
-    systemPrompt,
+    model: options.model ?? model,
+    systemPrompt: options.systemPrompt ?? systemPrompt,
     thinkingLevel,
   });
 
@@ -499,16 +510,20 @@ export async function createHarnessForSession(
     workspace: cwd,
     budget: gatewayEnv.toolBudget.values,
     artifactsEnabled: gatewayEnv.toolBudget.artifactsEnabled,
-    connectMcp: true,
+    connectMcp: options.connectMcp !== false,
+    additionalDescriptors: options.additionalToolDescriptors,
   });
   for (const diagnostic of toolAssembly.diagnostics) {
     process.stderr.write(`warning: ${diagnostic}\n`);
   }
-  await harness.setTools(toolAssembly.tools, toolAssembly.activeToolNames);
+  const activeToolNames = options.activeToolAllowlist
+    ? toolAssembly.activeToolNames.filter((name) => options.activeToolAllowlist?.includes(name))
+    : toolAssembly.activeToolNames;
+  await harness.setTools(toolAssembly.tools, activeToolNames);
 
   await harness.setResources({
-    skills: resources.skills,
-    promptTemplates: resources.promptTemplates,
+    skills: options.resources?.skills ?? resources.skills,
+    promptTemplates: options.resources?.promptTemplates ?? resources.promptTemplates,
   });
 
   const permissionStore = permissionStoreForHarness(
@@ -520,7 +535,9 @@ export async function createHarnessForSession(
     toolAssembly.scopeGuard,
     toolAssembly.resolveDescriptor,
   );
-  registerHooks(harness, hookConfig, { env, cwd, sessionId: metadata.id }, { permissionGate });
+  if (options.registerUserHooks !== false) {
+    registerHooks(harness, hookConfig, { env, cwd, sessionId: metadata.id }, { permissionGate });
+  }
 
   // Apply stream options when any are set (avoids a no-op setStreamOptions).
   const so = gatewayEnv.streamOptions;

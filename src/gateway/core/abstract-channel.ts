@@ -1,4 +1,11 @@
-import type { ChannelAdapter, ChannelCapabilities, ChannelMessage, ChannelType } from "./types.js";
+import type {
+  ChannelAdapter,
+  ChannelCapabilities,
+  ChannelDeliveryReceipt,
+  ChannelMessage,
+  ChannelSendTarget,
+  ChannelType,
+} from "./types.js";
 
 /**
  * Base class for channel adapters, following the tia-gateway pattern.
@@ -25,7 +32,7 @@ export abstract class AbstractChannel implements ChannelAdapter {
 
   abstract start(): Promise<void>;
   abstract stop(): Promise<void>;
-  abstract send(chatId: string, text: string): Promise<void>;
+  abstract send(target: ChannelSendTarget, text: string): Promise<ChannelDeliveryReceipt>;
 
   /** Send an inbound message to the gateway orchestrator (ack + onMessage). */
   protected async emitMessage(message: ChannelMessage): Promise<void> {

@@ -36,6 +36,21 @@ function config(dmPolicy: ResolvedGatewayConfig["security"]["dmPolicy"]): Resolv
       },
     },
     channels: [],
+    automation: {
+      timezone: "UTC",
+      allowedTools: ["read_file", "ls", "glob", "grep", "web_search", "fetch_content"],
+      minCronIntervalMs: 300_000,
+      runTimeoutMs: 120_000,
+      maxExecutionRetries: 1,
+      maxDeliveryRetries: 3,
+      maxConcurrentLlmRuns: 2,
+      dailyTokenLimit: 200_000,
+      dailyCostUsd: 1,
+      retentionDays: 30,
+      maxRunsPerJob: 100,
+      maxResultBytes: 65_536,
+    },
+    heartbeat: { enabled: false, everyMs: 1_800_000 },
   };
 }
 function agent(): AgentProtocolAdapter {
@@ -45,6 +60,7 @@ function agent(): AgentProtocolAdapter {
     followUp: vi.fn(),
     abort: vi.fn(),
     resetSession: vi.fn(),
+    appendScheduledDelivery: vi.fn(),
     closeSession: vi.fn(),
     stop: vi.fn(),
   };
@@ -127,7 +143,7 @@ describe("GatewayApp DM authorization", () => {
       senderId: "admin",
       text: `/pair approve ${requested.code}`,
     });
-    expect(outbound.send).toHaveBeenCalledWith("chat", "Pairing approved.");
+    expect(outbound.send).toHaveBeenCalledWith({ chatId: "chat" }, "Pairing approved.");
     expect(adapter.runTurn).not.toHaveBeenCalled();
     const allowed = await (
       app as unknown as {

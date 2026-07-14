@@ -4,8 +4,9 @@ import type { GatewaySessionManager } from "./session-manager.js";
 import type { CommandRegistry } from "./commands.js";
 import { runCommand } from "./commands.js";
 import type { GatewayEnv } from "../../bootstrap.js";
-import { InboundDeduper, sessionRoute } from "./routing.js";
+import { InboundDeduper, channelTargetForMessage, sessionRoute } from "./routing.js";
 import { PairingStore } from "./pairing-store.js";
+import type { SchedulerStats } from "../jobs/scheduler.js";
 
 /** Constructor options for {@link GatewayApp}. */
 export interface GatewayAppOptions {
@@ -20,6 +21,7 @@ export interface GatewayAppOptions {
   /** Gateway env exposed to slash commands (e.g. `/status`). */
   gatewayEnv?: GatewayEnv;
   pairingStore?: PairingStore;
+  schedulerStats?: () => Promise<SchedulerStats>;
 }
 
 /**
@@ -78,6 +80,7 @@ export class GatewayApp {
       this.options;
     try {
       const updateId = String(msg.metadata?.updateId ?? msg.id);
+      const target = channelTargetForMessage(msg);
       if (this.deduper.seenBefore(`${channel.id}:${updateId}`)) return;
       if (msg.chatType !== "direct" && msg.text.startsWith("/pair approve ")) return;
       // Administrators may approve a pairing without being granted ordinary
@@ -89,7 +92,7 @@ export class GatewayApp {
       ) {
         const code = msg.text.slice("/pair approve ".length).trim();
         await channel.send(
-          msg.remoteChatId,
+          target,
           (await this.pairingStore.approve(channel.id, code))
             ? "Pairing approved."
             : "Pairing code is invalid or expired.",
@@ -106,9 +109,13 @@ export class GatewayApp {
         const model = gatewayEnv
           ? `${gatewayEnv.model.provider}/${gatewayEnv.model.id}`
           : "unavailable";
+        const scheduled = await this.options.schedulerStats?.().catch(() => undefined);
         await channel.send(
-          msg.remoteChatId,
-          `channel: ${channel.id}\nsession: ${route.key}\nmodel: ${model}\nauthorized: yes\nqueue: ${stats.queuedMessages}\nactiveSessions: ${stats.activeSessions}`,
+          target,
+          `channel: ${channel.id}\nsession: ${route.key}\nmodel: ${model}\nauthorized: yes\nqueue: ${stats.queuedMessages}\nactiveSessions: ${stats.activeSessions}` +
+            (scheduled
+              ? `\njobs: enabled=${scheduled.enabled} paused=${scheduled.paused}\nbackground: ${scheduled.queuedOrRunning}\npendingDelivery: ${scheduled.pendingDelivery}`
+              : ""),
         );
         return;
       }
@@ -116,7 +123,7 @@ export class GatewayApp {
         const handled = await runCommand(
           channel,
           route,
-          msg.remoteChatId,
+          target,
           msg.text,
           agent,
           sessionManager,
@@ -155,11 +162,14 @@ export class GatewayApp {
         );
         if (result.code)
           await channel.send(
-            msg.remoteChatId,
+            channelTargetForMessage(msg),
             `Pairing required. Ask an administrator to approve code ${result.code}.`,
           );
         else if (result.reason === "full")
-          await channel.send(msg.remoteChatId, "Pairing is temporarily full; try again later.");
+          await channel.send(
+            channelTargetForMessage(msg),
+            "Pairing is temporarily full; try again later.",
+          );
       }
       return false;
     }
@@ -195,7 +205,9 @@ export class GatewayApp {
       current.queue.mode !== config.queue.mode ||
       JSON.stringify(current.queue.byChannel) !== JSON.stringify(config.queue.byChannel) ||
       current.session.idleTimeoutMs !== config.session.idleTimeoutMs ||
-      current.session.maxConcurrent !== config.session.maxConcurrent
+      current.session.maxConcurrent !== config.session.maxConcurrent ||
+      JSON.stringify(current.automation) !== JSON.stringify(config.automation) ||
+      JSON.stringify(current.heartbeat) !== JSON.stringify(config.heartbeat)
     )
       return false;
     this.options.config = { ...current, security: config.security, telegram: config.telegram };

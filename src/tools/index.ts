@@ -244,6 +244,7 @@ export interface CreateBuiltinToolAssemblyOptions extends WebToolOptions {
   budget?: ToolExecutionBudget;
   artifactsEnabled?: boolean;
   artifactRoot?: string;
+  additionalDescriptors?: readonly ToolDescriptor[];
 }
 
 /** Build the validated built-in catalog and its explicit model-visible set. */
@@ -264,9 +265,13 @@ export function createBuiltinToolAssembly(
     workspace: options.workspace ?? env.cwd,
     externalWriteAllowlist: permissions?.externalWriteAllowlist,
   });
+  const activeDescriptors = [...descriptors, ...(options.additionalDescriptors ?? [])];
+  const activeRegistry = options.additionalDescriptors?.length ? new ToolRegistry() : registry;
+  if (activeRegistry !== registry)
+    for (const descriptor of activeDescriptors) activeRegistry.add(descriptor);
   const wholeToolPermissions = permissions
     ? Object.fromEntries(
-        descriptors.map((descriptor) => [
+        activeDescriptors.map((descriptor) => [
           descriptor.name,
           resolveWholeToolPermission(permissions, descriptor).level,
         ]),
@@ -277,7 +282,7 @@ export function createBuiltinToolAssembly(
     enabledSources: options.exposure?.sources,
     permissions: wholeToolPermissions,
   };
-  const assembly = registry.build(
+  const assembly = activeRegistry.build(
     {
       env,
       sessionId,

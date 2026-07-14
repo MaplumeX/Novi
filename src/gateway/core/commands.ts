@@ -1,8 +1,10 @@
-import type { ChannelAdapter } from "./types.js";
+import type { ChannelAdapter, ChannelSendTarget } from "./types.js";
 import type { AgentProtocolAdapter } from "./types.js";
 import type { GatewaySessionRoute } from "./types.js";
 import type { GatewayEnv } from "../../bootstrap.js";
 import type { GatewaySessionManager } from "./session-manager.js";
+import type { JobService } from "../jobs/service.js";
+import { formatJob, formatRun } from "../jobs/format.js";
 
 /** A registered slash command handler. */
 export interface CommandHandler {
@@ -18,7 +20,7 @@ export interface CommandHandler {
 /** Context passed to a command handler. */
 export interface CommandContext {
   channel: ChannelAdapter;
-  chatId: string;
+  target: ChannelSendTarget;
   route: GatewaySessionRoute;
   agent: AgentProtocolAdapter;
   sessionManager: GatewaySessionManager;
@@ -50,7 +52,12 @@ export class CommandRegistry {
 }
 
 /** Create the default command registry with `/new` `/stop` `/help` `/status`. */
-export function createCommandRegistry(): CommandRegistry {
+export interface CommandRegistryOptions {
+  jobService?: JobService;
+  onJobsMutated?: () => void;
+}
+
+export function createCommandRegistry(options: CommandRegistryOptions = {}): CommandRegistry {
   const registry = new CommandRegistry();
 
   registry.register("new", {
@@ -58,10 +65,10 @@ export function createCommandRegistry(): CommandRegistry {
     async run(ctx) {
       try {
         await ctx.sessionManager.reset(ctx.route);
-        await ctx.channel.send(ctx.chatId, "Started a fresh session.");
+        await ctx.channel.send(ctx.target, "Started a fresh session.");
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        await ctx.channel.send(ctx.chatId, `Failed to start a fresh session: ${message}`);
+        await ctx.channel.send(ctx.target, `Failed to start a fresh session: ${message}`);
       }
     },
   });
@@ -70,7 +77,7 @@ export function createCommandRegistry(): CommandRegistry {
     description: "Abort the current run.",
     async run(ctx) {
       await ctx.agent.abort(ctx.route);
-      await ctx.channel.send(ctx.chatId, "Stopped current run.");
+      await ctx.channel.send(ctx.target, "Stopped current run.");
     },
   });
 
@@ -82,7 +89,7 @@ export function createCommandRegistry(): CommandRegistry {
         const handler = registry.get(name)!;
         lines.push(`  /${name} — ${handler.description}`);
       }
-      await ctx.channel.send(ctx.chatId, lines.join("\n"));
+      await ctx.channel.send(ctx.target, lines.join("\n"));
     },
   });
 
@@ -91,15 +98,67 @@ export function createCommandRegistry(): CommandRegistry {
     async run(ctx) {
       const env = ctx.gatewayEnv;
       if (!env) {
-        await ctx.channel.send(ctx.chatId, `session: ${ctx.route.key}`);
+        await ctx.channel.send(ctx.target, `session: ${ctx.route.key}`);
         return;
       }
       await ctx.channel.send(
-        ctx.chatId,
+        ctx.target,
         `session: ${ctx.route.key}\nmodel: ${env.model.provider}/${env.model.id}`,
       );
     },
   });
+
+  if (options.jobService) {
+    registry.register("jobs", {
+      description: "List and manage scheduled jobs.",
+      async run(ctx) {
+        const service = options.jobService!;
+        const [action = "list", id] = ctx.arg.split(/\s+/, 2);
+        if (action === "list") {
+          const jobs = service.list(ctx.route);
+          await ctx.channel.send(
+            ctx.target,
+            jobs.length ? jobs.map(formatJob).join("\n") : "No scheduled jobs.",
+          );
+          return;
+        }
+        if (!id) {
+          await ctx.channel.send(
+            ctx.target,
+            "Usage: /jobs list|show|pause|resume|cancel|run|retry-delivery <id>",
+          );
+          return;
+        }
+        try {
+          if (action === "show")
+            await ctx.channel.send(ctx.target, formatJob(service.get(ctx.route, id)));
+          else if (action === "pause")
+            await ctx.channel.send(ctx.target, formatJob(await service.pause(ctx.route, id)));
+          else if (action === "resume")
+            await ctx.channel.send(ctx.target, formatJob(await service.resume(ctx.route, id)));
+          else if (action === "cancel")
+            await ctx.channel.send(ctx.target, formatJob(await service.cancel(ctx.route, id)));
+          else if (action === "run")
+            await ctx.channel.send(ctx.target, formatRun(await service.runNow(ctx.route, id)));
+          else if (action === "retry-delivery")
+            await ctx.channel.send(
+              ctx.target,
+              formatRun(await service.retryDelivery(ctx.route, id)),
+            );
+          else {
+            await ctx.channel.send(ctx.target, `Unknown jobs action: ${action}`);
+            return;
+          }
+          options.onJobsMutated?.();
+        } catch (error) {
+          await ctx.channel.send(
+            ctx.target,
+            `Jobs error: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      },
+    });
+  }
 
   return registry;
 }
@@ -114,7 +173,7 @@ export function createCommandRegistry(): CommandRegistry {
 export async function runCommand(
   channel: ChannelAdapter,
   route: GatewaySessionRoute,
-  chatId: string,
+  target: ChannelSendTarget,
   text: string,
   agent: AgentProtocolAdapter,
   sessionManager: GatewaySessionManager,
@@ -130,6 +189,6 @@ export async function runCommand(
   const handler = registry.get(name);
   if (!handler) return false;
 
-  await handler.run({ channel, chatId, route, agent, sessionManager, gatewayEnv, arg });
+  await handler.run({ channel, target, route, agent, sessionManager, gatewayEnv, arg });
   return true;
 }

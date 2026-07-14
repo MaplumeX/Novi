@@ -1,0 +1,10 @@
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Authoritative non-TUI module layout and gateway/tool organization for architecture map anchors."}
+{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "TUI layer layout and harness subscription ownership rules."}
+{"file": ".trellis/spec/backend/pi-agent-core-api.md", "reason": "Verified pi-agent-core/pi-ai public API contracts used by bootstrap and harness wiring."}
+{"file": ".trellis/spec/backend/tool-runtime-contracts.md", "reason": "Descriptor, permission, budget, artifact, and tool event contract boundaries to link (not copy)."}
+{"file": ".trellis/spec/backend/web-tools.md", "reason": "Web tool subsystem boundaries for map + outbound links."}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "File-based persistence map (~/.novi sessions, todos, resources)."}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend guideline index for further deep-doc discovery."}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend guideline index for TUI-related deep links."}
+{"file": "docs/tool-system.md", "reason": "Existing deep tool-system architecture analysis to reference rather than duplicate."}
+{"file": "docs/gateway.md", "reason": "Gateway operational/config notes (pairing, SIGHUP) for link targets."}

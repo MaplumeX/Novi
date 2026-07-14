@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Verify architecture claims about module layout and gateway dependency direction."}
+{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "Verify TUI subscription/event-boundary claims."}
+{"file": ".trellis/spec/backend/tool-runtime-contracts.md", "reason": "Check that tool/permission summaries do not invent or contradict contracts."}
+{"file": ".trellis/spec/backend/pi-agent-core-api.md", "reason": "Check harness/session/models API naming against verified contracts."}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Verify persistence path map accuracy."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Quality bar for accurate, non-overengineered documentation claims."}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Frontend quality expectations when describing TUI boundaries."}
+{"file": "docs/tool-system.md", "reason": "Cross-check tool map summaries against existing deep analysis."}
+{"file": "docs/gateway.md", "reason": "Cross-check gateway config/security pointers."}

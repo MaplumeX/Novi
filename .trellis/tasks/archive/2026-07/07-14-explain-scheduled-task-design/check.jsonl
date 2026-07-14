@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/scheduled-jobs.md", "reason": "Verify design-doc claims match scheduled jobs recovery/security contracts"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Quality bar for delivered markdown and change hygiene"}

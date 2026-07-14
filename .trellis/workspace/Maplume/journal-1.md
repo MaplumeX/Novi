@@ -1526,3 +1526,37 @@ Rewrote root ARCHITECTURE.md as a Chinese implementation-level architecture map 
 ### Next Steps
 
 - None - task complete
+
+
+## Session 46: Gateway session continuity
+
+**Date**: 2026-07-14
+**Task**: Gateway session continuity
+**Branch**: `main`
+
+### Summary
+
+Added durable channel/account/chat/thread to JSONL session bindings, cold resume across restart and eviction, transactional /new rotation with archive and generation guards, unified bootstrap create/resume assembly, regression coverage, docs, and executable specs.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f242902` | (see git log) |
+| `60e887e` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

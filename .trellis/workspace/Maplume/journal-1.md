@@ -1594,3 +1594,36 @@ Added durable channel/account/chat/thread to JSONL session bindings, cold resume
 ### Next Steps
 
 - None - task complete
+
+
+## Session 48: Explain Novi agent gateway design
+
+**Date**: 2026-07-14
+**Task**: Explain Novi agent gateway design
+**Branch**: `main`
+
+### Summary
+
+用 explain-code-design 基于当前 src/gateway 源码撰写 docs/gateway-design.md：覆盖 Gateway 作为 IM 常驻运行表面的职责、核心抽象（Channel/Route/App/Lane/Adapter/EventBridge）、入站主路径与关键权衡；jobs/heartbeat 仅一笔带过。未改运行时。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4ac3a29` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

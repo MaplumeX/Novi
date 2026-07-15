@@ -42,6 +42,14 @@ const { values, positionals } = parseArgs({
     kind: { type: "string" },
     "dry-run": { type: "boolean", default: false },
     recover: { type: "boolean", default: false },
+    "environment-file": { type: "string" },
+    replace: { type: "boolean", default: false },
+    force: { type: "boolean", default: false },
+    "no-enable": { type: "boolean", default: false },
+    "no-start": { type: "boolean", default: false },
+    linger: { type: "boolean", default: false },
+    lines: { type: "string" },
+    follow: { type: "boolean", default: false },
     "tool-budget": { type: "string", multiple: true },
     help: { type: "boolean", short: "h", default: false },
   },
@@ -83,10 +91,18 @@ if (values.help) {
       "  --list-models [s] List configured models (optional search filter), then exit",
       "  --gateway         Multi-channel gateway mode (IM bot server; no TUI)",
       "  --config <path>   Path to gateway.json (gateway mode; default ~/.novi/gateway.json)",
-      "  --json            Machine-readable output for gateway status/health/messages",
+      "  --json            Machine-readable gateway diagnostics/migration/service output",
       "  --kind <kind>     Gateway health check: live|ready",
       "  --dry-run         Inspect a gateway migration/rollback without writing",
       "  --recover         Recover an interrupted gateway migration",
+      "  --environment-file <path>  Private EnvironmentFile for service install",
+      "  --replace         Replace a changed Novi-owned service unit",
+      "  --force           Force removal of a modified regular service unit",
+      "  --no-enable       Install the service without enabling it",
+      "  --no-start        Install the service without starting it",
+      "  --linger          Enable user linger during service install",
+      "  --lines <n>       Service log lines (1..10000; default 200)",
+      "  --follow          Follow service logs",
       "  --tool-budget <name>=<n>  Override a tool resource budget (repeatable)",
       "  -h, --help        Show this help",
     ].join("\n") + "\n",
@@ -106,8 +122,10 @@ const gatewayAction = [
   "messages",
   "migrate",
   "rollback-state",
+  "service",
 ].includes(positionals[0] ?? "")
-  ? (positionals[0] as "status" | "probe" | "health" | "messages" | "migrate" | "rollback-state")
+  ? (positionals[0] as
+      "status" | "probe" | "health" | "messages" | "migrate" | "rollback-state" | "service")
   : "run";
 const requestedHealthKind = values.kind ?? positionals[1];
 const gatewayHealthCheck =
@@ -119,6 +137,31 @@ const gatewayMessageAction =
   gatewayAction === "messages" &&
   ["list", "retry", "retry-delivery", "dismiss"].includes(requestedMessageAction)
     ? (requestedMessageAction as "list" | "retry" | "retry-delivery" | "dismiss")
+    : undefined;
+const requestedServiceAction = positionals[1];
+const gatewayServiceAction =
+  gatewayAction === "service" &&
+  [
+    "install",
+    "uninstall",
+    "start",
+    "stop",
+    "restart",
+    "enable",
+    "disable",
+    "status",
+    "logs",
+  ].includes(requestedServiceAction ?? "")
+    ? (requestedServiceAction as
+        | "install"
+        | "uninstall"
+        | "start"
+        | "stop"
+        | "restart"
+        | "enable"
+        | "disable"
+        | "status"
+        | "logs")
     : undefined;
 
 if (values.gateway && gatewayAction === "health" && gatewayHealthCheck === undefined) {
@@ -138,9 +181,11 @@ if (
 if (
   values.json &&
   (!values.gateway ||
-    !["status", "health", "messages", "migrate", "rollback-state"].includes(gatewayAction))
+    !["status", "health", "messages", "migrate", "rollback-state", "service"].includes(
+      gatewayAction,
+    ))
 ) {
-  fail("--json is supported only for gateway status/health/messages/migrate/rollback-state");
+  fail("--json is supported only for gateway diagnostics, migration, and service commands");
 }
 if (values.kind !== undefined && (!values.gateway || gatewayAction !== "health")) {
   fail("--kind is supported only for gateway health");
@@ -157,6 +202,50 @@ if (values.recover && (!values.gateway || gatewayAction !== "migrate")) {
 if (values.recover && values["dry-run"]) fail("--recover and --dry-run are mutually exclusive");
 if (values.gateway && gatewayAction === "rollback-state" && !positionals[1]) {
   fail("gateway rollback-state requires a backup id");
+}
+if (values.gateway && gatewayAction === "service" && gatewayServiceAction === undefined) {
+  fail(
+    "gateway service requires: install, uninstall, start, stop, restart, enable, disable, status, or logs",
+  );
+}
+const serviceOnlyFlags = [
+  values["environment-file"] !== undefined,
+  values.replace,
+  values.force,
+  values["no-enable"],
+  values["no-start"],
+  values.linger,
+  values.lines !== undefined,
+  values.follow,
+];
+if (serviceOnlyFlags.some(Boolean) && (!values.gateway || gatewayAction !== "service")) {
+  fail("service management flags require --gateway service");
+}
+if (values.lines !== undefined && !/^[0-9]+$/.test(values.lines)) {
+  fail("--lines must be an integer");
+}
+if (
+  gatewayAction === "service" &&
+  [
+    values["environment-file"] !== undefined,
+    values.replace,
+    values["no-enable"],
+    values["no-start"],
+    values.linger,
+  ].some(Boolean) &&
+  gatewayServiceAction !== "install"
+) {
+  fail("--environment-file/--replace/--no-enable/--no-start/--linger require service install");
+}
+if (gatewayAction === "service" && values.force && gatewayServiceAction !== "uninstall") {
+  fail("--force requires service uninstall");
+}
+if (
+  gatewayAction === "service" &&
+  (values.lines !== undefined || values.follow) &&
+  gatewayServiceAction !== "logs"
+) {
+  fail("--lines/--follow require service logs");
 }
 
 const isHeadless =
@@ -339,6 +428,15 @@ async function main(): Promise<void> {
         dryRun: values["dry-run"],
         recover: values.recover,
         backupId: gatewayAction === "rollback-state" ? positionals[1] : undefined,
+        serviceAction: gatewayServiceAction,
+        environmentFile: values["environment-file"],
+        replace: values.replace,
+        force: values.force,
+        noEnable: values["no-enable"],
+        noStart: values["no-start"],
+        linger: values.linger,
+        lines: values.lines === undefined ? undefined : Number(values.lines),
+        follow: values.follow,
       });
       return;
     }

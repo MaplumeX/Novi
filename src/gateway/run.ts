@@ -40,6 +40,8 @@ import { createGatewayStateRegistry } from "./migrations/registry.js";
 import { assertGatewayStateReady } from "./migrations/inspect.js";
 import { GatewayMigrationService } from "./migrations/service.js";
 import { formatGatewayMigrationResult } from "./migrations/format.js";
+import { runGatewayService } from "./service/manager.js";
+import type { GatewayServiceAction } from "./service/types.js";
 import {
   createMessageControlMethods,
   formatMessageSummaries,
@@ -50,7 +52,8 @@ import {
 export interface RunGatewayOptions extends BootstrapOptions {
   /** Explicit `--config <path>` for gateway.json (optional). */
   configPath?: string;
-  action?: "run" | "status" | "probe" | "health" | "messages" | "migrate" | "rollback-state";
+  action?:
+    "run" | "status" | "probe" | "health" | "messages" | "migrate" | "rollback-state" | "service";
   json?: boolean;
   healthCheck?: "live" | "ready";
   messageAction?: "list" | "retry" | "retry-delivery" | "dismiss";
@@ -58,6 +61,15 @@ export interface RunGatewayOptions extends BootstrapOptions {
   dryRun?: boolean;
   recover?: boolean;
   backupId?: string;
+  serviceAction?: GatewayServiceAction;
+  environmentFile?: string;
+  replace?: boolean;
+  force?: boolean;
+  noEnable?: boolean;
+  noStart?: boolean;
+  linger?: boolean;
+  lines?: number;
+  follow?: boolean;
 }
 
 function failGateway(logger: GatewayLogger, event: string, message: string): never {
@@ -76,6 +88,25 @@ function failGateway(logger: GatewayLogger, event: string, message: string): nev
  */
 export async function runGateway(options: RunGatewayOptions): Promise<void> {
   const cwd = options.cwd ?? process.cwd();
+
+  if (options.action === "service") {
+    if (!options.serviceAction) throw new Error("gateway service action is required");
+    await runGatewayService({
+      action: options.serviceAction,
+      cwd,
+      configPath: options.configPath,
+      environmentFile: options.environmentFile,
+      replace: options.replace,
+      force: options.force,
+      noEnable: options.noEnable,
+      noStart: options.noStart,
+      linger: options.linger,
+      lines: options.lines,
+      follow: options.follow,
+      json: options.json,
+    });
+    return;
+  }
 
   if (options.action === "migrate" || options.action === "rollback-state") {
     await runStateMigration(options, cwd);

@@ -25,13 +25,13 @@
 
 ## Acceptance Criteria
 
-- [ ] SD-AC1：unit fixture 通过 `systemd-analyze verify --user` 或等价隔离验证，并包含期望 restart/timeout/runtime directory 参数。
-- [ ] SD-AC2：renderer 对空格、反斜杠、引号、`%` 路径正确，对 newline/NUL/相对路径拒绝；secret fixtures 不进入 unit/manifest/output。
-- [ ] SD-AC3：install identical 幂等；different 无 `--replace` 零修改；preflight/systemctl 任一步失败有可恢复行为和明确结果。
-- [ ] SD-AC4：enable/start/stop/restart/disable/uninstall 的 runner argv 与状态转换通过 fake systemd 测试，不依赖开发机 user manager。
-- [ ] SD-AC5：linger 默认不变；显式 `--linger` 才调用 loginctl；uninstall 后 linger 保持原状。
-- [ ] SD-AC6：modified/symlink/non-regular unit 不被默认 uninstall 删除；`--force` 行为有审计提示。
-- [ ] SD-AC7：service status 能区分 systemd active 但 runtime not-ready、systemd inactive/stopped、degraded；logs 命令无 pager 且参数有界。
+- [x] SD-AC1：unit fixture 通过 `systemd-analyze verify --user` 或等价隔离验证，并包含期望 restart/timeout/runtime directory 参数。
+- [x] SD-AC2：renderer 对空格、反斜杠、引号、`%` 路径正确，对 newline/NUL/相对路径拒绝；secret fixtures 不进入 unit/manifest/output。
+- [x] SD-AC3：install identical 幂等；different 无 `--replace` 零修改；preflight/systemctl 任一步失败有可恢复行为和明确结果。
+- [x] SD-AC4：enable/start/stop/restart/disable/uninstall 的 runner argv 与状态转换通过 fake systemd 测试，不依赖开发机 user manager。
+- [x] SD-AC5：linger 默认不变；显式 `--linger` 才调用 loginctl；uninstall 后 linger 保持原状。
+- [x] SD-AC6：modified/symlink/non-regular unit 不被默认 uninstall 删除；`--force` 行为有审计提示。
+- [x] SD-AC7：service status 能区分 systemd active 但 runtime not-ready、systemd inactive/stopped、degraded；logs 命令无 pager且参数有界。
 
 ## Out of Scope
 

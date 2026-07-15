@@ -254,13 +254,13 @@ Trust **不热重载**：`/trust` 写 `trust.json`，下次启动才改变 `incl
 
 ## 7. Gateway 子系统
 
-**运维配置**：[docs/gateway.md](docs/gateway.md)  
+**设计与运维**：[docs/gateway-design.md](docs/gateway-design.md)
 **代码根**：`src/gateway/`
 
 ### 7.1 启动（`runGateway`）
 
-1. `status` / `probe`：只加载 `gateway.json` + channels（无 harness）
-2. provider probe（未配置则 fail + guidance）
+1. `status` / `health` / `messages` 通过私有 control socket；`migrate` / `service` 进入各自运维层（均无 harness）
+2. 默认 `run` 先做只读 schema preflight，再做 provider probe（未配置则 fail + guidance）
 3. trust（headless 规则）
 4. `prepareGatewayEnv({ toolMode: "gateway" })`
 5. `loadGatewayConfig`（`${ENV}` 展开；项目层受 trust）
@@ -272,19 +272,22 @@ Trust **不热重载**：`/trust` 写 `trust.json`，下次启动才改变 `incl
 
 ### 7.2 组件边界
 
-| 组件                      | 路径                                        | 职责                                                            |
-| ------------------------- | ------------------------------------------- | --------------------------------------------------------------- |
-| `GatewayApp`              | `core/gateway-app.ts`                       | 入站：dedupe → 授权/配对 → slash commands → session lane        |
-| `GatewaySessionManager`   | `core/session-manager.ts`                   | per-sessionKey lane、idle timeout、maxConcurrent 驱逐           |
-| Session lane              | `core/session-lane.ts`                      | 串行队列；running 时 steer / followup / interrupt；静默标记缓冲 |
-| `NoviAgentAdapter`        | `agent/novi-agent-adapter.ts`               | `AgentProtocolAdapter` 实现；懒 `createHarnessForSession`       |
-| `createEventBridge`       | `agent/event-bridge.ts`                     | **唯一** gateway 侧 harness 订阅点                              |
-| Channels                  | `channels/*`                                | 如 Telegram long-poll + edit-stream                             |
-| Pairing                   | `core/pairing-store.ts`                     | DM pairing fail-closed 持久授权                                 |
-| `JobStore` / `JobService` | `jobs/store.ts` / `jobs/service.ts`         | 严格文件状态、route 所有权、生命周期与预算账本                  |
-| `GatewayScheduler`        | `jobs/scheduler.ts`                         | occurrence claim、恢复、执行/投递重试与清理                     |
-| Automation / Delivery     | `jobs/agent-runner.ts` / `jobs/delivery.ts` | 隔离受限 run；至少一次 Telegram 投递；来源 Session 追加         |
-| Heartbeat                 | `jobs/heartbeat.ts`                         | due-item 计算、active hours、静默与单例低频检查                 |
+| 组件                      | 路径                                        | 职责                                                             |
+| ------------------------- | ------------------------------------------- | ---------------------------------------------------------------- |
+| `GatewayApp`              | `core/gateway-app.ts`                       | 入站：dedupe → 授权/配对 → slash commands → session lane         |
+| `GatewaySessionManager`   | `core/session-manager.ts`                   | per-sessionKey lane、idle timeout、maxConcurrent 驱逐            |
+| Session lane              | `core/session-lane.ts`                      | 串行队列；running 时 steer / followup / interrupt；静默标记缓冲  |
+| `NoviAgentAdapter`        | `agent/novi-agent-adapter.ts`               | `AgentProtocolAdapter` 实现；懒 `createHarnessForSession`        |
+| `createEventBridge`       | `agent/event-bridge.ts`                     | **唯一** gateway 侧 harness 订阅点                               |
+| Channels                  | `channels/*`                                | 如 Telegram long-poll + edit-stream                              |
+| Pairing                   | `core/pairing-store.ts`                     | DM pairing fail-closed 持久授权                                  |
+| `JobStore` / `JobService` | `jobs/store.ts` / `jobs/service.ts`         | 严格文件状态、route 所有权、生命周期与预算账本                   |
+| `GatewayScheduler`        | `jobs/scheduler.ts`                         | occurrence claim、恢复、执行/投递重试与清理                      |
+| Automation / Delivery     | `jobs/agent-runner.ts` / `jobs/delivery.ts` | 隔离受限 run；至少一次 Telegram 投递；来源 Session 追加          |
+| Heartbeat                 | `jobs/heartbeat.ts`                         | due-item 计算、active hours、静默与单例低频检查                  |
+| Runtime control           | `runtime/*`                                 | 私有 Unix socket、真实 health/status、结构化日志/指标/告警       |
+| State migrations          | `migrations/*`                              | schema inventory、私有备份、事务迁移、崩溃恢复与 rollback        |
+| systemd user service      | `service/*`                                 | deterministic unit、安装 ownership、生命周期、linger/status/logs |
 
 ### 7.3 架构规则
 

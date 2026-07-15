@@ -3,7 +3,7 @@
   "name": "systemd-user-service",
   "title": "实现 systemd 用户服务管理",
   "description": "实现 Linux systemd user service 的安全安装、生命周期管理、日志入口与状态集成。",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,

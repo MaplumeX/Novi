@@ -1,5 +1,21 @@
 # Novi
 
+## Gateway as a systemd user service
+
+On Linux with systemd 240+, build/install Novi and migrate legacy Gateway state before installing the user service:
+
+```bash
+novi --gateway migrate --dry-run
+novi --gateway migrate
+novi --gateway service install
+novi --gateway service status
+novi --gateway service logs --lines 200
+```
+
+Installation defaults to `enable --now`. This starts automatically with the user manager after login. Pass `--linger` only when you explicitly want boot-time operation without a login; uninstall never disables linger. Use `--no-enable` or `--no-start` for staged installation.
+
+An optional `--environment-file /absolute/path` must be a current-user regular file with mode `0600` or stricter. Its contents are never copied into the unit or install manifest. Novi does not use sudo, write `/etc`, install Node, or auto-upgrade itself. After changing the Novi binary path, cwd, config, or environment-file path, review and apply the deterministic unit update with `service install --replace`.
+
 ## MCP external tools
 
 Novi can load Model Context Protocol (MCP) servers and expose their tools

@@ -26,6 +26,7 @@ This directory contains guidelines for backend development. Fill in each file wi
 | [Durable Gateway Messages](./durable-message-delivery.md)     | Inbox/outbox schemas, Telegram polling acknowledgement, recovery, retry, rate limits, and management   | ✅ Filled |
 | [Gateway Runtime Control](./gateway-runtime-observability.md) | Unix socket ownership, live health, JSON logs, metrics, local operations, and durable alerts           | ✅ Filled |
 | [Gateway State Migrations](./gateway-state-migrations.md)     | Version inspection, offline migration, private backups, crash recovery, and rollback                   | ✅ Filled |
+| [systemd User Service](./systemd-user-service.md)             | Deterministic user unit, ownership-safe install/remove, lifecycle, linger, status, and logs            | ✅ Filled |
 
 ---
 

@@ -92,10 +92,10 @@ Manager 管的是**运行时容量**；它**不**删除 durable binding。
 
 ### PairingStore 与 GatewaySessionStore：两类持久化
 
-| Store | 文件（默认） | 语义 | 失败策略 |
-| --- | --- | --- | --- |
-| `PairingStore` | `~/.novi/gateway-pairing.json` | DM 授权名单与 pending code | 损坏/缺失 → fail-closed（未授权） |
-| `GatewaySessionStore` | `~/.novi/gateway-sessions.json` | route → JSONL session binding | 损坏 → **阻止启动**（strict） |
+| Store                 | 文件（默认）                    | 语义                          | 失败策略                          |
+| --------------------- | ------------------------------- | ----------------------------- | --------------------------------- |
+| `PairingStore`        | `~/.novi/gateway-pairing.json`  | DM 授权名单与 pending code    | 损坏/缺失 → fail-closed（未授权） |
+| `GatewaySessionStore` | `~/.novi/gateway-sessions.json` | route → JSONL session binding | 损坏 → **阻止启动**（strict）     |
 
 两者都是文件持久化、mutation 串行；session store 额外用 temp + rename 做原子提交。
 
@@ -153,12 +153,12 @@ Manager 管的是**运行时容量**；它**不**删除 durable binding。
 - `getOrCreate(route)` 懒建 lane；超过 `maxConcurrent` 时驱逐最老 idle lane，并 `agent.closeSession`（只关运行时，不动 binding）。
 - `enqueueMessage(lane, agent, { channel, msg, mode })`：
 
-| lane 状态 | mode | 行为 |
-| --- | --- | --- |
-| idle | 任意 | 立即 `runTurn` |
-| running | `steer` | `agent.steer`；失败则尝试 `followUp`；再失败则当 interrupt 入本地队列 |
-| running | `followup` | `agent.followUp`；失败则入本地队列 |
-| running | `interrupt` | `agent.abort`，消息入本地队列，待当前 turn 结束后新开 turn |
+| lane 状态 | mode        | 行为                                                                  |
+| --------- | ----------- | --------------------------------------------------------------------- |
+| idle      | 任意        | 立即 `runTurn`                                                        |
+| running   | `steer`     | `agent.steer`；失败则尝试 `followUp`；再失败则当 interrupt 入本地队列 |
+| running   | `followup`  | `agent.followUp`；失败则入本地队列                                    |
+| running   | `interrupt` | `agent.abort`，消息入本地队列，待当前 turn 结束后新开 turn            |
 
 默认配置是 `steer`：用户在 agent 思考/工具调用时继续说话，优先注入当前 run，而不是默认打断。
 
@@ -166,9 +166,9 @@ Manager 管的是**运行时容量**；它**不**删除 durable binding。
 
 `runTurn`（lane）把 channel 能力包装成 `AgentProtocolTurnCallbacks`，再调用 `agent.runTurn`：
 
-1. `NoviAgentAdapter.getOrCreateHarness(route)`  
-   - 有 binding → resume 既有 JSONL session  
-   - 无 binding → 新建 harness，**先** `store.bind` 成功，**再**把 entry 放进内存 cache  
+1. `NoviAgentAdapter.getOrCreateHarness(route)`
+   - 有 binding → resume 既有 JSONL session
+   - 无 binding → 新建 harness，**先** `store.bind` 成功，**再**把 entry 放进内存 cache
    - 并发首条消息共享同一个 pending promise
 2. `createEventBridge(harness, guardedCallbacks, toolCatalog)` 订阅一次。
 3. `harness.prompt(text)`。
@@ -280,8 +280,25 @@ Gateway 的 `toolMode` 为 `"gateway"`；与 headless 一样，无交互 Approve
 
 ### Pairing 与 session store 的不同严格度
 
-- Pairing 文件坏了：当作无人授权（fail-closed），进程仍可启动。
+- Pairing 文件缺失：从空的 v1 授权状态开始；文件损坏或仍是旧 schema：启动前置检查失败，要求显式迁移或修复，绝不静默清空授权。
 - Session store 坏了：启动失败。原因是 binding 错误会导致错误 resume 或静默丢上下文，属于更危险的一致性问题。
+
+### systemd 用户服务边界
+
+Linux 上可以用 `novi --gateway service install` 安装单实例 user unit。安装器固定当前 Node、编译后的 `dist/cli.js`、工作目录、`NOVI_HOME` 与可选配置路径，先做只读 config/schema preflight，再原子发布 unit 与私有 manifest。它不会使用 sudo、写 `/etc`、下载 Node/Novi，或把 token 写进 unit。
+
+默认安装会 `enable --now`，但这只保证登录后的 user manager 自动拉起。只有显式 `--linger` 才调用 `loginctl enable-linger`，从而支持未登录时开机运行；卸载永远不关闭 linger。unit 使用 `Type=exec`、失败重启、60 秒 SIGTERM 停止窗口和 systemd `RuntimeDirectory=novi` 的私有控制套接字目录。
+
+常用运维入口：
+
+```bash
+novi --gateway service status
+novi --gateway service logs --lines 200
+novi --gateway service restart
+novi --gateway service uninstall
+```
+
+升级 Novi 后再次 install 会比较 deterministic unit。内容变化必须显式 `--replace`；卸载时 unit hash 与 manifest 不一致也会保留用户修改，除非对预期位置的 regular file 使用 `--force`。
 
 ### 热更新边界
 

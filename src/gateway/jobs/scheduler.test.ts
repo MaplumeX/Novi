@@ -81,4 +81,23 @@ describe("GatewayScheduler", () => {
     expect(store.getJob("job_1")?.status).toBe("completed");
     expect(await store.listRuns("job_1")).toHaveLength(1);
   });
+
+  it("captures a background tick failure for runtime health", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "novi-scheduler-"));
+    roots.push(root);
+    const store = await JobStore.open(root, "2026-01-02");
+    const scheduler = new GatewayScheduler(
+      store,
+      { execute: vi.fn() } as unknown as AutomationAgentRunner,
+      { deliver: vi.fn() } as unknown as DeliveryService,
+      config,
+      () => new Date("2026-01-02T00:00:00.000Z"),
+    );
+    await scheduler.start();
+    vi.spyOn(store, "listRuns").mockRejectedValue(new Error("injected scheduler read failure"));
+
+    scheduler.kick();
+    await vi.waitFor(() => expect(scheduler.getFailure()?.message).toContain("injected"));
+    await scheduler.stop();
+  });
 });

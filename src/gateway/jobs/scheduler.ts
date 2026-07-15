@@ -21,6 +21,7 @@ export class GatewayScheduler {
   private lock: SchedulerLock | undefined;
   private ticking: Promise<void> | undefined;
   private stopped = true;
+  private failure: Error | undefined;
   private nextHeartbeatAt = 0;
 
   constructor(
@@ -55,6 +56,7 @@ export class GatewayScheduler {
     if (!this.stopped) return;
     await this.prepare();
     this.stopped = false;
+    this.failure = undefined;
     await this.tick();
   }
 
@@ -70,7 +72,11 @@ export class GatewayScheduler {
   kick(): void {
     if (this.stopped) return;
     if (this.timer) clearTimeout(this.timer);
-    this.timer = setTimeout(() => void this.tick(), 0);
+    this.timer = setTimeout(() => void this.tick().catch(() => undefined), 0);
+  }
+
+  getFailure(): Error | undefined {
+    return this.failure;
   }
 
   async getStats(): Promise<SchedulerStats> {
@@ -92,9 +98,13 @@ export class GatewayScheduler {
     this.ticking = this.doTick();
     try {
       await this.ticking;
+      await this.scheduleNext();
+    } catch (error) {
+      this.failure = error instanceof Error ? error : new Error(String(error));
+      this.stopped = true;
+      throw error;
     } finally {
       this.ticking = undefined;
-      await this.scheduleNext();
     }
   }
 
@@ -289,7 +299,7 @@ export class GatewayScheduler {
     }
     const nextDue = candidates.length ? Math.min(...candidates) : due;
     const wait = Math.max(100, Math.min(60_000, nextDue - now));
-    this.timer = setTimeout(() => void this.tick(), wait);
+    this.timer = setTimeout(() => void this.tick().catch(() => undefined), wait);
     this.timer.unref();
   }
 }

@@ -55,6 +55,14 @@ export interface RawDeliveryConfig {
   rateLimit?: Partial<DeliveryRateLimits>;
 }
 
+export interface RawOperationsConfig {
+  alertTarget?: GatewaySessionLocator;
+  alertCooldownMs?: number;
+  backlogRecords?: number;
+  backlogAgeMs?: number;
+  channelDownMs?: number;
+}
+
 /** Raw `gateway.json` shape — all fields optional, validated before use. */
 export interface RawGatewayConfig {
   queue?: {
@@ -89,6 +97,7 @@ export interface RawGatewayConfig {
   delivery?: RawDeliveryConfig;
   automation?: RawAutomationConfig;
   heartbeat?: RawHeartbeatConfig;
+  operations?: RawOperationsConfig;
 }
 
 /** Resolved gateway config with defaults applied. */
@@ -145,6 +154,13 @@ export interface ResolvedGatewayConfig {
     activeHours?: { start: string; end: string; timezone: string };
     target?: GatewaySessionLocator;
   };
+  operations: {
+    alertTarget?: GatewaySessionLocator;
+    alertCooldownMs: number;
+    backlogRecords: number;
+    backlogAgeMs: number;
+    channelDownMs: number;
+  };
 }
 
 /** Load result: resolved config + non-fatal warnings (stderr by caller). */
@@ -177,6 +193,10 @@ const DEFAULTS = {
   maxRunsPerJob: 100,
   maxResultBytes: 65_536,
   heartbeatEveryMs: 1_800_000,
+  alertCooldownMs: 3_600_000,
+  alertBacklogRecords: 100,
+  alertBacklogAgeMs: 900_000,
+  alertChannelDownMs: 300_000,
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -327,6 +347,10 @@ function mergeTrustedLayers(
       warnings.push("gateway: project heartbeat cannot enable unattended execution");
     }
   }
+  merged.operations = global.operations;
+  if (project.operations !== undefined) {
+    warnings.push("gateway: project operations config ignored (global-only authority)");
+  }
   return merged;
 }
 
@@ -432,6 +456,7 @@ function resolveConfig(merged: RawGatewayConfig, warnings: string[]): ResolvedGa
   const automation = resolveAutomationConfig(merged.automation, warnings);
   const delivery = resolveDeliveryConfig(merged.delivery, warnings);
   const heartbeat = resolveHeartbeatConfig(merged.heartbeat, automation.timezone, warnings);
+  const operations = resolveOperationsConfig(merged.operations, warnings);
 
   if (channels.length === 0) {
     warnings.push("gateway: no channels configured — the gateway will have no inbound sources");
@@ -455,6 +480,7 @@ function resolveConfig(merged: RawGatewayConfig, warnings: string[]): ResolvedGa
     delivery,
     automation,
     heartbeat,
+    operations,
   };
 }
 
@@ -580,7 +606,7 @@ function resolveHeartbeatConfig(
     typeof raw?.model === "string" && /^[^/\s]+\/[^/\s]+$/.test(raw.model) ? raw.model : undefined;
   if (raw?.model !== undefined && !model)
     warnings.push("gateway: invalid heartbeat.model, expected provider/model");
-  const target = decodeHeartbeatTarget(raw?.target, warnings);
+  const target = decodeTarget(raw?.target, "heartbeat.target", warnings);
   let activeHours: ResolvedGatewayConfig["heartbeat"]["activeHours"];
   if (raw?.activeHours !== undefined) {
     const { start, end } = raw.activeHours;
@@ -610,8 +636,42 @@ function resolveHeartbeatConfig(
   };
 }
 
-function decodeHeartbeatTarget(
+function resolveOperationsConfig(
+  raw: RawOperationsConfig | undefined,
+  warnings: string[],
+): ResolvedGatewayConfig["operations"] {
+  return {
+    alertTarget: decodeTarget(raw?.alertTarget, "operations.alertTarget", warnings),
+    alertCooldownMs: positiveNumber(
+      raw?.alertCooldownMs,
+      DEFAULTS.alertCooldownMs,
+      "operations.alertCooldownMs",
+      warnings,
+    ),
+    backlogRecords: positiveInteger(
+      raw?.backlogRecords,
+      DEFAULTS.alertBacklogRecords,
+      "operations.backlogRecords",
+      warnings,
+    ),
+    backlogAgeMs: positiveNumber(
+      raw?.backlogAgeMs,
+      DEFAULTS.alertBacklogAgeMs,
+      "operations.backlogAgeMs",
+      warnings,
+    ),
+    channelDownMs: positiveNumber(
+      raw?.channelDownMs,
+      DEFAULTS.alertChannelDownMs,
+      "operations.channelDownMs",
+      warnings,
+    ),
+  };
+}
+
+function decodeTarget(
   value: GatewaySessionLocator | undefined,
+  field: string,
   warnings: string[],
 ): GatewaySessionLocator | undefined {
   if (value === undefined) return undefined;
@@ -625,7 +685,7 @@ function decodeHeartbeatTarget(
     !["direct", "group", "channel", "thread"].includes(value.chat.type) ||
     (value.thread !== undefined && (typeof value.thread !== "string" || value.thread.length === 0))
   ) {
-    warnings.push("gateway: invalid heartbeat.target");
+    warnings.push(`gateway: invalid ${field}`);
     return undefined;
   }
   return {

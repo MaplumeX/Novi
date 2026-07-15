@@ -60,6 +60,12 @@ function config(dmPolicy: ResolvedGatewayConfig["security"]["dmPolicy"]): Resolv
       maxResultBytes: 65_536,
     },
     heartbeat: { enabled: false, everyMs: 1_800_000 },
+    operations: {
+      alertCooldownMs: 3_600_000,
+      backlogRecords: 100,
+      backlogAgeMs: 900_000,
+      channelDownMs: 300_000,
+    },
   };
 }
 function agent(): AgentProtocolAdapter {
@@ -300,5 +306,55 @@ describe("GatewayApp durable ingress", () => {
 
     expect(runTurn).toHaveBeenCalledTimes(1);
     expect(messageStore.listInbox()).toHaveLength(1);
+  });
+
+  it("queues operations alerts durably and excludes their failures from alert faults", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "novi-gateway-alert-"));
+    paths.push(dir);
+    const messageStore = await GatewayMessageStore.open(path.join(dir, "messages"));
+    const adapter = agent();
+    const outbound = channel();
+    const app = new GatewayApp({
+      channels: [outbound],
+      agent: adapter,
+      sessionManager: new GatewaySessionManager({
+        agent: adapter,
+        idleTimeoutMs: 1,
+        maxConcurrentSessions: 1,
+        queueMode: "steer",
+      }),
+      queueMode: "steer",
+      config: config("open"),
+      commands: createCommandRegistry(),
+      messageStore,
+    });
+    await app.enqueueOperationAlert(
+      {
+        channel: "telegram",
+        account: "tg",
+        chat: { type: "direct", id: "chat" },
+      },
+      "alert-source",
+      "Gateway alert",
+    );
+    const [record] = messageStore.listOutbox();
+    expect(record).toMatchObject({
+      source: { kind: "system", purpose: "alert" },
+      status: "pending",
+      suppressAlerts: true,
+    });
+    await messageStore.updateOutbox(record!.id, (current) => ({
+      ...current,
+      status: "sending",
+      attempt: 1,
+      startedAt: new Date().toISOString(),
+    }));
+    await messageStore.updateOutbox(record!.id, (current) => ({
+      ...current,
+      status: "delivery_failed",
+      finishedAt: new Date().toISOString(),
+      error: { code: "CHANNEL_SEND_FAILED", message: "failed", retryable: false },
+    }));
+    expect(app.runtimeComponents().messages?.exhaustedCount).toBe(0);
   });
 });

@@ -44,11 +44,13 @@ export class FinalDeliverySink {
     sourceId: string,
     text: string,
     purpose: OutboxPurpose,
+    suppressAlerts = false,
   ): Promise<ChannelDeliveryReceipt> {
     const outbox = createOutboxRecord({
       source: { kind: "system", id: sourceId, attempt: 0, purpose, ordinal: 0 },
       target: { ...target, channel: channel.type, account: channel.id },
       text,
+      suppressAlerts,
     });
     const created = await this.store.createOutbox(outbox);
     this.worker.kick();

@@ -132,6 +132,8 @@ export interface ChannelAdapter {
   acknowledgeMessage?(msgId: string): Promise<void>;
   /** Lightweight connectivity check; must not start an agent turn. */
   probe?(): Promise<{ ok: boolean; detail?: string }>;
+  /** Terminal background-loop failure, when the adapter owns such a loop. */
+  getFailure?(): Error | undefined;
 }
 
 // ---------------------------------------------------------------------------

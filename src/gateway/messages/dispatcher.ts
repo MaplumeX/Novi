@@ -2,6 +2,8 @@ import type { ChannelAdapter, ChannelMessage } from "../core/types.js";
 import { redactAndBoundError } from "./errors.js";
 import { GatewayMessageStore } from "./store.js";
 import type { InboxRecord } from "./types.js";
+import type { GatewayMetrics } from "../runtime/metrics.js";
+import type { GatewayLogger } from "../runtime/logger.js";
 
 export type DurableInboxHandler = (
   channel: ChannelAdapter,
@@ -22,6 +24,8 @@ export class GatewayMessageDispatcher {
     private readonly handler: DurableInboxHandler,
     private readonly now: () => Date = () => new Date(),
     private readonly onInterrupted?: (record: InboxRecord) => Promise<void>,
+    private readonly metrics?: GatewayMetrics,
+    private readonly logger?: GatewayLogger,
   ) {
     for (const channel of channels) this.channels.set(`${channel.type}:${channel.id}`, channel);
   }
@@ -52,7 +56,11 @@ export class GatewayMessageDispatcher {
               },
             }),
       }));
-      if (!hasFinalOutbox) await this.onInterrupted?.(recovered);
+      if (!hasFinalOutbox) {
+        this.metrics?.increment("ingressInterrupted");
+        this.logger?.warn("gateway.ingress.recovered_interrupted", { messageId: recovered.id });
+        await this.onInterrupted?.(recovered);
+      }
     }
     for (const routeKey of new Set(
       this.store
@@ -70,6 +78,7 @@ export class GatewayMessageDispatcher {
       .catch((error: unknown) => {
         this.failure = error instanceof Error ? error : new Error(String(error));
         this.stopping = true;
+        this.logger?.error("gateway.worker.inbox_failed", error);
       })
       .finally(() => {
         this.active.delete(routeKey);

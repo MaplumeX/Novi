@@ -1,6 +1,8 @@
 import type { ChannelAdapter } from "../core/types.js";
 import { ChannelDeliveryExecutor, deliveryRetryDelayMs } from "./delivery.js";
 import { GatewayMessageStore } from "./store.js";
+import type { GatewayMetrics } from "../runtime/metrics.js";
+import type { GatewayLogger } from "../runtime/logger.js";
 
 /** Durable outbox worker with crash reconciliation and persisted chunk progress. */
 export class OutboxDeliveryWorker {
@@ -16,6 +18,8 @@ export class OutboxDeliveryWorker {
     private readonly executor: ChannelDeliveryExecutor,
     private readonly now: () => Date = () => new Date(),
     private readonly random: () => number = Math.random,
+    private readonly metrics?: GatewayMetrics,
+    private readonly logger?: GatewayLogger,
   ) {
     for (const channel of channels) this.channels.set(`${channel.type}:${channel.id}`, channel);
   }
@@ -37,6 +41,8 @@ export class OutboxDeliveryWorker {
           retryable: true,
         },
       }));
+      this.metrics?.increment("deliveryRetried");
+      this.logger?.warn("gateway.delivery.recovered_interrupted", { deliveryId: record.id });
     }
     this.kick();
   }
@@ -51,6 +57,7 @@ export class OutboxDeliveryWorker {
       .catch((error: unknown) => {
         this.failure = error instanceof Error ? error : new Error(String(error));
         this.stopping = true;
+        this.logger?.error("gateway.worker.outbox_failed", error);
       })
       .finally(() => {
         this.active = undefined;
@@ -95,6 +102,12 @@ export class OutboxDeliveryWorker {
         nextAttemptAt: undefined,
         error: undefined,
       }));
+      this.metrics?.increment("deliveryAttempted");
+      this.logger?.info("gateway.delivery.attempted", {
+        deliveryId: current.id,
+        channel: current.target.account,
+        attempt: current.attempt,
+      });
       const result = await this.executor.execute({
         channel,
         target: current.target,
@@ -118,9 +131,15 @@ export class OutboxDeliveryWorker {
           nextAttemptAt: undefined,
           error: undefined,
         }));
+        this.metrics?.increment("deliverySucceeded");
+        this.logger?.info("gateway.delivery.succeeded", {
+          deliveryId: current.id,
+          channel: current.target.account,
+          attempt: current.attempt,
+        });
         continue;
       }
-      await this.store.updateOutbox(current.id, (record) => {
+      const updated = await this.store.updateOutbox(current.id, (record) => {
         const exhausted = !result.error.retryable || record.attempt >= record.maxAttempts;
         return {
           ...record,
@@ -136,6 +155,17 @@ export class OutboxDeliveryWorker {
           error: result.error,
         };
       });
+      const exhausted = updated.status === "delivery_failed";
+      this.metrics?.increment(exhausted ? "deliveryFailed" : "deliveryRetried");
+      this.logger?.warn(
+        exhausted ? "gateway.delivery.failed" : "gateway.delivery.retry_scheduled",
+        {
+          deliveryId: updated.id,
+          channel: updated.target.account,
+          attempt: updated.attempt,
+          error: updated.error,
+        },
+      );
     }
   }
 

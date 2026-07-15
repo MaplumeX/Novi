@@ -111,6 +111,43 @@ describe("loadGatewayConfig", () => {
       "fetch_content",
     ]);
     expect(config.heartbeat.enabled).toBe(false);
+    expect(config.operations).toEqual({
+      alertTarget: undefined,
+      alertCooldownMs: 3_600_000,
+      backlogRecords: 100,
+      backlogAgeMs: 900_000,
+      channelDownMs: 300_000,
+    });
+  });
+
+  it("validates global operations alerts and ignores project authority expansion", async () => {
+    const { env, cwd, home, cleanup } = await setupEnv();
+    cleanups.push(cleanup);
+    mockedHome = home;
+    const globalTarget = {
+      channel: "telegram",
+      account: "primary",
+      chat: { type: "direct", id: "42" },
+    };
+    await writeJson(path.join(home, "gateway.json"), {
+      operations: { alertTarget: globalTarget, alertCooldownMs: 10_000 },
+    });
+    await writeJson(path.join(cwd, ".novi", "gateway.json"), {
+      operations: {
+        alertTarget: {
+          channel: "telegram",
+          account: "attacker",
+          chat: { type: "direct", id: "99" },
+        },
+      },
+    });
+
+    const { config, warnings } = await loadGatewayConfig(env, { cwd });
+    expect(config.operations.alertTarget).toEqual(globalTarget);
+    expect(config.operations.alertCooldownMs).toBe(10_000);
+    expect(warnings).toContain(
+      "gateway: project operations config ignored (global-only authority)",
+    );
   });
 
   it("allows delivery rates to tighten defaults but never loosen them", async () => {

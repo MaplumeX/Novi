@@ -11,6 +11,7 @@ import {
   enqueueSystemOperation,
   type SessionLane,
 } from "./session-lane.js";
+import type { GatewayMetrics } from "../runtime/metrics.js";
 
 /** Constructor options for {@link GatewaySessionManager}. */
 export interface GatewaySessionManagerOptions {
@@ -21,6 +22,7 @@ export interface GatewaySessionManagerOptions {
   maxConcurrentSessions: number;
   /** Default queue mode for messages arriving mid-turn. */
   queueMode: QueueMode;
+  metrics?: GatewayMetrics;
 }
 
 /**
@@ -43,6 +45,7 @@ export class GatewaySessionManager {
   private readonly idleTimeoutMs: number;
   private readonly maxConcurrentSessions: number;
   private readonly queueMode: QueueMode;
+  private readonly metrics: GatewayMetrics | undefined;
   private readonly lanes = new Map<string, SessionLane>();
   private readonly resets = new Map<string, Promise<void>>();
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
@@ -52,6 +55,7 @@ export class GatewaySessionManager {
     this.idleTimeoutMs = options.idleTimeoutMs;
     this.maxConcurrentSessions = options.maxConcurrentSessions;
     this.queueMode = options.queueMode;
+    this.metrics = options.metrics;
   }
 
   /**
@@ -68,7 +72,7 @@ export class GatewaySessionManager {
     if (resetting) await resetting.catch(() => {});
     const lane = this.getOrCreate(route);
     const mode = queueMode ?? this.queueMode;
-    await enqueueMessage(lane, this.agent, { channel, msg, mode });
+    await enqueueMessage(lane, this.agent, { channel, msg, mode }, this.metrics);
   }
 
   async enqueueSystemOperation(

@@ -25,6 +25,7 @@ import type { GatewaySessionStore } from "../core/session-store.js";
 import type { ToolCatalogSnapshot } from "../../tools/contracts.js";
 import type { McpRuntimeHandle } from "../../tools/assembly.js";
 import type { JobService } from "../jobs/service.js";
+import type { GatewayLogger } from "../runtime/logger.js";
 import { createJobsToolDescriptor } from "../jobs/tool.js";
 
 /** Cached harness + canonical metadata for one route generation. */
@@ -57,6 +58,7 @@ export class NoviAgentAdapter implements AgentProtocolAdapter {
     private readonly createHarness: HarnessFactory = createHarnessForSession,
     private readonly jobService?: JobService,
     private readonly onJobsMutated: () => void = () => undefined,
+    private readonly logger?: GatewayLogger,
   ) {}
 
   /** Get or initialize one route. Concurrent first messages share the promise. */
@@ -227,9 +229,15 @@ export class NoviAgentAdapter implements AgentProtocolAdapter {
       try {
         await entry.harness.waitForIdle();
       } catch (error) {
-        process.stderr.write(
-          `warning: closeSession("${route.key}"): waitForIdle failed: ${errorMessage(error)}\n`,
-        );
+        if (this.logger) {
+          this.logger.error("gateway.agent.close_wait_failed", error, {
+            routeKey: route.key,
+          });
+        } else {
+          process.stderr.write(
+            `warning: closeSession("${route.key}"): waitForIdle failed: ${errorMessage(error)}\n`,
+          );
+        }
       }
       await this.closeMcp(entry.mcp);
     })();

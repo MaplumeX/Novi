@@ -7,6 +7,7 @@ import type {
 import type { QueueMode } from "../config.js";
 import { isSilentReply } from "./routing.js";
 import { channelTargetForMessage } from "./routing.js";
+import type { GatewayMetrics } from "../runtime/metrics.js";
 
 /** A queued inbound message awaiting dispatch after the current run. */
 export interface QueuedMessage {
@@ -83,11 +84,12 @@ export async function enqueueMessage(
   lane: SessionLane,
   agent: AgentProtocolAdapter,
   entry: QueuedMessage,
+  metrics?: GatewayMetrics,
 ): Promise<void> {
   lane.lastActivity = Date.now();
 
   if (lane.status === "idle") {
-    await runTurn(lane, agent, entry);
+    await runTurn(lane, agent, entry, metrics);
     return;
   }
 
@@ -127,6 +129,7 @@ export async function enqueueMessage(
   } catch {
     // Abort failed — still queue; the current run will end on its own.
   }
+  metrics?.increment("ingressInterrupted");
   lane.queue.push(entry);
 }
 
@@ -141,6 +144,7 @@ async function runTurn(
   lane: SessionLane,
   agent: AgentProtocolAdapter,
   entry: QueuedMessage,
+  metrics?: GatewayMetrics,
 ): Promise<void> {
   const { channel, msg } = entry;
   lane.status = "running";
@@ -180,7 +184,9 @@ async function runTurn(
 
   try {
     await agent.runTurn({ route: lane.route, text: msg.text, callbacks });
+    metrics?.increment("agentSucceeded");
   } catch (e) {
+    metrics?.increment("agentFailed");
     const message = e instanceof Error ? e.message : String(e);
     await channel.send(target, `Error: ${message}`).catch(() => {});
   } finally {
@@ -197,9 +203,9 @@ async function runTurn(
       } catch (error) {
         next.reject(error);
       }
-      await drainQueue(lane, agent);
+      await drainQueue(lane, agent, metrics);
     } else {
-      await runTurn(lane, agent, next);
+      await runTurn(lane, agent, next, metrics);
     }
     return;
   }
@@ -221,7 +227,11 @@ async function runSystemOperation(
   }
 }
 
-async function drainQueue(lane: SessionLane, agent: AgentProtocolAdapter): Promise<void> {
+async function drainQueue(
+  lane: SessionLane,
+  agent: AgentProtocolAdapter,
+  metrics?: GatewayMetrics,
+): Promise<void> {
   const next = lane.queue.shift();
   if (!next) {
     lane.status = "idle";
@@ -235,10 +245,10 @@ async function drainQueue(lane: SessionLane, agent: AgentProtocolAdapter): Promi
     } catch (error) {
       next.reject(error);
     }
-    await drainQueue(lane, agent);
+    await drainQueue(lane, agent, metrics);
     return;
   }
-  await runTurn(lane, agent, next);
+  await runTurn(lane, agent, next, metrics);
 }
 
 const SILENT_MARKERS = ["SILENT", "[SILENT]", "NO_REPLY", "NO REPLY"];

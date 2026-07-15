@@ -12,18 +12,19 @@ This directory contains guidelines for backend development. Fill in each file wi
 
 ## Guidelines Index
 
-| Guide                                                     | Description                                                                                            | Status    |
-| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | --------- |
-| [Directory Structure](./directory-structure.md)           | Module organization and file layout                                                                    | ✅ Filled |
-| [Database Guidelines](./database-guidelines.md)           | Persistence (JSONL sessions, todos, MCP config/approvals, credentials)                                 | ✅ Filled |
-| [Error Handling](./error-handling.md)                     | Error types, handling strategies                                                                       | ✅ Filled |
-| [Quality Guidelines](./quality-guidelines.md)             | Code standards, forbidden patterns                                                                     | ✅ Filled |
-| [Logging Guidelines](./logging-guidelines.md)             | Diagnostic output (stderr warnings, startup errors)                                                    | ✅ Filled |
-| [pi-agent-core API 契约](./pi-agent-core-api.md)          | 已验证的 pi-agent-core / pi-ai 公开 API（Node 入口、session、models、harness 事件、hook 注册）         | ✅ Filled |
-| [Web Tool Contracts](./web-tools.md)                      | Batch search/fetch contracts, providers, guarded network, cache, and continuation                      | ✅ Filled |
-| [Tool Runtime Contracts](./tool-runtime-contracts.md)     | Descriptor assembly, permissions, resource budgets, artifacts, and unified tool result/event contracts | ✅ Filled |
-| [Scheduled Jobs](./scheduled-jobs.md)                     | Durable scheduling, recovery, unattended harness policy, delivery, and Heartbeat contracts             | ✅ Filled |
-| [Durable Gateway Messages](./durable-message-delivery.md) | Inbox/outbox schemas, Telegram polling acknowledgement, recovery, retry, rate limits, and management   | ✅ Filled |
+| Guide                                                         | Description                                                                                            | Status    |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | --------- |
+| [Directory Structure](./directory-structure.md)               | Module organization and file layout                                                                    | ✅ Filled |
+| [Database Guidelines](./database-guidelines.md)               | Persistence (JSONL sessions, todos, MCP config/approvals, credentials)                                 | ✅ Filled |
+| [Error Handling](./error-handling.md)                         | Error types, handling strategies                                                                       | ✅ Filled |
+| [Quality Guidelines](./quality-guidelines.md)                 | Code standards, forbidden patterns                                                                     | ✅ Filled |
+| [Logging Guidelines](./logging-guidelines.md)                 | Diagnostic output (stderr warnings, startup errors)                                                    | ✅ Filled |
+| [pi-agent-core API 契约](./pi-agent-core-api.md)              | 已验证的 pi-agent-core / pi-ai 公开 API（Node 入口、session、models、harness 事件、hook 注册）         | ✅ Filled |
+| [Web Tool Contracts](./web-tools.md)                          | Batch search/fetch contracts, providers, guarded network, cache, and continuation                      | ✅ Filled |
+| [Tool Runtime Contracts](./tool-runtime-contracts.md)         | Descriptor assembly, permissions, resource budgets, artifacts, and unified tool result/event contracts | ✅ Filled |
+| [Scheduled Jobs](./scheduled-jobs.md)                         | Durable scheduling, recovery, unattended harness policy, delivery, and Heartbeat contracts             | ✅ Filled |
+| [Durable Gateway Messages](./durable-message-delivery.md)     | Inbox/outbox schemas, Telegram polling acknowledgement, recovery, retry, rate limits, and management   | ✅ Filled |
+| [Gateway Runtime Control](./gateway-runtime-observability.md) | Unix socket ownership, live health, JSON logs, metrics, local operations, and durable alerts           | ✅ Filled |
 
 ---
 

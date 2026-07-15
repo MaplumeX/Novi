@@ -38,6 +38,8 @@ const { values, positionals } = parseArgs({
     "list-models": { type: "boolean", default: false },
     gateway: { type: "boolean", default: false },
     config: { type: "string" },
+    json: { type: "boolean", default: false },
+    kind: { type: "string" },
     "tool-budget": { type: "string", multiple: true },
     help: { type: "boolean", short: "h", default: false },
   },
@@ -79,6 +81,8 @@ if (values.help) {
       "  --list-models [s] List configured models (optional search filter), then exit",
       "  --gateway         Multi-channel gateway mode (IM bot server; no TUI)",
       "  --config <path>   Path to gateway.json (gateway mode; default ~/.novi/gateway.json)",
+      "  --json            Machine-readable output for gateway status/health/messages",
+      "  --kind <kind>     Gateway health check: live|ready",
       "  --tool-budget <name>=<n>  Override a tool resource budget (repeatable)",
       "  -h, --help        Show this help",
     ].join("\n") + "\n",
@@ -91,8 +95,41 @@ if (values.print && values.mode === "json") {
 }
 
 const promptText = positionals.join(" ");
-const gatewayAction =
-  positionals[0] === "status" || positionals[0] === "probe" ? positionals[0] : "run";
+const gatewayAction = ["status", "probe", "health", "messages"].includes(positionals[0] ?? "")
+  ? (positionals[0] as "status" | "probe" | "health" | "messages")
+  : "run";
+const requestedHealthKind = values.kind ?? positionals[1];
+const gatewayHealthCheck =
+  gatewayAction === "health" && (requestedHealthKind === "live" || requestedHealthKind === "ready")
+    ? requestedHealthKind
+    : undefined;
+const requestedMessageAction = positionals[1] ?? "list";
+const gatewayMessageAction =
+  gatewayAction === "messages" &&
+  ["list", "retry", "retry-delivery", "dismiss"].includes(requestedMessageAction)
+    ? (requestedMessageAction as "list" | "retry" | "retry-delivery" | "dismiss")
+    : undefined;
+
+if (values.gateway && gatewayAction === "health" && gatewayHealthCheck === undefined) {
+  fail("gateway health requires: live or ready");
+}
+if (values.gateway && gatewayAction === "messages" && gatewayMessageAction === undefined) {
+  fail("gateway messages requires: list, retry, retry-delivery, or dismiss");
+}
+if (
+  values.gateway &&
+  gatewayAction === "messages" &&
+  gatewayMessageAction !== "list" &&
+  !positionals[2]
+) {
+  fail(`gateway messages ${gatewayMessageAction} requires a message id`);
+}
+if (values.json && (!values.gateway || !["status", "health", "messages"].includes(gatewayAction))) {
+  fail("--json is supported only for gateway status/health/messages");
+}
+if (values.kind !== undefined && (!values.gateway || gatewayAction !== "health")) {
+  fail("--kind is supported only for gateway health");
+}
 
 const isHeadless =
   values.print || values.mode === "json" || values["list-models"] || values.gateway;
@@ -212,49 +249,51 @@ async function main(): Promise<void> {
   // decision is unresolved ("ask"), and we're in TUI mode. Headless modes
   // resolve "ask" → "never" (don't load project resources, don't prompt).
   const cwd = values.cwd ?? process.cwd();
-  const trustEnv = new NodeExecutionEnv({ cwd, shellEnv: process.env });
   let trusted = true;
-  try {
-    const trustDb = await loadTrust(trustEnv);
-    const gated = await hasGatedResources(trustEnv, cwd);
-    if (gated) {
-      // Read global settings for defaultProjectTrust (project layer excluded:
-      // it's gated). `includeProject: false` is conservative but trust.json
-      // and defaultProjectTrust are global-only anyway.
-      const settingsLoad = await loadSettings(trustEnv, cwd, { includeProject: false });
-      const resolved = resolveSettings(settingsLoad.merged, settingsLoad.layers, cliOverrides);
-      const decision = resolveProjectTrust(cwd, trustDb, {
-        approve: values.approve,
-        noApprove: values["no-approve"],
-        defaultProjectTrust: resolved.defaultProjectTrust,
-        isHeadless,
-      });
+  if (!(values.gateway && gatewayAction !== "run")) {
+    const trustEnv = new NodeExecutionEnv({ cwd, shellEnv: process.env });
+    try {
+      const trustDb = await loadTrust(trustEnv);
+      const gated = await hasGatedResources(trustEnv, cwd);
+      if (gated) {
+        // Read global settings for defaultProjectTrust (project layer excluded:
+        // it's gated). `includeProject: false` is conservative but trust.json
+        // and defaultProjectTrust are global-only anyway.
+        const settingsLoad = await loadSettings(trustEnv, cwd, { includeProject: false });
+        const resolved = resolveSettings(settingsLoad.merged, settingsLoad.layers, cliOverrides);
+        const decision = resolveProjectTrust(cwd, trustDb, {
+          approve: values.approve,
+          noApprove: values["no-approve"],
+          defaultProjectTrust: resolved.defaultProjectTrust,
+          isHeadless,
+        });
 
-      if (decision === "ask" && !isHeadless) {
-        // TUI: show the trust prompt overlay before bootstrap.
-        const choice = await renderTrustPrompt(cwd);
-        if (choice === "abort") {
-          process.exit(0);
+        if (decision === "ask" && !isHeadless) {
+          // TUI: show the trust prompt overlay before bootstrap.
+          const choice = await renderTrustPrompt(cwd);
+          if (choice === "abort") {
+            process.exit(0);
+          }
+          // Persist always/never (mirrors pi: write to trust.json, no reload).
+          if (choice === "always" || choice === "never") {
+            await saveTrust(trustEnv, cwd, choice);
+          }
+          trusted = choice === "always" || choice === "once";
+        } else {
+          // Resolved decision (always/never) or headless ask→never.
+          trusted = decision === "always";
         }
-        // Persist always/never (mirrors pi: write to trust.json, no reload).
-        if (choice === "always" || choice === "never") {
-          await saveTrust(trustEnv, cwd, choice);
-        }
-        trusted = choice === "always" || choice === "once";
-      } else {
-        // Resolved decision (always/never) or headless ask→never.
-        trusted = decision === "always";
       }
+    } catch (error) {
+      // Trust resolution failure is non-fatal: default to trusted=false only
+      // would be too disruptive; instead default to trusted (current behavior)
+      // and warn.
+      process.stderr.write(
+        `warning: trust resolution failed: ${error instanceof Error ? error.message : String(error)}\n`,
+      );
+    } finally {
+      await trustEnv.cleanup();
     }
-  } catch (error) {
-    // Trust resolution failure is non-fatal: default to trusted=false only
-    // would be too disruptive; instead default to trusted (current behavior)
-    // and warn.
-    process.stderr.write(
-      `warning: trust resolution failed: ${error instanceof Error ? error.message : String(error)}\n`,
-    );
-  } finally {
-    await trustEnv.cleanup();
   }
 
   try {
@@ -265,6 +304,10 @@ async function main(): Promise<void> {
         trusted,
         configPath: values.config,
         action: gatewayAction,
+        json: values.json,
+        healthCheck: gatewayHealthCheck,
+        messageAction: gatewayMessageAction,
+        messageId: positionals[2],
       });
       return;
     }

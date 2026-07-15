@@ -1,4 +1,9 @@
-import type { ChannelAdapter, ChannelMessage, AgentProtocolAdapter } from "./types.js";
+import type {
+  ChannelAdapter,
+  ChannelMessage,
+  AgentProtocolAdapter,
+  GatewaySessionLocator,
+} from "./types.js";
 import type { QueueMode, ResolvedGatewayConfig } from "../config.js";
 import type { GatewaySessionManager } from "./session-manager.js";
 import type { CommandRegistry } from "./commands.js";
@@ -8,8 +13,10 @@ import {
   InboundDeduper,
   channelTargetForLocator,
   channelTargetForMessage,
+  sessionKeyForLocator,
   sessionRoute,
 } from "./routing.js";
+import type { GatewaySessionStore } from "./session-store.js";
 import { PairingStore } from "./pairing-store.js";
 import type { SchedulerStats } from "../jobs/scheduler.js";
 import { GatewayMessageDispatcher } from "../messages/dispatcher.js";
@@ -19,6 +26,13 @@ import { ChannelDeliveryExecutor } from "../messages/delivery.js";
 import { OutboxDeliveryWorker } from "../messages/outbox.js";
 import { FinalDeliverySink } from "../messages/sink.js";
 import { formatMessageRecords } from "../messages/format.js";
+import {
+  runtimeFailure,
+  type GatewayChannelState,
+  type GatewayRuntimeComponents,
+} from "../runtime/snapshot.js";
+import type { GatewayLogger } from "../runtime/logger.js";
+import type { GatewayMetrics } from "../runtime/metrics.js";
 
 /** Constructor options for {@link GatewayApp}. */
 export interface GatewayAppOptions {
@@ -36,6 +50,8 @@ export interface GatewayAppOptions {
   schedulerStats?: () => Promise<SchedulerStats>;
   messageStore?: GatewayMessageStore;
   deliveryExecutor?: ChannelDeliveryExecutor;
+  logger?: GatewayLogger;
+  metrics?: GatewayMetrics;
 }
 
 /**
@@ -57,9 +73,11 @@ export class GatewayApp {
   private readonly messageDispatcher: GatewayMessageDispatcher | undefined;
   private readonly deliveryWorker: OutboxDeliveryWorker | undefined;
   private readonly deliverySink: FinalDeliverySink | undefined;
+  private readonly channelStates = new Map<string, GatewayChannelState>();
 
   constructor(options: GatewayAppOptions) {
     this.options = options;
+    for (const channel of options.channels) this.channelStates.set(channel.id, "starting");
     this.pairingStore = options.pairingStore ?? new PairingStore();
     this.messageService = options.messageStore
       ? new GatewayMessageService(
@@ -73,6 +91,10 @@ export class GatewayApp {
           options.channels,
           options.messageStore,
           options.deliveryExecutor ?? new ChannelDeliveryExecutor(),
+          undefined,
+          undefined,
+          options.metrics,
+          options.logger,
         )
       : undefined;
     this.deliverySink =
@@ -104,6 +126,8 @@ export class GatewayApp {
                 "A previous request was interrupted when Novi stopped. It was not run again; use /messages retry to retry explicitly.",
               );
           },
+          options.metrics,
+          options.logger,
         )
       : undefined;
   }
@@ -115,13 +139,26 @@ export class GatewayApp {
       channel.onMessage = (msg) => this.onInbound(channel, msg);
       try {
         await channel.start();
+        this.channelStates.set(channel.id, "ready");
+        this.options.logger?.info("gateway.channel.ready", {
+          channel: channel.id,
+          channelType: channel.type,
+        });
       } catch (e) {
+        this.channelStates.set(channel.id, "failed");
         // N3: single channel failure degrades to a diagnostic + skip.
-        process.stderr.write(
-          `warning: channel "${channel.id}" (${channel.type}) failed to start: ${
-            e instanceof Error ? e.message : String(e)
-          }\n`,
-        );
+        if (this.options.logger) {
+          this.options.logger.error("gateway.channel.start_failed", e, {
+            channel: channel.id,
+            channelType: channel.type,
+          });
+        } else {
+          process.stderr.write(
+            `warning: channel "${channel.id}" (${channel.type}) failed to start: ${
+              e instanceof Error ? e.message : String(e)
+            }\n`,
+          );
+        }
       }
     }
     await this.deliveryWorker?.start();
@@ -137,6 +174,7 @@ export class GatewayApp {
     await dispatcherStop;
     await this.deliveryWorker?.stop();
     await Promise.allSettled(channels.map((c) => c.stop()));
+    for (const channel of channels) this.channelStates.set(channel.id, "stopped");
     await agent.stop();
   }
 
@@ -154,14 +192,27 @@ export class GatewayApp {
       const route = sessionRoute(channel, msg);
       if (this.messageService) {
         const accepted = await this.messageService.accept(channel, msg, route);
+        this.options.metrics?.increment(accepted.created ? "ingressAccepted" : "ingressDeduped");
+        this.options.logger?.info(
+          accepted.created ? "gateway.ingress.accepted" : "gateway.ingress.deduped",
+          {
+            channel: channel.id,
+            messageId: accepted.record.id,
+            textBytes: Buffer.byteLength(msg.text, "utf8"),
+          },
+        );
         if (accepted.record.status === "received") this.messageDispatcher?.kick(route.key);
         return;
       }
       await this.processAccepted(channel, msg, route);
     } catch (e) {
-      process.stderr.write(
-        `warning: inbound message handling failed for channel "${channel.id}": ${e instanceof Error ? e.message : String(e)}\n`,
-      );
+      if (this.options.logger) {
+        this.options.logger.error("gateway.ingress.failed", e, { channel: channel.id });
+      } else {
+        process.stderr.write(
+          `warning: inbound message handling failed for channel "${channel.id}": ${e instanceof Error ? e.message : String(e)}\n`,
+        );
+      }
       throw e;
     }
   }
@@ -335,6 +386,97 @@ export class GatewayApp {
     };
   }
 
+  /** Live, body-free component state for the runtime monitor. */
+  runtimeComponents(): GatewayRuntimeComponents {
+    const worker = (failure: Error | undefined, stopped = false) =>
+      failure
+        ? { state: "failed" as const, failure: runtimeFailure(failure) }
+        : { state: stopped ? ("stopped" as const) : ("ready" as const) };
+    const inbox = this.options.messageStore?.listInbox() ?? [];
+    const outbox = this.options.messageStore?.listOutbox() ?? [];
+    const pendingTimestamps = [
+      ...inbox
+        .filter((record) => record.status === "received" || record.status === "processing")
+        .map((record) => Date.parse(record.createdAt)),
+      ...outbox
+        .filter((record) => record.status === "pending" || record.status === "sending")
+        .map((record) => Date.parse(record.createdAt)),
+    ].filter(Number.isFinite);
+    const oldestPendingAt =
+      pendingTimestamps.length > 0 ? Math.min(...pendingTimestamps) : undefined;
+    return {
+      channels: this.options.channels.map((channel) => {
+        const failure = channel.getFailure?.();
+        return {
+          id: channel.id,
+          type: channel.type,
+          state: failure ? ("failed" as const) : (this.channelStates.get(channel.id) ?? "starting"),
+          ...(failure === undefined ? {} : { failure: runtimeFailure(failure, "CHANNEL_FAILURE") }),
+        };
+      }),
+      sessions: this.options.sessionManager.getStats(),
+      ...(this.options.messageStore === undefined
+        ? {}
+        : {
+            messages: {
+              ...this.options.messageStore.snapshot(),
+              oldestPendingAgeMs:
+                oldestPendingAt === undefined ? 0 : Math.max(0, Date.now() - oldestPendingAt),
+              retryCount:
+                inbox.reduce((total, record) => total + record.attempt, 0) +
+                outbox.reduce((total, record) => total + Math.max(0, record.attempt - 1), 0),
+              exhaustedCount: outbox.filter(
+                (record) => record.status === "delivery_failed" && record.suppressAlerts !== true,
+              ).length,
+            },
+          }),
+      workers: {
+        inbox: worker(this.messageDispatcher?.getFailure(), this.messageDispatcher === undefined),
+        outbox: worker(this.deliveryWorker?.getFailure(), this.deliveryWorker === undefined),
+      },
+    };
+  }
+
+  messageOperator(): GatewayMessageService | undefined {
+    return this.messageService;
+  }
+
+  async enqueueOperationAlert(
+    target: GatewaySessionLocator,
+    sourceId: string,
+    text: string,
+  ): Promise<void> {
+    const channel = this.options.channels.find(
+      (candidate) => candidate.type === target.channel && candidate.id === target.account,
+    );
+    if (!channel || !this.deliverySink) throw new Error("operations alert channel is unavailable");
+    await this.deliverySink.enqueueSystem(channel, target, sourceId, text, "alert", true);
+  }
+
+  async validateOperationTarget(
+    target: GatewaySessionLocator,
+    sessionStore: GatewaySessionStore,
+  ): Promise<boolean> {
+    const channelExists = this.options.channels.some(
+      (channel) => channel.type === target.channel && channel.id === target.account,
+    );
+    if (!channelExists) return false;
+    const route = { key: sessionKeyForLocator(target), locator: target };
+    if (!sessionStore.getBinding(route)) return false;
+    if (target.chat.type === "direct") {
+      const policy = this.options.config.security.dmPolicy;
+      if (policy === "disabled") return false;
+      if (policy === "open" || this.options.config.security.allowlist.has(target.chat.id))
+        return true;
+      return policy === "pairing" && this.pairingStore.isAuthorized(target.account, target.chat.id);
+    }
+    const policy = this.options.config.security.groupPolicy;
+    return (
+      policy === "open" ||
+      (policy === "allowlist" && this.options.config.telegram.groups.allowlist.has(target.chat.id))
+    );
+  }
+
   /**
    * Atomically replace only live-safe policy fields. Channel lifecycle and
    * stream settings require a restart because Telegram polling cannot run two
@@ -351,7 +493,8 @@ export class GatewayApp {
       current.session.maxConcurrent !== config.session.maxConcurrent ||
       JSON.stringify(current.delivery) !== JSON.stringify(config.delivery) ||
       JSON.stringify(current.automation) !== JSON.stringify(config.automation) ||
-      JSON.stringify(current.heartbeat) !== JSON.stringify(config.heartbeat)
+      JSON.stringify(current.heartbeat) !== JSON.stringify(config.heartbeat) ||
+      JSON.stringify(current.operations) !== JSON.stringify(config.operations)
     )
       return false;
     this.options.config = { ...current, security: config.security, telegram: config.telegram };

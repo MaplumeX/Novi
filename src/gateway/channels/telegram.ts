@@ -18,6 +18,7 @@ import type {
   ChatType,
 } from "../core/types.js";
 import { classifyChannelError } from "../messages/errors.js";
+import type { GatewayLogger } from "../runtime/logger.js";
 
 /** Constructor options for {@link TelegramChannel}. */
 export interface TelegramChannelOptions {
@@ -28,6 +29,7 @@ export interface TelegramChannelOptions {
   /** Minimum interval between edit-message calls (default 1000 ms). */
   editIntervalMs?: number;
   pollingApi?: TelegramPollingApi;
+  logger?: GatewayLogger;
 }
 
 export interface TelegramPollingApi {
@@ -73,6 +75,7 @@ export class TelegramChannel extends AbstractChannel {
   private pollTask: Promise<void> | undefined;
   private pollFailure: Error | undefined;
   private handlersRegistered = false;
+  private readonly logger: GatewayLogger | undefined;
 
   constructor(options: TelegramChannelOptions) {
     super(options.id, "telegram");
@@ -81,6 +84,7 @@ export class TelegramChannel extends AbstractChannel {
       throw error;
     });
     this.editIntervalMs = options.editIntervalMs ?? 1000;
+    this.logger = options.logger;
     this.pollingApi = options.pollingApi ?? {
       getMe: () => this.bot.telegram.getMe(),
       deleteWebhook: () => this.bot.telegram.deleteWebhook({ drop_pending_updates: false }),
@@ -122,7 +126,13 @@ export class TelegramChannel extends AbstractChannel {
     this.pollTask = this.poll(abort.signal).catch((error) => {
       if (!isAbortError(error)) {
         this.pollFailure = error instanceof Error ? error : new Error(String(error));
-        process.stderr.write(`warning: telegram polling stopped: ${telegramErrorSummary(error)}\n`);
+        if (this.logger) {
+          this.logger.error("gateway.channel.polling_stopped", error, { channel: this.id });
+        } else {
+          process.stderr.write(
+            `warning: telegram polling stopped: ${telegramErrorSummary(error)}\n`,
+          );
+        }
       }
     });
   }
@@ -219,7 +229,16 @@ export class TelegramChannel extends AbstractChannel {
     await this.callWithRetry("sendChatAction", () =>
       this.bot.telegram.sendChatAction(target.chatId, "typing", telegramThreadExtra(target)),
     ).catch((e) => {
-      process.stderr.write(`warning: telegram sendChatAction failed: ${telegramErrorSummary(e)}\n`);
+      if (this.logger) {
+        this.logger.warn("gateway.channel.typing_failed", {
+          channel: this.id,
+          error: classifyChannelError(e),
+        });
+      } else {
+        process.stderr.write(
+          `warning: telegram sendChatAction failed: ${telegramErrorSummary(e)}\n`,
+        );
+      }
     });
   }
 
@@ -232,7 +251,16 @@ export class TelegramChannel extends AbstractChannel {
     await this.callWithRetry("deleteMessage", () =>
       this.bot.telegram.deleteMessage(target.chatId, buffer.messageId),
     ).catch((e) => {
-      process.stderr.write(`warning: telegram deleteMessage failed: ${telegramErrorSummary(e)}\n`);
+      if (this.logger) {
+        this.logger.warn("gateway.channel.stream_cleanup_failed", {
+          channel: this.id,
+          error: classifyChannelError(e),
+        });
+      } else {
+        process.stderr.write(
+          `warning: telegram deleteMessage failed: ${telegramErrorSummary(e)}\n`,
+        );
+      }
     });
   }
 
@@ -362,9 +390,16 @@ export class TelegramChannel extends AbstractChannel {
       // last sent text — swallow it to avoid noise.
       if (isMessageNotModified(e)) return;
       // Best-effort: don't let an edit failure crash the turn.
-      process.stderr.write(
-        `warning: telegram editMessageText failed: ${telegramErrorSummary(e)}\n`,
-      );
+      if (this.logger) {
+        this.logger.warn("gateway.channel.stream_edit_failed", {
+          channel: this.id,
+          error: classifyChannelError(e),
+        });
+      } else {
+        process.stderr.write(
+          `warning: telegram editMessageText failed: ${telegramErrorSummary(e)}\n`,
+        );
+      }
     }
   }
 

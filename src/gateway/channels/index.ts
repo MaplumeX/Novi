@@ -1,11 +1,13 @@
 import type { ChannelConfig, TelegramChannelConfig } from "../config.js";
 import type { ChannelAdapter } from "../core/types.js";
 import { TelegramChannel } from "./telegram.js";
+import type { GatewayLogger } from "../runtime/logger.js";
 
 /** Options passed through to channel constructors. */
 export interface CreateChannelOptions {
   /** Throttle interval for edit-stream rendering (ms). */
   editIntervalMs?: number;
+  logger?: GatewayLogger;
 }
 
 /**
@@ -41,5 +43,6 @@ function createTelegramChannel(
     id: config.id,
     botToken: config.botToken,
     editIntervalMs: options.editIntervalMs,
+    logger: options.logger,
   });
 }

@@ -86,6 +86,8 @@ export interface OutboxRecord {
   receipts: OutboxReceipt[];
   deliveryAmbiguous: boolean;
   possibleDuplicate: boolean;
+  /** Prevent an operations-alert delivery failure from producing another alert. */
+  suppressAlerts?: true;
   createdAt: string;
   updatedAt: string;
   startedAt?: string;
@@ -112,6 +114,7 @@ export interface CreateOutboxRecordInput {
   target: GatewaySessionLocator;
   text: string;
   maxAttempts?: number;
+  suppressAlerts?: boolean;
 }
 
 const INBOX_TRANSITIONS: Record<InboxStatus, readonly InboxStatus[]> = {
@@ -207,6 +210,7 @@ export function createOutboxRecord(input: CreateOutboxRecordInput, now = new Dat
     receipts: [],
     deliveryAmbiguous: false,
     possibleDuplicate: false,
+    ...(input.suppressAlerts === true ? { suppressAlerts: true } : {}),
     createdAt: timestamp,
     updatedAt: timestamp,
   });
@@ -353,6 +357,10 @@ export function decodeOutboxRecord(value: unknown): OutboxRecord {
     createdAt: isoString(item.createdAt, "outbox.createdAt"),
     updatedAt: isoString(item.updatedAt, "outbox.updatedAt"),
   };
+  if (item.suppressAlerts !== undefined) {
+    if (item.suppressAlerts !== true) throw new Error("outbox.suppressAlerts must be true");
+    result.suppressAlerts = true;
+  }
   if (result.attempt > result.maxAttempts) throw new Error("outbox.attempt exceeds maxAttempts");
   assignOptionalIso(result, "nextAttemptAt", item.nextAttemptAt, "outbox.nextAttemptAt");
   assignOptionalIso(result, "startedAt", item.startedAt, "outbox.startedAt");

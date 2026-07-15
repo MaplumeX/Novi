@@ -105,6 +105,12 @@ export class GatewayMessageService {
     return created.record;
   }
 
+  async retryById(id: string): Promise<InboxRecord> {
+    const record = this.store.getInbox(id);
+    if (!record) throw new Error(`inbox message not found: ${id}`);
+    return this.retry(record.route, id);
+  }
+
   async retryDelivery(route: GatewaySessionRoute, id: string): Promise<OutboxRecord> {
     const original = this.routeOutbox(route, id);
     if (original.status !== "delivery_failed") {
@@ -146,6 +152,15 @@ export class GatewayMessageService {
     }
     this.onOutboxReady?.();
     return created.record;
+  }
+
+  async retryDeliveryById(id: string): Promise<OutboxRecord> {
+    const record = this.store.getOutbox(id);
+    if (!record) throw new Error(`outbox delivery not found: ${id}`);
+    return this.retryDelivery(
+      { key: sessionKeyForLocator(record.target), locator: record.target },
+      id,
+    );
   }
 
   async dismiss(id: string, route?: GatewaySessionRoute): Promise<InboxRecord | OutboxRecord> {

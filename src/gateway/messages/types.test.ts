@@ -146,4 +146,22 @@ describe("durable message types", () => {
     expect(() => assertInboxTransition("processing", "completed")).not.toThrow();
     expect(() => assertOutboxTransition("sending", "delivered")).not.toThrow();
   });
+
+  it("marks alert deliveries as loop-suppressed while accepting legacy records", () => {
+    const alert = createOutboxRecord(
+      {
+        source: { kind: "system", id: "alert-1", attempt: 0, purpose: "alert", ordinal: 0 },
+        target: route().locator,
+        text: "alert",
+        suppressAlerts: true,
+      },
+      NOW,
+    );
+    expect(alert.suppressAlerts).toBe(true);
+    expect(decodeOutboxRecord(alert).suppressAlerts).toBe(true);
+    const legacy = { ...alert };
+    delete legacy.suppressAlerts;
+    expect(decodeOutboxRecord(legacy).suppressAlerts).toBeUndefined();
+    expect(() => decodeOutboxRecord({ ...alert, suppressAlerts: false })).toThrow(/suppressAlerts/);
+  });
 });

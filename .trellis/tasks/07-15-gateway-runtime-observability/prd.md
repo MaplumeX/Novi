@@ -24,13 +24,13 @@
 
 ## Acceptance Criteria
 
-- [ ] RO-AC1：第二个 Gateway 无法夺取 live socket；stale socket 可恢复；普通文件/符号链接不会被误删。
-- [ ] RO-AC2：status 在 stopped、starting、ready、degraded、unhealthy/stopping fixture 下输出稳定 human/JSON 结果和 exit code。
-- [ ] RO-AC3：control parser 对 partial frames、multiple frames、oversize、malformed/unknown request fail closed，且不会使 daemon 崩溃。
-- [ ] RO-AC4：channel start failure、outbox backlog、retry exhausted、store capacity 和 scheduler state 能反映到 snapshot/metrics。
-- [ ] RO-AC5：结构化日志为合法单行 JSON；secret fixtures、message body 和 raw Telegram error 不出现在输出。
-- [ ] RO-AC6：alert 按 key/cooldown 去重、通过 outbox 投递；alert delivery failure 不增加第二条 alert。
-- [ ] RO-AC7：TUI/headless 输出测试无变化，Gateway 现有 warning 迁移后仍可诊断。
+- [x] RO-AC1：第二个 Gateway 无法夺取 live socket；stale socket 可恢复；普通文件/符号链接不会被误删。
+- [x] RO-AC2：status 在 stopped、starting、ready、degraded、unhealthy/stopping fixture 下输出稳定 human/JSON 结果和 exit code。
+- [x] RO-AC3：control parser 对 partial frames、multiple frames、oversize、malformed/unknown request fail closed，且不会使 daemon 崩溃。
+- [x] RO-AC4：channel start failure、outbox backlog、retry exhausted、store capacity 和 scheduler state 能反映到 snapshot/metrics。
+- [x] RO-AC5：结构化日志为合法单行 JSON；secret fixtures、message body 和 raw Telegram error 不出现在输出。
+- [x] RO-AC6：alert 按 key/cooldown 去重、通过 outbox 投递；alert delivery failure 不增加第二条 alert。
+- [x] RO-AC7：TUI/headless 输出测试无变化，Gateway 现有 warning 迁移后仍可诊断。
 
 ## Out of Scope
 

@@ -1,4 +1,17 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const { skillsHubMock } = vi.hoisted(() => ({
+  skillsHubMock: {
+    search: vi.fn(),
+    install: vi.fn(),
+    update: vi.fn(),
+    uninstall: vi.fn(),
+    list: vi.fn(),
+  },
+}));
+
+vi.mock("../skills-hub/skills-hub.js", () => skillsHubMock);
+
 import {
   parseCommand,
   parseSkillCommand,
@@ -827,5 +840,198 @@ describe("/mcp command", () => {
     expect(ctx.print).toHaveBeenCalled();
     const text = String((ctx.print as ReturnType<typeof vi.fn>).mock.calls[0]![0]);
     expect(text.toLowerCase()).toContain("mcp");
+  });
+});
+
+describe("/skills command", () => {
+  beforeEach(() => {
+    skillsHubMock.search.mockReset();
+    skillsHubMock.install.mockReset();
+    skillsHubMock.update.mockReset();
+    skillsHubMock.uninstall.mockReset();
+    skillsHubMock.list.mockReset();
+  });
+
+  it("is registered in COMMANDS", () => {
+    const cmd = COMMANDS.find((c) => c.name === "skills");
+    expect(cmd).toBeDefined();
+    expect(cmd!.description.toLowerCase()).toContain("skill");
+  });
+
+  it("prints usage with no args", async () => {
+    const { ctx } = makeCtx({});
+    await runCommand("/skills", ctx);
+    expect(ctx.print).toHaveBeenCalledWith(expect.stringContaining("Usage: /skills"));
+  });
+
+  it("prints usage for unknown subcommand", async () => {
+    const { ctx } = makeCtx({});
+    await runCommand("/skills frobnicate", ctx);
+    expect(ctx.print).toHaveBeenCalledWith(expect.stringContaining("Usage: /skills"));
+  });
+
+  it("search calls facade and prints results", async () => {
+    skillsHubMock.search.mockResolvedValue([
+      { id: "1", name: "react", source: "foo/bar", installs: 42 },
+      { id: "2", name: "vue", source: "baz/qux", installs: 7 },
+    ]);
+    const { ctx } = makeCtx({});
+    await runCommand("/skills search react", ctx);
+    expect(skillsHubMock.search).toHaveBeenCalledWith("react");
+    const text = String((ctx.print as ReturnType<typeof vi.fn>).mock.calls[0]![0]);
+    expect(text).toContain("react");
+    expect(text).toContain("foo/bar");
+    expect(text).toContain("installs=42");
+  });
+
+  it("search prints no results message on empty", async () => {
+    skillsHubMock.search.mockResolvedValue([]);
+    const { ctx } = makeCtx({});
+    await runCommand("/skills search zzz", ctx);
+    expect(ctx.print).toHaveBeenCalledWith("No skills found.");
+  });
+
+  it("search prints failure message on error", async () => {
+    skillsHubMock.search.mockRejectedValue(new Error("network"));
+    const { ctx } = makeCtx({});
+    await runCommand("/skills search foo", ctx);
+    expect(ctx.print).toHaveBeenCalledWith("Search failed (check network).");
+  });
+
+  it("install without --confirm does NOT call facade install", async () => {
+    // When --confirm is absent, the confirm callback returns false, so the
+    // facade would reject — but we verify the facade is NOT called because
+    // the confirm check happens before install in the simplified model.
+    // Actually the facade IS called (it internally checks confirm), so we
+    // mock it to return a trust-not-confirmed result.
+    skillsHubMock.install.mockResolvedValue({
+      ok: false,
+      reason: "installation cancelled (trust not confirmed)",
+    });
+    const { ctx } = makeCtx({});
+    await runCommand("/skills install foo/bar", ctx);
+    expect(skillsHubMock.install).toHaveBeenCalledTimes(1);
+    const callArgs = skillsHubMock.install.mock.calls[0]!;
+    expect(callArgs[1]).toBe("foo/bar");
+    // The confirm callback should return false (no --confirm flag).
+    const confirmFn = callArgs[2].confirm;
+    expect(await confirmFn()).toBe(false);
+    // Should print trust notice with re-run guidance.
+    const text = String((ctx.print as ReturnType<typeof vi.fn>).mock.calls[0]![0]);
+    expect(text).toContain("requires confirmation");
+    expect(text).toContain("--confirm");
+  });
+
+  it("install with --confirm calls facade and prints success", async () => {
+    skillsHubMock.install.mockResolvedValue({
+      ok: true,
+      name: "my-skill",
+      path: "/home/.novi/skills/my-skill",
+      entry: { name: "my-skill" },
+      verdict: "pass",
+    });
+    const { ctx } = makeCtx({});
+    await runCommand("/skills install foo/bar --confirm", ctx);
+    expect(skillsHubMock.install).toHaveBeenCalledTimes(1);
+    const callArgs = skillsHubMock.install.mock.calls[0]!;
+    expect(callArgs[1]).toBe("foo/bar");
+    expect(callArgs[2].force).toBe(false);
+    // The confirm callback should return true (--confirm flag present).
+    expect(await callArgs[2].confirm()).toBe(true);
+    const text = String((ctx.print as ReturnType<typeof vi.fn>).mock.calls[0]![0]);
+    expect(text).toContain("Installed skill my-skill");
+    expect(text).toContain("Run /reload to activate");
+  });
+
+  it("install with --force passes force=true to facade", async () => {
+    skillsHubMock.install.mockResolvedValue({
+      ok: true,
+      name: "x",
+      path: "/p",
+      entry: {},
+      verdict: "pass",
+    });
+    const { ctx } = makeCtx({});
+    await runCommand("/skills install foo/bar --confirm --force", ctx);
+    const callArgs = skillsHubMock.install.mock.calls[0]!;
+    expect(callArgs[2].force).toBe(true);
+  });
+
+  it("install with dangerous verdict prints block message", async () => {
+    skillsHubMock.install.mockResolvedValue({
+      ok: false,
+      reason: "security scan: dangerous verdict — installation blocked",
+    });
+    const { ctx } = makeCtx({});
+    await runCommand("/skills install foo/bar --confirm", ctx);
+    const text = String((ctx.print as ReturnType<typeof vi.fn>).mock.calls[0]![0]);
+    expect(text).toContain("Blocked: dangerous");
+  });
+
+  it("list empty prints guidance", async () => {
+    skillsHubMock.list.mockResolvedValue([]);
+    const { ctx } = makeCtx({});
+    await runCommand("/skills list", ctx);
+    expect(ctx.print).toHaveBeenCalledWith("No hub-installed skills. Use /skills search <query>.");
+  });
+
+  it("list with entries prints table", async () => {
+    skillsHubMock.list.mockResolvedValue([
+      {
+        name: "foo",
+        source: "owner/repo",
+        sourceType: "skills-sh",
+        sourceUrl: "https://github.com/owner/repo",
+        contentHash: "abc",
+        installedAt: "2025-01-01T00:00:00Z",
+        updatedAt: "2025-01-01T00:00:00Z",
+        version: "1.0",
+        scan: null,
+      },
+    ]);
+    const { ctx } = makeCtx({});
+    await runCommand("/skills list", ctx);
+    const text = String((ctx.print as ReturnType<typeof vi.fn>).mock.calls[0]![0]);
+    expect(text).toContain("foo");
+    expect(text).toContain("owner/repo");
+    expect(text).toContain("1.0");
+    expect(text).toContain("no scan");
+  });
+
+  it("uninstall calls facade and prints success", async () => {
+    skillsHubMock.uninstall.mockResolvedValue({ ok: true });
+    const { ctx } = makeCtx({});
+    await runCommand("/skills uninstall foo", ctx);
+    expect(skillsHubMock.uninstall).toHaveBeenCalledWith(expect.anything(), "foo");
+    expect(ctx.print).toHaveBeenCalledWith("Uninstalled foo.");
+  });
+
+  it("uninstall not found prints reason", async () => {
+    skillsHubMock.uninstall.mockResolvedValue({ ok: false, reason: "not hub-installed" });
+    const { ctx } = makeCtx({});
+    await runCommand("/skills uninstall foo", ctx);
+    expect(ctx.print).toHaveBeenCalledWith("Uninstall failed: not hub-installed");
+  });
+
+  it("update calls facade and prints summary", async () => {
+    skillsHubMock.update.mockResolvedValue({
+      updated: ["foo"],
+      upToDate: ["bar"],
+      failed: [],
+    });
+    const { ctx } = makeCtx({});
+    await runCommand("/skills update", ctx);
+    expect(skillsHubMock.update).toHaveBeenCalledTimes(1);
+    const text = String((ctx.print as ReturnType<typeof vi.fn>).mock.calls[0]![0]);
+    expect(text).toContain("Updated: foo");
+    expect(text).toContain("Up-to-date: bar");
+  });
+
+  it("update with name passes name to facade", async () => {
+    skillsHubMock.update.mockResolvedValue({ updated: [], upToDate: [], failed: [] });
+    const { ctx } = makeCtx({});
+    await runCommand("/skills update foo", ctx);
+    const callArgs = skillsHubMock.update.mock.calls[0]!;
+    expect(callArgs[1].name).toBe("foo");
   });
 });

@@ -188,6 +188,27 @@ Prompt templates are not deduplicated. Loaders skip invalid files and collect
 `hasGatedResources` treats project `.agents/skills` (git-root→cwd) as gated,
 alongside `<cwd>/.novi/{settings,models,skills,prompts}`.
 
+### Skill Hub Provenance (`skills-hub`)
+
+`src/skills-hub/` owns third-party skill lifecycle (search/install/update/uninstall).
+It does **not** modify `resources.ts` / `loadSourcedSkills`; installs land in the
+existing user-layer `~/.novi/skills/<name>/` so the loader discovers them
+automatically.
+
+- **Provenance file**: `~/.novi/skills/.hub/lock.json` (versioned, atomic
+  tmp+rename write; missing/corrupt/version-mismatch → empty rebuild). The
+  `.hub/` directory is skipped by `loadSourcedSkills` (loader only accepts dirs
+  containing `SKILL.md`).
+- **Entry** (`SkillLockEntry`): source/sourceType/sourceUrl/ref/skillPath,
+  version, contentHash (sha256), installedAt/updatedAt, scan record,
+  platforms/requires.
+- **Network**: all HTTP via `tools/web/network.ts` `guardedRequest` (SSRF-safe,
+  proxy-aware). skills.sh search + audit are best-effort null-on-failure.
+- **Security gate**: skills.sh scan verdict — `critical`/`high` → dangerous
+  (hard block, not forceable), `medium` → warn (`--force` or `--confirm`),
+  `low`/`safe` → pass. Non-skills.sh sources have no scan coverage and require a
+  trust-prompt confirm.
+
 ---
 
 ## Settings Files

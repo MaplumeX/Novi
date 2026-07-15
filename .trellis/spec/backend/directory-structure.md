@@ -26,6 +26,15 @@ src/
 ├── default-system-prompt.ts# Fallback system prompt constant
 ├── resources.ts            # Loads skills + prompt templates (agents/novi layers + git-root chain)
 ├── compaction.ts           # AutoCompactor: turn debounce + threshold check
+├── skills-hub/             # Third-party skill lifecycle (search/install/update/uninstall + provenance + security)
+│   ├── types.ts            # ParsedSource / SkillLockEntry / ScanRecord types
+│   ├── source-parser.ts    # ref → ParsedSource (skills-sh / git / well-known / url / local)
+│   ├── registry-client.ts  # skills.sh search + audit API client (guardedRequest)
+│   ├── installer.ts        # fetch skill files → install to ~/.novi/skills/<name>/ + path safety
+│   ├── provenance.ts       # ~/.novi/skills/.hub/lock.json atomic read/write (CRUD)
+│   ├── scanner.ts          # map audit verdict → dangerous/warn/pass gate
+│   ├── compat.ts           # platforms / requires compatibility check
+│   └── skills-hub.ts       # facade: search/install/update/uninstall/list (no TUI)
 ├── *.test.ts               # Co-located tests alongside their source
 ├── tools/                  # Built-in tool set, one file per tool
 │   ├── contracts.ts        # Descriptor/catalog/capability/availability contracts
@@ -151,6 +160,13 @@ src/
   the final text arrives after deltas, `session-lane.ts` buffers a possible
   marker prefix before forwarding deltas, then releases it in order as soon
   as it cannot be a silence marker. Do not bypass that helper in a channel.
+- **Skills-hub sub-system.** `skills-hub/` is a self-contained backend module
+  for third-party skill lifecycle (search/install/update/uninstall). It depends
+  only on `tools/web/network.ts` (guardedRequest) + `config.ts` + `ExecutionEnv`;
+  it MUST NOT import from `tui/`. The TUI calls its facade (`skills-hub.ts`)
+  from `commands.ts` only. It does not modify the existing skill loader
+  (`resources.ts` / `loadSourcedSkills`) — installs land in the existing
+  `~/.novi/skills/` user layer so the loader discovers them automatically.
 
 ### Reusable tool patterns
 

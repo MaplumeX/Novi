@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Module organization conventions for new src/skills-hub/ layer; file layout rules to follow."}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Resource loading + skill sources + trust gating rules — install target aligns with existing ~/.novi/skills user layer."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Error type and degradation strategies for network/scan failures and lock.json corruption."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Code standards and forbidden patterns for the new skills-hub module + tests."}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "Diagnostic output conventions for scan/network errors (stderr warnings, non-blocking)."}
+{"file": ".trellis/spec/backend/web-tools.md", "reason": "Network fetch contracts (DNS-pinned, SSRF protection) to reuse for skills.sh API + SKILL.md downloads."}
+{"file": ".trellis/tasks/07-15-skill-lifecycle-management/design.md", "reason": "Architecture: source parser, provenance lock.json, scanner, installer, and command routing for /skills."}
+{"file": ".trellis/tasks/07-15-skill-lifecycle-management/implement.md", "reason": "Ordered implementation checklist (Phase A-F) and validation commands."}

@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify new skills-hub module meets code standards and test coverage rules."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Check error degradation for scan/network/lock failures matches conventions."}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Verify install target + lock.json align with resource loading + trust gating rules."}
+{"file": ".trellis/tasks/07-15-skill-lifecycle-management/prd.md", "reason": "Acceptance criteria AC1-AC11 to verify against implementation."}
+{"file": ".trellis/tasks/07-15-skill-lifecycle-management/design.md", "reason": "Data contracts and security boundaries to verify implementation conformance."}

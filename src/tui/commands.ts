@@ -39,6 +39,9 @@ import {
   type PendingImage,
 } from "../images/encode.js";
 import { createClipboardImageReader, type ClipboardImageReader } from "../images/clipboard.js";
+import * as skillsHub from "../skills-hub/skills-hub.js";
+import type { UpdateResult } from "../skills-hub/skills-hub.js";
+import type { Risk, SkillLockEntry } from "../skills-hub/types.js";
 
 export interface ParsedCommand {
   name: string;
@@ -701,10 +704,17 @@ export const COMMANDS: readonly Command[] = [
       await pasteImageFromClipboard(ctx);
     },
   },
+  {
+    name: "skills",
+    description: "Manage skills (search/install/update/uninstall/list)",
+    run: async (ctx, args) => {
+      await runSkillsCommand(ctx, args);
+    },
+  },
 ];
 
 const COMMAND_HINT =
-  "Try /quit /model /tools /mcp /session /new /resume /name /compact /settings /trust /scoped-models /reload /image /paste-image /skill:<name>.";
+  "Try /quit /model /tools /mcp /session /new /resume /name /compact /settings /trust /scoped-models /reload /image /paste-image /skills /skill:<name>.";
 
 /** `/mcp` subcommands: list / approve / deny / reconnect. */
 async function runMcpCommand(ctx: CommandContext, args: string): Promise<void> {
@@ -786,6 +796,169 @@ async function runMcpCommand(ctx: CommandContext, args: string): Promise<void> {
   }
 
   ctx.print("Usage: /mcp [list|approve <name>|deny <name>|reconnect [name]]");
+}
+
+const SKILLS_USAGE =
+  "Usage: /skills [search <query> | install <ref> [--force] [--confirm] | update [name] | uninstall <name> | list]";
+
+/** Format a scan verdict for human-readable display in `/skills list`. */
+function formatScanVerdict(entry: SkillLockEntry): string {
+  if (!entry.scan) return "no scan";
+  const risks: Risk[] = [];
+  const v = entry.scan.verdicts;
+  if (v.ath) risks.push(v.ath.risk);
+  if (v.socket) risks.push(v.socket.risk);
+  if (v.snyk) risks.push(v.snyk.risk);
+  if (risks.length === 0) return "scanned";
+  return risks.join(",");
+}
+
+/**
+ * `/skills` subcommand dispatcher: search / install / update / uninstall / list.
+ *
+ * Delegates all side effects (network, filesystem, lock) to the skills-hub
+ * facade. This function only parses arguments and formats results for the
+ * TUI notice area.
+ */
+async function runSkillsCommand(ctx: CommandContext, args: string): Promise<void> {
+  const trimmed = args.trim();
+  if (!trimmed) {
+    ctx.print(SKILLS_USAGE);
+    return;
+  }
+  const spaceIdx = trimmed.search(/\s/);
+  const sub = (spaceIdx === -1 ? trimmed : trimmed.slice(0, spaceIdx)).toLowerCase();
+  const rest = spaceIdx === -1 ? "" : trimmed.slice(spaceIdx + 1).trim();
+
+  if (sub === "search") {
+    if (!rest) {
+      ctx.print("Usage: /skills search <query>");
+      return;
+    }
+    try {
+      const results = await skillsHub.search(rest);
+      if (results.length === 0) {
+        ctx.print("No skills found.");
+        return;
+      }
+      const lines = [
+        "Skills:",
+        ...results.map((r) => `  ${r.name}  ${r.source}  installs=${r.installs}`),
+      ];
+      ctx.print(lines.join("\n"));
+    } catch {
+      ctx.print("Search failed (check network).");
+    }
+    return;
+  }
+
+  if (sub === "install") {
+    if (!rest) {
+      ctx.print("Usage: /skills install <ref> [--force] [--confirm]");
+      return;
+    }
+    const tokens = rest.split(/\s+/);
+    const force = tokens.includes("--force");
+    const confirmed = tokens.includes("--confirm");
+    const ref = tokens.filter((t) => !t.startsWith("--")).join(" ");
+    if (!ref) {
+      ctx.print("Usage: /skills install <ref> [--force] [--confirm]");
+      return;
+    }
+
+    const installResult = await skillsHub.install(ctx.env, ref, {
+      force,
+      confirm: async () => confirmed,
+    });
+
+    if (installResult.ok) {
+      const verdictLabel =
+        installResult.verdict === "unknown" ? "no scan" : `scan=${installResult.verdict}`;
+      ctx.print(
+        `Installed skill ${installResult.name} to ${installResult.path} (${verdictLabel}). Run /reload to activate.`,
+      );
+      return;
+    }
+
+    // Not ok — distinguish dangerous block from trust-confirmation-needed.
+    if (installResult.reason.includes("dangerous")) {
+      ctx.print(`Blocked: dangerous scan verdict for "${ref}". Installation aborted.`);
+      return;
+    }
+    // Trust prompt or warn — show the notice and ask user to re-run with --confirm.
+    const scanNote = installResult.reason.includes("trust")
+      ? "No security scan coverage for this source."
+      : `Security warning: ${installResult.reason}`;
+    ctx.print(
+      [
+        `Third-party skill "${ref}" requires confirmation.`,
+        scanNote,
+        `To proceed, re-run: /skills install ${ref}${force ? " --force" : ""} --confirm`,
+      ].join("\n"),
+    );
+    return;
+  }
+
+  if (sub === "update") {
+    const name = rest || undefined;
+    try {
+      const result: UpdateResult = await skillsHub.update(ctx.env, {
+        name,
+        confirm: async () => true,
+      });
+      const lines: string[] = [];
+      if (result.updated.length > 0) lines.push(`Updated: ${result.updated.join(", ")}`);
+      if (result.upToDate.length > 0) lines.push(`Up-to-date: ${result.upToDate.join(", ")}`);
+      if (result.failed.length > 0)
+        lines.push(`Failed: ${result.failed.map((f) => `${f.name} (${f.error})`).join(", ")}`);
+      if (lines.length === 0) lines.push("No hub-installed skills to update.");
+      ctx.print(lines.join("\n"));
+    } catch (e) {
+      ctx.print(`Update failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    return;
+  }
+
+  if (sub === "uninstall") {
+    if (!rest) {
+      ctx.print("Usage: /skills uninstall <name>");
+      return;
+    }
+    try {
+      const result = await skillsHub.uninstall(ctx.env, rest);
+      if (result.ok) {
+        ctx.print(`Uninstalled ${rest}.`);
+      } else {
+        ctx.print(`Uninstall failed: ${result.reason ?? "unknown error"}`);
+      }
+    } catch (e) {
+      ctx.print(`Uninstall failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    return;
+  }
+
+  if (sub === "list") {
+    try {
+      const entries = await skillsHub.list(ctx.env);
+      if (entries.length === 0) {
+        ctx.print("No hub-installed skills. Use /skills search <query>.");
+        return;
+      }
+      const lines = [
+        "Skills:",
+        ...entries.map(
+          (e) =>
+            `  ${e.name}  ${e.source}  v=${e.version ?? "-"}  installed=${e.installedAt}  ${formatScanVerdict(e)}`,
+        ),
+      ];
+      ctx.print(lines.join("\n"));
+    } catch (e) {
+      ctx.print(`List failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    return;
+  }
+
+  ctx.print(SKILLS_USAGE);
 }
 
 /**

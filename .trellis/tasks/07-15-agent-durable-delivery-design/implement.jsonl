@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/backend/durable-message-delivery.md", "reason": "Inbox/outbox states, accept-before-ack, at-least-once final delivery, recovery contracts for design narrative"}
+{"file": ".trellis/spec/backend/systemd-user-service.md", "reason": "systemd user unit shape, install/lifecycle, linger, preflight contracts"}
+{"file": ".trellis/spec/backend/gateway-runtime-observability.md", "reason": "Boundary-only reference so runtime is mentioned as ops surface without becoming a full chapter"}

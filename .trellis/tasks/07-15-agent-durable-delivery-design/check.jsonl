@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/durable-message-delivery.md", "reason": "Verify doc claims about recovery, outbox ambiguity, and delivery limits match contracts"}
+{"file": ".trellis/spec/backend/systemd-user-service.md", "reason": "Verify service lifecycle / unit / linger statements against executable contracts"}

@@ -12,6 +12,8 @@ Novi has **no database**. All persistence is file-based via the
 - **Sessions** → JSONL files on disk, managed by `JsonlSessionRepo`.
 - **Gateway session bindings** → strict versioned JSON at
   `~/.novi/gateway-sessions.json` (`NOVI_HOME` respected).
+- **Gateway inbox/outbox** → strict versioned per-record JSON under
+  `~/.novi/gateway-messages/`; see `durable-message-delivery.md`.
 - **TODOs** → file-based persistence at `~/.novi/todos/<sessionId>.json` with an in-memory cache (`tools/todo.ts`).
 - **Skills / prompt templates** → YAML / markdown files loaded from disk at
   startup (`resources.ts`).
@@ -120,14 +122,14 @@ the public `JsonlSessionRepo` API.
 
 ### 4. Validation & Error Matrix
 
-| Condition | Required behavior |
-|---|---|
-| Mapping file missing | Start with an empty in-memory V1 store |
-| Invalid JSON / fields / route-key mismatch | Fail Gateway startup; preserve file |
-| Unsupported `version` | Fail Gateway startup; preserve file |
-| Bound JSONL missing or metadata id/cwd/path mismatch | Fail the message visibly; preserve binding; require explicit `/new` |
-| First bind write fails | Do not publish cache/binding; best-effort close and delete the unbound JSONL |
-| `/new` rotate write fails | Keep old durable binding; do not publish new cache; best-effort delete unbound JSONL |
+| Condition                                            | Required behavior                                                                    |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Mapping file missing                                 | Start with an empty in-memory V1 store                                               |
+| Invalid JSON / fields / route-key mismatch           | Fail Gateway startup; preserve file                                                  |
+| Unsupported `version`                                | Fail Gateway startup; preserve file                                                  |
+| Bound JSONL missing or metadata id/cwd/path mismatch | Fail the message visibly; preserve binding; require explicit `/new`                  |
+| First bind write fails                               | Do not publish cache/binding; best-effort close and delete the unbound JSONL         |
+| `/new` rotate write fails                            | Keep old durable binding; do not publish new cache; best-effort delete unbound JSONL |
 
 ### 5. Good/Base/Bad Cases
 
@@ -155,8 +157,10 @@ sessions.set(route.key, session);
 
 // Correct: the durable binding chooses resume vs create; publish after commit.
 const binding = store.getBinding(route);
-const created = await createHarnessForSession(env,
-  binding ? { kind: "resume", metadata: binding.session } : { kind: "new" });
+const created = await createHarnessForSession(
+  env,
+  binding ? { kind: "resume", metadata: binding.session } : { kind: "new" },
+);
 if (!binding) await store.bind(route, created.metadata);
 sessions.set(route.key, created);
 ```

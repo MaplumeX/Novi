@@ -1,10 +1,13 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { TelegramError } from "telegraf";
+import type { Update as TgUpdate } from "@telegraf/types";
 import {
   chunkText,
   isMessageNotModified,
   isTransientTelegramError,
   telegramErrorSummary,
+  TelegramChannel,
+  type TelegramPollingApi,
 } from "./telegram.js";
 
 describe("chunkText", () => {
@@ -60,6 +63,64 @@ describe("chunkText", () => {
     expect(chunks.join("")).toBe(text);
   });
 });
+
+describe("Telegram owned polling", () => {
+  it("does not advance past a failed durable callback or process higher updates", async () => {
+    const offsets: number[] = [];
+    const updates = [telegramUpdate(10), telegramUpdate(11), telegramUpdate(12)];
+    const api: TelegramPollingApi = {
+      getMe: async () => ({
+        id: 99,
+        is_bot: true,
+        first_name: "Novi",
+        username: "novi_bot",
+        can_join_groups: true,
+        can_read_all_group_messages: false,
+        supports_inline_queries: false,
+      }),
+      deleteWebhook: vi.fn().mockResolvedValue(true),
+      getUpdates: async (offset, signal) => {
+        offsets.push(offset);
+        if (offset < 13) return updates.filter((update) => update.update_id >= offset);
+        return new Promise<TgUpdate[]>((resolve) => {
+          signal.addEventListener("abort", () => resolve([]), { once: true });
+        });
+      },
+    };
+    const channel = new TelegramChannel({ id: "primary", botToken: "test", pollingApi: api });
+    const seen: number[] = [];
+    let failOnce = true;
+    channel.onMessage = async (message) => {
+      const updateId = Number(message.metadata?.updateId);
+      seen.push(updateId);
+      if (updateId === 11 && failOnce) {
+        failOnce = false;
+        throw { code: 429, parameters: { retry_after: 0 } };
+      }
+    };
+
+    await channel.start();
+    await vi.waitFor(() => expect(offsets).toContain(13));
+    await channel.stop();
+
+    expect(offsets.slice(0, 3)).toEqual([0, 11, 13]);
+    expect(seen).toEqual([10, 11, 11, 12]);
+    expect(seen.indexOf(12)).toBeGreaterThan(seen.lastIndexOf(11));
+  });
+});
+
+function telegramUpdate(updateId: number): TgUpdate {
+  return {
+    update_id: updateId,
+    message: {
+      message_id: updateId,
+      date: 1_700_000_000,
+      chat: { id: 1, type: "private", first_name: "User" },
+      from: { id: 7, is_bot: false, first_name: "User" },
+      text: `message-${updateId}`,
+    },
+  };
+}
 
 describe("Telegram retry classification", () => {
   it("retries common transient network failures only", () => {

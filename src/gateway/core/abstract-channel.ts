@@ -22,7 +22,7 @@ import type {
 export abstract class AbstractChannel implements ChannelAdapter {
   abstract readonly capabilities: ChannelCapabilities;
   abstract readonly textChunkLimit: number;
-  onMessage?: (msg: ChannelMessage) => void;
+  onMessage?: (msg: ChannelMessage) => Promise<void>;
   acknowledgeMessage?: (msgId: string) => Promise<void>;
 
   constructor(

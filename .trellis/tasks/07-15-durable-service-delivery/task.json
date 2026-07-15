@@ -1,0 +1,31 @@
+{
+  "id": "durable-service-delivery",
+  "name": "durable-service-delivery",
+  "title": "建设常驻服务与可靠投递",
+  "description": "",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "Maplume",
+  "assignee": "Maplume",
+  "createdAt": "2026-07-15",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "07-15-durable-message-delivery",
+    "07-15-gateway-runtime-observability",
+    "07-15-gateway-state-migration",
+    "07-15-systemd-user-service"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

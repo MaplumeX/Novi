@@ -83,6 +83,10 @@ export interface ChannelDeliveryReceipt {
   messageIds: string[];
 }
 
+export interface ChannelChunkReceipt {
+  messageId: string;
+}
+
 /** Outbound streaming events bridged from the agent harness to a channel. */
 export type ChannelEvent =
   | { type: "typing" }
@@ -104,11 +108,20 @@ export interface ChannelAdapter {
   /** Max UTF-16 code units per outbound message (Telegram = 4096). */
   readonly textChunkLimit: number;
   /** Inbound callback injected by the gateway orchestrator. */
-  onMessage?: (msg: ChannelMessage) => void;
+  onMessage?: (msg: ChannelMessage) => Promise<void>;
   start(): Promise<void>;
   stop(): Promise<void>;
   /** Send the final, complete reply text (may chunk on overflow). */
   send(target: ChannelSendTarget, text: string): Promise<ChannelDeliveryReceipt>;
+  /**
+   * Send exactly one final-text chunk without hidden retry. Durable delivery
+   * uses this optional boundary to persist progress after each API call.
+   */
+  sendFinalChunk?(
+    target: ChannelSendTarget,
+    text: string,
+    ordinal: number,
+  ): Promise<ChannelChunkReceipt>;
   /** Stream an incremental event (only channels with `capabilities.edit`). */
   sendEvent?(target: ChannelSendTarget, event: ChannelEvent): Promise<void>;
   /** Best-effort typing indicator. */

@@ -5,6 +5,7 @@ import { getSessionsDir } from "../../config.js";
 import { extractText } from "../../headless/events.js";
 import { addUsage, usageToSummary, ZERO_USAGE, type UsageSummary } from "../../usage.js";
 import { isSilentReply } from "../core/routing.js";
+import { truncateUtf8 } from "../core/text.js";
 import type { ResolvedGatewayConfig } from "../config.js";
 import { localDayKey } from "./schedule.js";
 import type { ScheduledJob, ScheduledRun } from "./types.js";
@@ -168,16 +169,6 @@ async function withTimeout<T>(
   } finally {
     if (timer) clearTimeout(timer);
   }
-}
-
-export function truncateUtf8(text: string, maxBytes: number): { text: string; truncated: boolean } {
-  const bytes = Buffer.from(text, "utf8");
-  if (bytes.length <= maxBytes) return { text, truncated: false };
-  const marker = "\n[output truncated by Novi]";
-  const markerBytes = Buffer.byteLength(marker);
-  let end = Math.max(0, maxBytes - markerBytes);
-  while (end > 0 && (bytes[end] & 0xc0) === 0x80) end--;
-  return { text: bytes.subarray(0, end).toString("utf8") + marker, truncated: true };
 }
 
 function totalTokens(usage: UsageSummary): number {

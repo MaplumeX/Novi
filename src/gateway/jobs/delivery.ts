@@ -1,8 +1,10 @@
 import type { ChannelAdapter } from "../core/types.js";
-import { channelTargetForLocator, sessionKeyForLocator } from "../core/routing.js";
+import { sessionKeyForLocator } from "../core/routing.js";
 import type { GatewaySessionManager } from "../core/session-manager.js";
 import type { AgentProtocolAdapter } from "../core/types.js";
 import type { GatewaySessionStore } from "../core/session-store.js";
+import { ChannelDeliveryExecutor, deliveryRetryDelayMs } from "../messages/delivery.js";
+import type { MessageError } from "../messages/types.js";
 import type { ScheduledJob, ScheduledRun } from "./types.js";
 import { JobStore } from "./store.js";
 import { boundedJobError } from "./errors.js";
@@ -17,6 +19,8 @@ export class DeliveryService {
     private readonly sessionManager: GatewaySessionManager,
     private readonly agent: AgentProtocolAdapter,
     private readonly now: () => Date = () => new Date(),
+    private readonly executor = new ChannelDeliveryExecutor(),
+    private readonly random: () => number = Math.random,
   ) {
     for (const channel of channels) this.channels.set(`${channel.type}:${channel.id}`, channel);
   }
@@ -31,13 +35,11 @@ export class DeliveryService {
         : run;
     }
     if (!this.sessionStore.getBinding(targetRoute)) {
-      return this.failed(
-        job,
-        run,
-        "TARGET_UNAUTHORIZED",
-        "delivery target has no current durable binding",
-        false,
-      );
+      return this.failed(job, run, {
+        code: "TARGET_UNAUTHORIZED",
+        message: "delivery target has no current durable binding",
+        retryable: false,
+      });
     }
     run = await this.store.updateRun(job.id, run.id, (current) => ({
       ...current,
@@ -51,23 +53,43 @@ export class DeliveryService {
     }));
     const channel = this.channels.get(`${target.channel}:${target.account}`);
     if (!channel)
-      return this.failed(job, run, "CHANNEL_UNAVAILABLE", "delivery channel is unavailable", true);
+      return this.failed(job, run, {
+        code: "CHANNEL_UNAVAILABLE",
+        message: "delivery channel is unavailable",
+        retryable: true,
+      });
     const text = renderDelivery(job, run);
-    try {
-      const receipt = await channel.send(channelTargetForLocator(target), text);
+    const result = await this.executor.execute({
+      channel,
+      target,
+      text,
+      messageIds: run.delivery.messageIds,
+      onProgress: async ({ ordinal, messageId }) => {
+        run = await this.store.updateRun(job.id, run.id, (current) => {
+          const messageIds = [...(current.delivery.messageIds ?? [])];
+          if (ordinal !== messageIds.length) {
+            throw new Error(
+              `scheduled delivery receipt cursor mismatch: expected ${messageIds.length}, got ${ordinal}`,
+            );
+          }
+          messageIds.push(messageId);
+          return { ...current, delivery: { ...current.delivery, messageIds } };
+        });
+      },
+    });
+    if (result.ok) {
       run = await this.store.updateRun(job.id, run.id, (current) => ({
         ...current,
         delivery: {
           ...current.delivery,
           status: "delivered",
-          messageIds: receipt.messageIds,
+          messageIds: result.messageIds,
           nextAttemptAt: undefined,
         },
       }));
       return targetRoute.key === job.owner.key ? this.appendOrigin(job, run) : run;
-    } catch (error) {
-      return this.failed(job, run, "DELIVERY_FAILED", boundedJobError(error), true);
     }
+    return this.failed(job, run, result.error, result.messageIds);
   }
 
   private async appendOrigin(job: ScheduledJob, run: ScheduledRun): Promise<ScheduledRun> {
@@ -97,7 +119,9 @@ export class DeliveryService {
         delivery: {
           ...current.delivery,
           status: "delivered",
-          nextAttemptAt: new Date(this.now().getTime() + retryDelay(1)).toISOString(),
+          nextAttemptAt: new Date(
+            this.now().getTime() + deliveryRetryDelayMs(1, undefined, this.random),
+          ).toISOString(),
           error: {
             code: "ORIGIN_APPEND_FAILED",
             message: boundedJobError(error),
@@ -111,25 +135,27 @@ export class DeliveryService {
   private failed(
     job: ScheduledJob,
     run: ScheduledRun,
-    code: string,
-    message: string,
-    retryable: boolean,
+    error: MessageError,
+    messageIds: string[] = [],
   ): Promise<ScheduledRun> {
     return this.store.updateRun(job.id, run.id, (current) => {
-      const exhausted = !retryable || current.delivery.attempt >= current.delivery.maxAttempts;
+      const exhausted =
+        !error.retryable || current.delivery.attempt >= current.delivery.maxAttempts;
       return {
         ...current,
         delivery: {
           ...current.delivery,
           status: exhausted ? "delivery_failed" : "pending",
+          ...(messageIds.length === 0 ? {} : { messageIds }),
           ...(exhausted
             ? {}
             : {
                 nextAttemptAt: new Date(
-                  this.now().getTime() + retryDelay(current.delivery.attempt),
+                  this.now().getTime() +
+                    deliveryRetryDelayMs(current.delivery.attempt, error.retryAfterMs, this.random),
                 ).toISOString(),
               }),
-          error: { code, message, retryable },
+          error,
         },
       };
     });
@@ -146,8 +172,4 @@ function renderDelivery(job: ScheduledJob, run: ScheduledRun): string {
     return `[Novi job ${job.name} · ${short}]\n${run.execution.error?.message ?? "scheduled run failed"}`;
   }
   return `[Novi job ${job.name} · ${short}]\n${delayed}${run.execution.result ?? ""}`;
-}
-
-function retryDelay(attempt: number): number {
-  return Math.min(60_000, 1_000 * 2 ** Math.max(0, attempt - 1));
 }

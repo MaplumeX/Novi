@@ -44,6 +44,7 @@ export interface BoundedError {
   code: string;
   message: string;
   retryable: boolean;
+  retryAfterMs?: number;
 }
 
 export interface ScheduledRun {

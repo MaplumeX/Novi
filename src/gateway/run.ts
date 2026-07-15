@@ -18,6 +18,9 @@ import { DeliveryService } from "./jobs/delivery.js";
 import { GatewayScheduler } from "./jobs/scheduler.js";
 import { localDayKey } from "./jobs/schedule.js";
 import { HeartbeatService } from "./jobs/heartbeat.js";
+import { ChannelDeliveryExecutor } from "./messages/delivery.js";
+import { DeliveryRateLimiter } from "./messages/rate-limit.js";
+import { GatewayMessageStore } from "./messages/store.js";
 
 /** Options for `runGateway`, mirroring the relevant CLI flags. */
 export interface RunGatewayOptions extends BootstrapOptions {
@@ -158,6 +161,7 @@ export async function runGateway(options: RunGatewayOptions): Promise<void> {
     editIntervalMs: config.stream.editIntervalMs,
   });
   const sessionStore = await GatewaySessionStore.open();
+  const messageStore = await GatewayMessageStore.open();
   const jobStore = await JobStore.open(
     undefined,
     localDayKey(new Date(), config.automation.timezone),
@@ -180,7 +184,18 @@ export async function runGateway(options: RunGatewayOptions): Promise<void> {
   });
   const commands = createCommandRegistry({ jobService, onJobsMutated: wakeScheduler });
   const runner = new AutomationAgentRunner(gatewayEnv, jobStore, config);
-  const delivery = new DeliveryService(channels, jobStore, sessionStore, sessionManager, agent);
+  const deliveryExecutor = new ChannelDeliveryExecutor(
+    new DeliveryRateLimiter(config.delivery.rateLimit),
+  );
+  const delivery = new DeliveryService(
+    channels,
+    jobStore,
+    sessionStore,
+    sessionManager,
+    agent,
+    undefined,
+    deliveryExecutor,
+  );
   const heartbeat = new HeartbeatService(gatewayEnv, jobStore, runner, delivery, config);
   const scheduler = new GatewayScheduler(jobStore, runner, delivery, config, undefined, heartbeat);
   schedulerRef.current = scheduler;
@@ -196,6 +211,8 @@ export async function runGateway(options: RunGatewayOptions): Promise<void> {
     commands,
     gatewayEnv,
     schedulerStats: () => scheduler.getStats(),
+    messageStore,
+    deliveryExecutor,
   });
 
   try {
@@ -219,7 +236,7 @@ export async function runGateway(options: RunGatewayOptions): Promise<void> {
         }
         if (!app.reloadPolicy(next)) {
           process.stderr.write(
-            "warning: gateway reload rejected: channels, queue, session, and stream settings require restart; only access and group routing policy can reload\n",
+            "warning: gateway reload rejected: channels, queue, session, stream, delivery, and automation settings require restart; only access and group routing policy can reload\n",
           );
           return;
         }

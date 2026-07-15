@@ -96,6 +96,11 @@ describe("loadGatewayConfig", () => {
     expect(config.security.dmPolicy).toBe("pairing");
     expect(config.security.groupPolicy).toBe("disabled");
     expect(config.channels).toEqual([]);
+    expect(config.delivery.rateLimit).toEqual({
+      accountPerSecond: 25,
+      directPerSecond: 1,
+      groupPerMinute: 20,
+    });
     expect(config.automation.minCronIntervalMs).toBe(300_000);
     expect(config.automation.allowedTools).toEqual([
       "read_file",
@@ -106,6 +111,26 @@ describe("loadGatewayConfig", () => {
       "fetch_content",
     ]);
     expect(config.heartbeat.enabled).toBe(false);
+  });
+
+  it("allows delivery rates to tighten defaults but never loosen them", async () => {
+    const { env, home, cleanup } = await setupEnv();
+    cleanups.push(cleanup);
+    mockedHome = home;
+    await writeJson(path.join(home, "gateway.json"), {
+      delivery: {
+        rateLimit: { accountPerSecond: 10, directPerSecond: 2, groupPerMinute: 5 },
+      },
+    });
+
+    const { config, warnings } = await loadGatewayConfig(env);
+
+    expect(config.delivery.rateLimit).toEqual({
+      accountPerSecond: 10,
+      directPerSecond: 1,
+      groupPerMinute: 5,
+    });
+    expect(warnings.some((warning) => warning.includes("directPerSecond"))).toBe(true);
   });
 
   it("lets a trusted project tighten automation but not enable or retarget heartbeat", async () => {

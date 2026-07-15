@@ -3,6 +3,7 @@ import type { ExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import { getNoviDir } from "../config.js";
 import type { ChannelType } from "./core/types.js";
 import type { GatewaySessionLocator } from "./core/types.js";
+import { DEFAULT_DELIVERY_RATE_LIMITS, type DeliveryRateLimits } from "./messages/rate-limit.js";
 
 // ---------------------------------------------------------------------------
 // Schema types
@@ -50,6 +51,10 @@ export interface RawHeartbeatConfig {
   target?: GatewaySessionLocator;
 }
 
+export interface RawDeliveryConfig {
+  rateLimit?: Partial<DeliveryRateLimits>;
+}
+
 /** Raw `gateway.json` shape — all fields optional, validated before use. */
 export interface RawGatewayConfig {
   queue?: {
@@ -81,6 +86,7 @@ export interface RawGatewayConfig {
     };
   };
   channels?: ChannelConfig[];
+  delivery?: RawDeliveryConfig;
   automation?: RawAutomationConfig;
   heartbeat?: RawHeartbeatConfig;
 }
@@ -115,6 +121,9 @@ export interface ResolvedGatewayConfig {
     };
   };
   channels: ChannelConfig[];
+  delivery: {
+    rateLimit: DeliveryRateLimits;
+  };
   automation: {
     timezone: string;
     allowedTools: string[];
@@ -421,6 +430,7 @@ function resolveConfig(merged: RawGatewayConfig, warnings: string[]): ResolvedGa
   }
   const channels = validateChannels(merged.channels, warnings);
   const automation = resolveAutomationConfig(merged.automation, warnings);
+  const delivery = resolveDeliveryConfig(merged.delivery, warnings);
   const heartbeat = resolveHeartbeatConfig(merged.heartbeat, automation.timezone, warnings);
 
   if (channels.length === 0) {
@@ -442,9 +452,31 @@ function resolveConfig(merged: RawGatewayConfig, warnings: string[]): ResolvedGa
       },
     },
     channels,
+    delivery,
     automation,
     heartbeat,
   };
+}
+
+function resolveDeliveryConfig(
+  raw: RawDeliveryConfig | undefined,
+  warnings: string[],
+): ResolvedGatewayConfig["delivery"] {
+  const rateLimit = { ...DEFAULT_DELIVERY_RATE_LIMITS };
+  for (const field of ["accountPerSecond", "directPerSecond", "groupPerMinute"] as const) {
+    const value = raw?.rateLimit?.[field];
+    if (value === undefined) continue;
+    if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+      warnings.push(`gateway: invalid delivery.rateLimit.${field}, using default`);
+      continue;
+    }
+    if (value > DEFAULT_DELIVERY_RATE_LIMITS[field]) {
+      warnings.push(`gateway: delivery.rateLimit.${field} may only tighten the default`);
+      continue;
+    }
+    rateLimit[field] = value;
+  }
+  return { rateLimit };
 }
 
 function resolveAutomationConfig(

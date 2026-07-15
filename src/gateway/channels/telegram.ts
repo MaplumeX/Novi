@@ -1,7 +1,14 @@
 import { Telegraf, TelegramError } from "telegraf";
 import { message } from "telegraf/filters";
-import type { Chat as TgChat, User as TgUser } from "@telegraf/types";
+import { AbortController, type AbortSignal } from "abort-controller";
+import type {
+  Chat as TgChat,
+  Update as TgUpdate,
+  User as TgUser,
+  UserFromGetMe,
+} from "@telegraf/types";
 import { AbstractChannel } from "../core/abstract-channel.js";
+import { chunkText } from "../core/text.js";
 import type {
   ChannelCapabilities,
   ChannelDeliveryReceipt,
@@ -10,6 +17,7 @@ import type {
   ChannelSendTarget,
   ChatType,
 } from "../core/types.js";
+import { classifyChannelError } from "../messages/errors.js";
 
 /** Constructor options for {@link TelegramChannel}. */
 export interface TelegramChannelOptions {
@@ -19,6 +27,13 @@ export interface TelegramChannelOptions {
   botToken: string;
   /** Minimum interval between edit-message calls (default 1000 ms). */
   editIntervalMs?: number;
+  pollingApi?: TelegramPollingApi;
+}
+
+export interface TelegramPollingApi {
+  getMe(): Promise<UserFromGetMe>;
+  deleteWebhook(): Promise<unknown>;
+  getUpdates(offset: number, signal: AbortSignal): Promise<TgUpdate[]>;
 }
 
 /** Per-chat streaming buffer: holds the placeholder message id and accumulated text. */
@@ -50,42 +65,77 @@ export class TelegramChannel extends AbstractChannel {
 
   private readonly bot: Telegraf;
   private readonly editIntervalMs: number;
+  private readonly pollingApi: TelegramPollingApi;
   private readonly streamBuffers = new Map<string, StreamBuffer>();
   private botUserId: number | undefined;
   private botUsername: string | undefined;
+  private pollAbort: AbortController | undefined;
+  private pollTask: Promise<void> | undefined;
+  private pollFailure: Error | undefined;
+  private handlersRegistered = false;
 
   constructor(options: TelegramChannelOptions) {
     super(options.id, "telegram");
     this.bot = new Telegraf(options.botToken);
+    this.bot.catch((error) => {
+      throw error;
+    });
     this.editIntervalMs = options.editIntervalMs ?? 1000;
+    this.pollingApi = options.pollingApi ?? {
+      getMe: () => this.bot.telegram.getMe(),
+      deleteWebhook: () => this.bot.telegram.deleteWebhook({ drop_pending_updates: false }),
+      getUpdates: (offset, signal) =>
+        this.bot.telegram.callApi(
+          "getUpdates",
+          { timeout: 30, limit: 100, offset, allowed_updates: ["message"] },
+          { signal },
+        ),
+    };
   }
 
   async start(): Promise<void> {
-    this.bot.on(message("text"), (ctx) => {
-      const tgMsg = ctx.message;
-      const chat = ctx.chat as TgChat | undefined;
-      const from = tgMsg.from as TgUser | undefined;
-      if (!chat || (chat.type !== "private" && chat.type !== "group" && chat.type !== "supergroup"))
-        return;
-      if (!from) return;
+    if (this.pollTask) throw new Error("Telegram polling is already running");
+    if (!this.handlersRegistered) {
+      this.handlersRegistered = true;
+      this.bot.on(message("text"), async (ctx) => {
+        const tgMsg = ctx.message;
+        const chat = ctx.chat as TgChat | undefined;
+        const from = tgMsg.from as TgUser | undefined;
+        if (
+          !chat ||
+          (chat.type !== "private" && chat.type !== "group" && chat.type !== "supergroup")
+        )
+          return;
+        if (!from) return;
+        await this.emitMessage(this.normalizeMessage(chat, tgMsg, from, ctx.update.update_id));
+      });
+    }
 
-      void this.emitMessage(this.normalizeMessage(chat, tgMsg, from, ctx.update.update_id));
-    });
-
-    const me = await this.bot.telegram.getMe();
+    const me = await this.pollingApi.getMe();
     this.botUserId = me.id;
     this.botUsername = me.username;
-    await this.bot.launch();
+    this.bot.botInfo = me;
+    await this.pollingApi.deleteWebhook();
+    const abort = new AbortController();
+    this.pollAbort = abort;
+    this.pollFailure = undefined;
+    this.pollTask = this.poll(abort.signal).catch((error) => {
+      if (!isAbortError(error)) {
+        this.pollFailure = error instanceof Error ? error : new Error(String(error));
+        process.stderr.write(`warning: telegram polling stopped: ${telegramErrorSummary(error)}\n`);
+      }
+    });
+  }
+
+  getFailure(): Error | undefined {
+    return this.pollFailure;
   }
 
   async stop(): Promise<void> {
-    // `bot.stop` throws "Bot is not running!" when never launched or already
-    // stopped — guard against that (mirrors tia-gateway).
-    try {
-      this.bot.stop("gateway-shutdown");
-    } catch {
-      // Not running — nothing to do.
-    }
+    this.pollAbort?.abort();
+    await this.pollTask;
+    this.pollAbort = undefined;
+    this.pollTask = undefined;
   }
 
   /** Send the final, complete reply text (chunking on overflow). */
@@ -113,6 +163,31 @@ export class TelegramChannel extends AbstractChannel {
       ids.push(String(await this.sendOrRetry(target, chunk)));
     }
     return { messageIds: ids };
+  }
+
+  /** One durable final-send API call. Retry ownership stays with the outbox worker. */
+  async sendFinalChunk(
+    target: ChannelSendTarget,
+    text: string,
+    ordinal: number,
+  ): Promise<{ messageId: string }> {
+    const key = targetKey(target);
+    const buffer = ordinal === 0 ? this.streamBuffers.get(key) : undefined;
+    if (buffer?.messageId) {
+      try {
+        await this.bot.telegram.editMessageText(target.chatId, buffer.messageId, undefined, text);
+      } catch (error) {
+        if (!isMessageNotModified(error)) throw error;
+      }
+      this.streamBuffers.delete(key);
+      return { messageId: String(buffer.messageId) };
+    }
+    const sent = await this.bot.telegram.sendMessage(
+      target.chatId,
+      text,
+      telegramThreadExtra(target),
+    );
+    return { messageId: String(sent.message_id) };
   }
 
   /** Stream an incremental event. Only `text-delta`/`typing` are handled. */
@@ -173,6 +248,27 @@ export class TelegramChannel extends AbstractChannel {
   // -----------------------------------------------------------------------
   // Internal helpers
   // -----------------------------------------------------------------------
+
+  private async poll(signal: AbortSignal): Promise<void> {
+    let offset = 0;
+    while (!signal.aborted) {
+      try {
+        const updates = (await this.pollingApi.getUpdates(offset, signal)).sort(
+          (left, right) => left.update_id - right.update_id,
+        );
+        for (const update of updates) {
+          if (signal.aborted) return;
+          await this.bot.handleUpdate(update);
+          offset = update.update_id + 1;
+        }
+      } catch (error) {
+        if (signal.aborted || isAbortError(error)) return;
+        const classified = classifyChannelError(error);
+        if (!classified.retryable) throw error;
+        await abortableDelay(classified.retryAfterMs ?? 1_000, signal);
+      }
+    }
+  }
 
   /** Map a Telegram text message into a {@link ChannelMessage}. */
   private normalizeMessage(
@@ -359,6 +455,25 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) return resolve();
+    const timer = setTimeout(resolve, ms);
+    signal.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer);
+        resolve();
+      },
+      { once: true },
+    );
+  });
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
+}
+
 /**
  * Split `text` into chunks no longer than `limit` UTF-16 code units.
  *
@@ -367,23 +482,4 @@ function delay(ms: number): Promise<void> {
  * by one so the pair stays intact. This matches the Telegram 4096-UTF-16-unit
  * limit (design.md §4).
  */
-export function chunkText(text: string, limit: number): string[] {
-  const chunks: string[] = [];
-  let start = 0;
-  while (start < text.length) {
-    let end = start + limit;
-    if (end > text.length) end = text.length;
-    // Avoid splitting a surrogate pair: if the code unit at `end` is a low
-    // surrogate, `end-1` is its high surrogate — back up one so the pair
-    // stays in the previous chunk.
-    if (end < text.length) {
-      const code = text.charCodeAt(end);
-      if (code >= 0xdc00 && code <= 0xdfff) {
-        end -= 1;
-      }
-    }
-    chunks.push(text.slice(start, end));
-    start = end;
-  }
-  return chunks.length > 0 ? chunks : [""];
-}
+export { chunkText };

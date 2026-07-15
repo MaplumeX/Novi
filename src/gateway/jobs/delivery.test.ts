@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentProtocolAdapter, ChannelAdapter } from "../core/types.js";
 import { GatewaySessionStore } from "../core/session-store.js";
 import type { GatewaySessionManager } from "../core/session-manager.js";
+import { ChannelDeliveryExecutor } from "../messages/delivery.js";
+import { DeliveryRateLimiter } from "../messages/rate-limit.js";
 import { DeliveryService } from "./delivery.js";
 import { JobStore } from "./store.js";
 import type { ScheduledJob, ScheduledRun } from "./types.js";
@@ -130,10 +132,14 @@ describe("DeliveryService", () => {
       id: "tg",
       type: "telegram",
       capabilities: { chatTypes: ["direct"] },
-      textChunkLimit: 4096,
+      textChunkLimit: 20,
       start: vi.fn(),
       stop: vi.fn(),
-      send: vi.fn().mockRejectedValue(new Error("network")),
+      send: vi.fn(),
+      sendFinalChunk: vi
+        .fn()
+        .mockResolvedValueOnce({ messageId: "partial-1" })
+        .mockRejectedValueOnce({ code: "ECONNRESET" }),
     } as ChannelAdapter;
     const delivery = new DeliveryService(
       [channel],
@@ -142,11 +148,15 @@ describe("DeliveryService", () => {
       {} as GatewaySessionManager,
       {} as AgentProtocolAdapter,
       () => new Date("2026-01-01T00:00:00.000Z"),
+      new ChannelDeliveryExecutor(
+        new DeliveryRateLimiter({}, { now: () => 0, sleep: async () => Promise.resolve() }),
+      ),
     );
     const result = await delivery.deliver(job, run);
     expect(result.delivery.status).toBe("pending");
     expect(result.delivery.attempt).toBe(1);
     expect(result.execution.result).toBe("stable-result");
+    expect(result.delivery.messageIds).toEqual(["partial-1"]);
   });
 
   it("retries a failed origin append without sending Telegram twice", async () => {

@@ -16,6 +16,7 @@ describe("PairingStore", () => {
     const store = new PairingStore(file);
     const request = await store.request("tg-one", "u1", 1000, 3);
     expect(request.code).toBeTruthy();
+    expect((await store.request("tg-one", "u1", 1000, 3)).code).toBe(request.code);
     expect(await store.approve("tg-one", request.code!)).toBe(true);
     expect(await new PairingStore(file).isAuthorized("tg-one", "u1")).toBe(true);
     expect(await new PairingStore(file).isAuthorized("tg-two", "u1")).toBe(false);

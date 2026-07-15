@@ -6,8 +6,14 @@ import { GatewayApp } from "./gateway-app.js";
 import { GatewaySessionManager } from "./session-manager.js";
 import { createCommandRegistry } from "./commands.js";
 import { PairingStore } from "./pairing-store.js";
-import type { AgentProtocolAdapter, ChannelAdapter, ChannelMessage } from "./types.js";
+import type {
+  AgentProtocolAdapter,
+  AgentProtocolTurnInput,
+  ChannelAdapter,
+  ChannelMessage,
+} from "./types.js";
 import type { ResolvedGatewayConfig } from "../config.js";
+import { GatewayMessageStore } from "../messages/store.js";
 
 const paths: string[] = [];
 afterEach(async () => {
@@ -36,6 +42,9 @@ function config(dmPolicy: ResolvedGatewayConfig["security"]["dmPolicy"]): Resolv
       },
     },
     channels: [],
+    delivery: {
+      rateLimit: { accountPerSecond: 25, directPerSecond: 1, groupPerMinute: 20 },
+    },
     automation: {
       timezone: "UTC",
       allowedTools: ["read_file", "ls", "glob", "grep", "web_search", "fetch_content"],
@@ -238,5 +247,58 @@ describe("GatewayApp DM authorization", () => {
     });
     expect(adapter.runTurn).not.toHaveBeenCalled();
     expect(outbound.send).not.toHaveBeenCalled();
+  });
+});
+
+describe("GatewayApp durable ingress", () => {
+  it("persists before Agent dispatch and deduplicates a redelivered update", async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), "novi-gateway-durable-"));
+    paths.push(dir);
+    const messageStore = await GatewayMessageStore.open(path.join(dir, "messages"));
+    const pairingStore = new PairingStore(path.join(dir, "pairing.json"));
+    const baseAgent = agent();
+    const runTurn = vi.fn(async (input: AgentProtocolTurnInput) => {
+      expect(messageStore.listInbox()).toEqual([expect.objectContaining({ status: "processing" })]);
+      await input.callbacks?.onTurnEnd?.("done");
+      return { text: "done" };
+    });
+    const adapter = { ...baseAgent, runTurn };
+    const outbound = channel();
+    vi.mocked(outbound.send).mockImplementation(async () => {
+      expect(messageStore.listOutbox()).toEqual([
+        expect.objectContaining({ status: "sending", text: "done" }),
+      ]);
+      return { messageIds: ["telegram-42"] };
+    });
+    const resolved = config("open");
+    const sessionManager = new GatewaySessionManager({
+      agent: adapter,
+      idleTimeoutMs: 60_000,
+      maxConcurrentSessions: 1,
+      queueMode: "steer",
+    });
+    const app = new GatewayApp({
+      channels: [outbound],
+      agent: adapter,
+      sessionManager,
+      queueMode: "steer",
+      config: resolved,
+      commands: createCommandRegistry(),
+      pairingStore,
+      messageStore,
+    });
+    const inbound = { ...message(), metadata: { updateId: 42 } };
+
+    await app.start();
+    await app.onInbound(outbound, inbound);
+    await vi.waitFor(() => expect(runTurn).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(messageStore.listInbox()[0]?.status).toBe("completed"));
+    await vi.waitFor(() => expect(messageStore.listOutbox()[0]?.status).toBe("delivered"));
+    await app.onInbound(outbound, inbound);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await app.stop();
+
+    expect(runTurn).toHaveBeenCalledTimes(1);
+    expect(messageStore.listInbox()).toHaveLength(1);
   });
 });

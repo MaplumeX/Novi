@@ -51,7 +51,9 @@ export class PairingStore {
       const existing = this.data.pending.find(
         (p) => p.channelId === channelId && p.senderId === senderId,
       );
-      if (existing) return { reason: "pending" };
+      // Return the same code so a transport can retry a failed durable pairing
+      // response without rotating or losing the already-persisted request.
+      if (existing) return { code: existing.code, reason: "pending" };
       if (this.data.pending.filter((p) => p.channelId === channelId).length >= maxPending)
         return { reason: "full" };
       const code = randomBytes(6).toString("base64url").slice(0, 8).toUpperCase();

@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import {
   chmod,
+  lstat,
   mkdir,
   open,
   readFile,
@@ -300,6 +301,28 @@ export class SchedulerLock {
       if (!isNodeError(error) || error.code !== "ENOENT") throw error;
     });
   }
+}
+
+export type SchedulerLockState =
+  | { state: "absent" }
+  | { state: "stale"; pid: number }
+  | { state: "live"; pid: number }
+  | { state: "invalid" };
+
+/** Read-only lock inspection for offline migration/rollback guards. */
+export async function inspectSchedulerLock(rootPath: string): Promise<SchedulerLockState> {
+  const lockPath = path.join(rootPath, "scheduler.lock");
+  let stats;
+  try {
+    stats = await lstat(lockPath);
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") return { state: "absent" };
+    throw error;
+  }
+  if (!stats.isFile() || stats.isSymbolicLink()) return { state: "invalid" };
+  const pid = await readLockPid(lockPath);
+  if (pid === undefined) return { state: "invalid" };
+  return isProcessAlive(pid) ? { state: "live", pid } : { state: "stale", pid };
 }
 
 async function atomicWrite(filePath: string, value: unknown): Promise<void> {

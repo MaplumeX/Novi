@@ -34,6 +34,12 @@ import {
 import { GatewayLogger } from "./runtime/logger.js";
 import { GatewayMetrics } from "./runtime/metrics.js";
 import { GatewayAlertManager, GatewayOperationsStore } from "./runtime/alerts.js";
+import { getNoviDir } from "../config.js";
+import path from "node:path";
+import { createGatewayStateRegistry } from "./migrations/registry.js";
+import { assertGatewayStateReady } from "./migrations/inspect.js";
+import { GatewayMigrationService } from "./migrations/service.js";
+import { formatGatewayMigrationResult } from "./migrations/format.js";
 import {
   createMessageControlMethods,
   formatMessageSummaries,
@@ -44,11 +50,14 @@ import {
 export interface RunGatewayOptions extends BootstrapOptions {
   /** Explicit `--config <path>` for gateway.json (optional). */
   configPath?: string;
-  action?: "run" | "status" | "probe" | "health" | "messages";
+  action?: "run" | "status" | "probe" | "health" | "messages" | "migrate" | "rollback-state";
   json?: boolean;
   healthCheck?: "live" | "ready";
   messageAction?: "list" | "retry" | "retry-delivery" | "dismiss";
   messageId?: string;
+  dryRun?: boolean;
+  recover?: boolean;
+  backupId?: string;
 }
 
 function failGateway(logger: GatewayLogger, event: string, message: string): never {
@@ -67,6 +76,11 @@ function failGateway(logger: GatewayLogger, event: string, message: string): nev
  */
 export async function runGateway(options: RunGatewayOptions): Promise<void> {
   const cwd = options.cwd ?? process.cwd();
+
+  if (options.action === "migrate" || options.action === "rollback-state") {
+    await runStateMigration(options, cwd);
+    return;
+  }
 
   // Runtime diagnostics use only the private control socket: no config,
   // provider, model, channel, or harness is constructed.
@@ -104,6 +118,15 @@ export async function runGateway(options: RunGatewayOptions): Promise<void> {
     }
     return;
   }
+
+  // Daemon startup is read-only and fail-fast until every owned schema is current.
+  const noviDir = getNoviDir();
+  const registry = await createGatewayStateRegistry({
+    noviDir,
+    cwd,
+    configPath: options.configPath,
+  });
+  await assertGatewayStateReady(registry, path.join(noviDir, "migrations", "active.json"));
 
   const instanceId = randomUUID();
   const logger = new GatewayLogger({ instanceId });
@@ -351,6 +374,33 @@ export async function runGateway(options: RunGatewayOptions): Promise<void> {
   };
   process.once("SIGINT", shutdown);
   process.once("SIGTERM", shutdown);
+}
+
+async function runStateMigration(options: RunGatewayOptions, cwd: string): Promise<void> {
+  const noviDir = getNoviDir();
+  const registry = await createGatewayStateRegistry({
+    noviDir,
+    cwd,
+    configPath: options.configPath,
+  });
+  const jobsRoot = registry.find((entry) => entry.schema === "jobs")?.path;
+  if (!jobsRoot) throw new Error("Gateway jobs state is not registered");
+  const service = new GatewayMigrationService({
+    registry,
+    backupsRoot: path.join(noviDir, "backups", "gateway"),
+    journalPath: path.join(noviDir, "migrations", "active.json"),
+    runtimePaths: resolveGatewayRuntimePaths(process.env, noviDir),
+    jobsRoot,
+    cwd,
+  });
+  let result;
+  if (options.action === "migrate") {
+    result = options.recover ? await service.recover() : await service.migrate(options.dryRun);
+  } else {
+    if (!options.backupId) throw new Error("gateway rollback-state requires a backup id");
+    result = await service.rollback(options.backupId, options.dryRun);
+  }
+  process.stdout.write(formatGatewayMigrationResult(result, options.json === true));
 }
 
 function gatewayConfigDigest(

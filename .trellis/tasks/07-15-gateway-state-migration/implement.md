@@ -2,32 +2,32 @@
 
 ## 1. Inspectors and Registry
 
-- [ ] 定义 descriptor/state/plan types，导出现有 store read-only validation。
-- [ ] inventory global/project/explicit config、pairing、sessions、jobs、messages，处理 alias/missing。
-- [ ] 实现 startup preflight，确保 legacy/future/corrupt/active journal 零写 fail-fast。
+- [x] 定义 descriptor/state/plan types，导出现有 store read-only validation。
+- [x] inventory global/project/explicit config、pairing、sessions、jobs、messages，处理 alias/missing。
+- [x] 实现 startup preflight，确保 legacy/future/corrupt/active journal 零写 fail-fast。
 
 Gate A：所有现有 v1 fixture validate，daemon preflight 无 mutation。
 
 ## 2. Backup
 
-- [ ] 实现 safe traversal、regular-only copy、mode clamp、streaming SHA-256、manifest codec。
-- [ ] staging backup 完整验证后 atomic publish；实现 verify/list。
-- [ ] 覆盖 token secrecy、symlink/device/path traversal、hash mismatch、external config mapping。
+- [x] 实现 safe traversal、regular-only copy、mode clamp、streaming SHA-256、manifest codec。
+- [x] staging backup 完整验证后 atomic publish；实现 verify/list。
+- [x] 覆盖 token secrecy、symlink/device/path traversal、hash mismatch、external config mapping。
 
 ## 3. Migrators and Transaction
 
-- [ ] 实现 config/pairing v0->v1 pure transforms；session/jobs/messages v1 no-op validation。
-- [ ] 实现 dry-run human/JSON plan 与 tree-hash zero-write test。
-- [ ] 实现 active journal、step staging/publish、caught-error compensation、crash recover。
-- [ ] 每个 publish boundary fault injection。
+- [x] 实现 config/pairing v0->v1 pure transforms；session/jobs/messages v1 no-op validation。
+- [x] 实现 dry-run human/JSON plan 与 tree-hash zero-write test。
+- [x] 实现 active journal、step staging/publish、caught-error compensation、crash recover。
+- [x] 每个 publish boundary fault injection。
 
 Gate B：任何注入失败都能回到原 fixture；SIGKILL fixture 可 recover。
 
 ## 4. Rollback
 
-- [ ] rollback dry-run、pre-rollback backup、restore present/absent/quarantine、full validation。
-- [ ] stopped socket/lock guard 与 operator guidance。
-- [ ] CLI 接线 `migrate` / `rollback-state`，不经过 provider probe/harness。
+- [x] rollback dry-run、pre-rollback backup、restore present/absent/quarantine、full validation。
+- [x] stopped socket/lock guard 与 operator guidance。
+- [x] CLI 接线 `migrate` / `rollback-state`，不经过 provider probe/harness。
 
 ## 5. Validation
 

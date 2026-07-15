@@ -22,11 +22,17 @@ describe("PairingStore", () => {
     expect(await new PairingStore(file).isAuthorized("tg-two", "u1")).toBe(false);
   });
 
-  it("fails closed for parseable but invalid store data", async () => {
+  it("fails startup for parseable but invalid or legacy store data", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "novi-pairing-"));
     paths.push(dir);
     const file = path.join(dir, "pairing.json");
     await writeFile(file, JSON.stringify({ authorized: "not-an-object", pending: [] }));
-    expect(await new PairingStore(file).isAuthorized("tg", "user")).toBe(false);
+    await expect(new PairingStore(file).isAuthorized("tg", "user")).rejects.toThrow(
+      /failed to load Gateway pairing store/,
+    );
+    await writeFile(file, JSON.stringify({ authorized: {}, pending: [] }));
+    await expect(new PairingStore(file).isAuthorized("tg", "user")).rejects.toThrow(
+      /pairing store/,
+    );
   });
 });

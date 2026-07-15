@@ -24,13 +24,13 @@
 
 ## Acceptance Criteria
 
-- [ ] SM-AC1：dry-run 前后 workspace tree/hash 完全一致；human/JSON plan 可稳定测试。
-- [ ] SM-AC2：live runtime/lock 存在时 migrate/rollback 拒绝，且不创建 backup 或 journal。
-- [ ] SM-AC3：backup manifest 与文件 hash/mode 校验通过；含 token 的 fixture 不出现在输出，backup 权限安全。
-- [ ] SM-AC4：每个 publish step 注入异常后自动恢复原状态；模拟 kill 留下 journal 后 `--recover` 恢复并通过旧 schema validation。
-- [ ] SM-AC5：unknown future version、corrupt file、hash mismatch、symlink/path traversal 均 fail closed 并保留证据。
-- [ ] SM-AC6：rollback-state 会先生成安全备份，恢复 absent/present 文件语义，并对全 inventory 再校验。
-- [ ] SM-AC7：Gateway startup 对 legacy/migration-in-progress 给出稳定错误和操作命令，不做写入。
+- [x] SM-AC1：dry-run 前后 workspace tree/hash 完全一致；human/JSON plan 可稳定测试。
+- [x] SM-AC2：live runtime/lock 存在时 migrate/rollback 拒绝，且不创建 backup 或 journal。
+- [x] SM-AC3：backup manifest 与文件 hash/mode 校验通过；含 token 的 fixture 不出现在输出，backup 权限安全。
+- [x] SM-AC4：每个 publish step 注入异常后自动恢复原状态；模拟 kill 留下 journal 后 `--recover` 恢复并通过旧 schema validation。
+- [x] SM-AC5：unknown future version、corrupt file、hash mismatch、symlink/path traversal 均 fail closed 并保留证据。
+- [x] SM-AC6：rollback-state 会先生成安全备份，恢复 absent/present 文件语义，并对全 inventory 再校验。
+- [x] SM-AC7：Gateway startup 对 legacy/migration-in-progress 给出稳定错误和操作命令，不做写入。
 
 ## Out of Scope
 

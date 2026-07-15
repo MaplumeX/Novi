@@ -65,6 +65,8 @@ export interface RawOperationsConfig {
 
 /** Raw `gateway.json` shape — all fields optional, validated before use. */
 export interface RawGatewayConfig {
+  /** Persistent schema marker; omitted only by legacy v0 files. */
+  version?: 1;
   queue?: {
     mode?: QueueMode;
     byChannel?: Record<string, QueueMode>;

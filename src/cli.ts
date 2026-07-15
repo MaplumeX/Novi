@@ -40,6 +40,8 @@ const { values, positionals } = parseArgs({
     config: { type: "string" },
     json: { type: "boolean", default: false },
     kind: { type: "string" },
+    "dry-run": { type: "boolean", default: false },
+    recover: { type: "boolean", default: false },
     "tool-budget": { type: "string", multiple: true },
     help: { type: "boolean", short: "h", default: false },
   },
@@ -83,6 +85,8 @@ if (values.help) {
       "  --config <path>   Path to gateway.json (gateway mode; default ~/.novi/gateway.json)",
       "  --json            Machine-readable output for gateway status/health/messages",
       "  --kind <kind>     Gateway health check: live|ready",
+      "  --dry-run         Inspect a gateway migration/rollback without writing",
+      "  --recover         Recover an interrupted gateway migration",
       "  --tool-budget <name>=<n>  Override a tool resource budget (repeatable)",
       "  -h, --help        Show this help",
     ].join("\n") + "\n",
@@ -95,8 +99,15 @@ if (values.print && values.mode === "json") {
 }
 
 const promptText = positionals.join(" ");
-const gatewayAction = ["status", "probe", "health", "messages"].includes(positionals[0] ?? "")
-  ? (positionals[0] as "status" | "probe" | "health" | "messages")
+const gatewayAction = [
+  "status",
+  "probe",
+  "health",
+  "messages",
+  "migrate",
+  "rollback-state",
+].includes(positionals[0] ?? "")
+  ? (positionals[0] as "status" | "probe" | "health" | "messages" | "migrate" | "rollback-state")
   : "run";
 const requestedHealthKind = values.kind ?? positionals[1];
 const gatewayHealthCheck =
@@ -124,11 +135,28 @@ if (
 ) {
   fail(`gateway messages ${gatewayMessageAction} requires a message id`);
 }
-if (values.json && (!values.gateway || !["status", "health", "messages"].includes(gatewayAction))) {
-  fail("--json is supported only for gateway status/health/messages");
+if (
+  values.json &&
+  (!values.gateway ||
+    !["status", "health", "messages", "migrate", "rollback-state"].includes(gatewayAction))
+) {
+  fail("--json is supported only for gateway status/health/messages/migrate/rollback-state");
 }
 if (values.kind !== undefined && (!values.gateway || gatewayAction !== "health")) {
   fail("--kind is supported only for gateway health");
+}
+if (
+  values["dry-run"] &&
+  (!values.gateway || !["migrate", "rollback-state"].includes(gatewayAction))
+) {
+  fail("--dry-run is supported only for gateway migrate/rollback-state");
+}
+if (values.recover && (!values.gateway || gatewayAction !== "migrate")) {
+  fail("--recover is supported only for gateway migrate");
+}
+if (values.recover && values["dry-run"]) fail("--recover and --dry-run are mutually exclusive");
+if (values.gateway && gatewayAction === "rollback-state" && !positionals[1]) {
+  fail("gateway rollback-state requires a backup id");
 }
 
 const isHeadless =
@@ -308,6 +336,9 @@ async function main(): Promise<void> {
         healthCheck: gatewayHealthCheck,
         messageAction: gatewayMessageAction,
         messageId: positionals[2],
+        dryRun: values["dry-run"],
+        recover: values.recover,
+        backupId: gatewayAction === "rollback-state" ? positionals[1] : undefined,
       });
       return;
     }

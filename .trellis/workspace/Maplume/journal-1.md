@@ -1693,3 +1693,40 @@ Added durable channel/account/chat/thread to JSONL session bindings, cold resume
 ### Next Steps
 
 - None - task complete
+
+
+## Session 51: 交付 Gateway 常驻服务与可靠投递
+
+**Date**: 2026-07-15
+**Task**: 交付 Gateway 常驻服务与可靠投递
+**Branch**: `main`
+
+### Summary
+
+完成 durable inbox/outbox 与可靠投递、Unix runtime status/health/日志指标告警、显式状态迁移备份恢复回滚、systemd user service 安装生命周期与 linger，并通过 110 文件 869 项全量测试和 systemd unit 验证。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c6d659f` | (see git log) |
+| `299dc22` | (see git log) |
+| `6a908e7` | (see git log) |
+| `bd7d16e` | (see git log) |
+| `ba6b3d9` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

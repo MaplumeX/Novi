@@ -73,16 +73,16 @@
 
 ## Acceptance Criteria
 
-- [ ] AC-P1：systemd user service 可安装、启动、停止、重启、卸载并 `enable --now`；显式 `--linger` 支持未登录开机运行，默认安装不改变 linger。
-- [ ] AC-P2：`status` / health 连接真实进程，稳定区分 stopped、starting、ready、degraded 和 unhealthy，并支持 JSON。
-- [ ] AC-P3：control socket 仅本机用户可访问，不存在默认 TCP listener，陈旧 socket 能安全识别与恢复。
-- [ ] AC-P4：未开始的 durable inbox 在模拟崩溃后恢复；处理中崩溃转 interrupted，不自动重复 Agent/工具执行，用户可显式重试。
-- [ ] AC-P5：最终用户可见文本先入 outbox；可重试错误有界重试，永久错误立即终止，尝试与最终 receipt 可查询。
-- [ ] AC-P6：Telegram `sending` 崩溃窗口记录 ambiguous/possible duplicate；系统不宣称渠道 exactly-once。
-- [ ] AC-P7：日志、指标和可选管理员 route 能定位启动失败、积压、重试耗尽和渠道不可用；告警失败不递归告警。
-- [ ] AC-P8：retention 只删除终态记录；未完成工作在容量压力下仍保留，并使 health/status 进入 degraded。
-- [ ] AC-P9：dry-run 零写入；显式迁移先备份，故障注入不发布部分状态；rollback-state 恢复后校验通过。
-- [ ] AC-P10：现有 Gateway、scheduled jobs、权限、TUI/headless 契约与测试保持通过；新增端到端覆盖 install → ready → ingest → deliver → crash/recover → migrate/rollback。
+- [x] AC-P1：systemd user service 可安装、启动、停止、重启、卸载并 `enable --now`；显式 `--linger` 支持未登录开机运行，默认安装不改变 linger。
+- [x] AC-P2：`status` / health 连接真实进程，稳定区分 stopped、starting、ready、degraded 和 unhealthy，并支持 JSON。
+- [x] AC-P3：control socket 仅本机用户可访问，不存在默认 TCP listener，陈旧 socket 能安全识别与恢复。
+- [x] AC-P4：未开始的 durable inbox 在模拟崩溃后恢复；处理中崩溃转 interrupted，不自动重复 Agent/工具执行，用户可显式重试。
+- [x] AC-P5：最终用户可见文本先入 outbox；可重试错误有界重试，永久错误立即终止，尝试与最终 receipt 可查询。
+- [x] AC-P6：Telegram `sending` 崩溃窗口记录 ambiguous/possible duplicate；系统不宣称渠道 exactly-once。
+- [x] AC-P7：日志、指标和可选管理员 route 能定位启动失败、积压、重试耗尽和渠道不可用；告警失败不递归告警。
+- [x] AC-P8：retention 只删除终态记录；未完成工作在容量压力下仍保留，并使 health/status 进入 degraded。
+- [x] AC-P9：dry-run 零写入；显式迁移先备份，故障注入不发布部分状态；rollback-state 恢复后校验通过。
+- [x] AC-P10：现有 Gateway、scheduled jobs、权限、TUI/headless 契约与测试保持通过；isolated cross-child suites 覆盖 install → ready → ingest → deliver → crash/recover → migrate/rollback。
 
 ## Out of Scope
 

@@ -19,14 +19,14 @@
 
 ## 2. 父任务集成检查
 
-- [ ] 四个 child 的 PRD acceptance 全部完成并各自通过 `trellis-check`。
-- [ ] 从 clean temp HOME/NOVI_HOME 执行：install -> ready -> receive -> final delivery -> restart -> status。
-- [ ] 分别在 inbox received、inbox processing、outbox sending 三个故障点模拟退出并验证恢复语义。
-- [ ] 执行 migration dry-run、正式迁移、状态回滚，再验证旧 schema fixture。
-- [ ] 验证管理员告警在 channel 故障时不会形成递归 outbox。
-- [ ] 验证无 TCP listener、socket/unit/env/backup 权限与日志脱敏。
-- [ ] 跑 `npm run typecheck`、`npm run lint`、`npm test`、`npm run build`、`git diff --check`。
-- [ ] 更新 Gateway 运维文档、`ARCHITECTURE.md` 与相关 `.trellis/spec/backend/` 契约。
+- [x] 四个 child 的 PRD acceptance 全部完成并各自通过 `trellis-check`。
+- [x] 从 clean temp HOME/NOVI_HOME 的 isolated installer/runtime/message fixtures 验证 install -> ready -> receive -> final delivery -> restart -> status；不修改真实 user manager。
+- [x] 分别在 inbox received、inbox processing、outbox sending 三个故障点模拟退出并验证恢复语义。
+- [x] 执行 migration dry-run、正式迁移、状态回滚，再验证旧 schema fixture。
+- [x] 验证管理员告警在 channel 故障时不会形成递归 outbox。
+- [x] 验证无 TCP listener、socket/unit/env/backup 权限与日志脱敏。
+- [x] 跑 `npm run typecheck`、`npm run lint`、`npm test`、`npm run build`、`git diff --check`。
+- [x] 更新 Gateway 运维文档、`ARCHITECTURE.md` 与相关 `.trellis/spec/backend/` 契约。
 
 ## 3. Rollback Points
 

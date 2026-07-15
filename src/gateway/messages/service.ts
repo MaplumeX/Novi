@@ -39,6 +39,7 @@ export class GatewayMessageService {
           ...(message.replyToMessageId === undefined
             ? {}
             : { replyToMessageId: message.replyToMessageId }),
+          ...(message.attachments === undefined ? {} : { attachments: message.attachments }),
         },
       }),
     );
@@ -88,6 +89,9 @@ export class GatewayMessageService {
       ...(original.message.replyToMessageId === undefined
         ? {}
         : { replyToMessageId: original.message.replyToMessageId }),
+      ...(original.message.attachments === undefined
+        ? {}
+        : { attachments: original.message.attachments }),
     };
     const retryRecord = createInboxRecord(
       {

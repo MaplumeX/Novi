@@ -146,4 +146,35 @@ describe("GatewayMessageDispatcher", () => {
     expect(handler).not.toHaveBeenCalled();
     expect(interrupted).not.toHaveBeenCalled();
   });
+
+  it("restores attachments from inbox records into the ChannelMessage", async () => {
+    const { store } = await setup();
+    const attachments = [
+      { kind: "image" as const, mimeType: "image/png", size: 512, filename: "img.png", remoteFileId: "tg-1" },
+    ];
+    const locator = {
+      channel: "telegram" as const,
+      account: "primary",
+      chat: { type: "direct" as const, id: "chat" },
+    };
+    const withAttachments = createInboxRecord({
+      identity: { channel: "telegram", account: "primary", nativeUpdateId: "att-1" },
+      route: { key: sessionKeyForLocator(locator), locator },
+      message: {
+        nativeMessageId: "att-1",
+        senderId: "user",
+        text: "see image",
+        timestamp: "2026-07-15T00:00:00.000Z",
+        attachments,
+      },
+    });
+    await store.createInbox(withAttachments);
+    const handler = vi.fn().mockResolvedValue(undefined);
+    const dispatcher = new GatewayMessageDispatcher([channel()], store, handler);
+    await dispatcher.start();
+    await vi.waitFor(() => expect(handler).toHaveBeenCalledTimes(1));
+    await dispatcher.stop();
+    const restored = handler.mock.calls[0]![1] as { attachments?: typeof attachments };
+    expect(restored.attachments).toEqual(attachments);
+  });
 });

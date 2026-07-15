@@ -8,6 +8,8 @@
  * `gateway/channels/*`.
  */
 
+import type { ImageContent } from "@earendil-works/pi-ai";
+
 // ---------------------------------------------------------------------------
 // Channel abstraction
 // ---------------------------------------------------------------------------
@@ -28,7 +30,14 @@ export interface ChannelCapabilities {
   chatTypes: ChatType[];
   /** Can the channel edit a sent message (used for edit-stream rendering)? */
   edit?: boolean;
-  /** Does the channel support group-chat threads / topics? */
+  /**
+   * Does the channel support group-chat threads / topics?
+   *
+   * When `true`, `ChannelMessage.threadId` / `ChannelSendTarget.threadId`
+   * identify a topic/thread and outbound `send` should target that thread.
+   * When `false` (or undefined), the channel must safely ignore `threadId`
+   * — it degrades to a plain send and must not crash.
+   */
   threads?: boolean;
   /** Can the channel send/receive media (Phase 3, reserved). */
   media?: boolean;
@@ -36,6 +45,21 @@ export interface ChannelCapabilities {
   blockStreaming?: boolean;
   /** Does the channel render markdown natively? */
   markdown?: boolean;
+}
+
+/** Kind of a channel attachment (Phase 3, reserved for media tasks). */
+export type ChannelAttachmentKind = "image" | "file" | "voice";
+
+/** Metadata for one inbound attachment. Persisted to inbox (no blob). */
+export interface ChannelAttachment {
+  kind: ChannelAttachmentKind;
+  mimeType: string;
+  size: number;
+  filename?: string;
+  /** Local relative reference (relative to gateway workspace), filled after download. */
+  localPath?: string;
+  /** Channel-native file id/reference (available before download). */
+  remoteFileId?: string;
 }
 
 /** Inbound message emitted by a {@link ChannelAdapter}. */
@@ -52,6 +76,10 @@ export interface ChannelMessage {
   threadId?: string;
   replyToMessageId?: string;
   metadata?: Record<string, unknown>;
+  /** Persisted attachment metadata (kind/mime/size/filename/localPath/remoteFileId). */
+  attachments?: ChannelAttachment[];
+  /** Runtime base64 images — NOT persisted to inbox; filled by channel after download. */
+  images?: ImageContent[];
 }
 
 /** Durable identity of one channel conversation. */
@@ -66,6 +94,8 @@ export interface GatewaySessionLocator {
   };
   /** Channel-native thread/topic id, when present. */
   thread?: string;
+  /** Optional outbound reply-to message id (D9: default no reply). */
+  replyTo?: string;
 }
 
 /** Runtime route: a structured durable locator plus its canonical cache key. */
@@ -77,6 +107,8 @@ export interface GatewaySessionRoute {
 export interface ChannelSendTarget {
   chatId: string;
   threadId?: string;
+  /** Optional outbound reply-to message id; channel replies only if it supports reply and this is set. */
+  replyToMessageId?: string;
 }
 
 export interface ChannelDeliveryReceipt {
@@ -153,6 +185,7 @@ export interface AgentProtocolTurnCallbacks {
 export interface AgentProtocolTurnInput {
   route: GatewaySessionRoute;
   text: string;
+  images?: ImageContent[];
   callbacks?: AgentProtocolTurnCallbacks;
 }
 

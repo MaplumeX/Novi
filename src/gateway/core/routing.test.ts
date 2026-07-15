@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { InboundDeduper, isSilentReply, sessionRoute } from "./routing.js";
+import {
+  InboundDeduper,
+  channelTargetForLocator,
+  channelTargetForMessage,
+  isSilentReply,
+  sessionRoute,
+} from "./routing.js";
 
 describe("gateway routing helpers", () => {
   it("isolates topic sessions by channel, chat kind and topic", () => {
@@ -45,5 +51,63 @@ describe("gateway routing helpers", () => {
     expect(deduper.seenBefore("a", 0)).toBe(false);
     expect(deduper.seenBefore("a", 1)).toBe(true);
     expect(deduper.seenBefore("a", 11)).toBe(false);
+  });
+});
+
+describe("channelTargetForLocator", () => {
+  it("passes replyTo through to replyToMessageId", () => {
+    const locator = {
+      channel: "telegram" as const,
+      account: "primary",
+      chat: { type: "direct" as const, id: "123" },
+      replyTo: "msg-42",
+    };
+    expect(channelTargetForLocator(locator)).toEqual({
+      chatId: "123",
+      replyToMessageId: "msg-42",
+    });
+  });
+
+  it("omits replyToMessageId when locator has no replyTo", () => {
+    const locator = {
+      channel: "telegram" as const,
+      account: "primary",
+      chat: { type: "direct" as const, id: "123" },
+      thread: "topic-1",
+    };
+    expect(channelTargetForLocator(locator)).toEqual({
+      chatId: "123",
+      threadId: "topic-1",
+    });
+  });
+});
+
+describe("channelTargetForMessage", () => {
+  it("passes replyToMessageId from inbound message", () => {
+    const message = {
+      id: "m1",
+      remoteChatId: "123",
+      chatType: "direct" as const,
+      senderId: "u",
+      text: "hi",
+      timestamp: new Date(),
+      replyToMessageId: "msg-99",
+    };
+    expect(channelTargetForMessage(message)).toEqual({
+      chatId: "123",
+      replyToMessageId: "msg-99",
+    });
+  });
+
+  it("omits replyToMessageId when message has none", () => {
+    const message = {
+      id: "m1",
+      remoteChatId: "123",
+      chatType: "direct" as const,
+      senderId: "u",
+      text: "hi",
+      timestamp: new Date(),
+    };
+    expect(channelTargetForMessage(message)).toEqual({ chatId: "123" });
   });
 });

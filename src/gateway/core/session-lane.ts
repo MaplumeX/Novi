@@ -183,7 +183,12 @@ async function runTurn(
   };
 
   try {
-    await agent.runTurn({ route: lane.route, text: msg.text, callbacks });
+    await agent.runTurn({
+      route: lane.route,
+      text: msg.text,
+      ...(msg.images === undefined ? {} : { images: msg.images }),
+      callbacks,
+    });
     metrics?.increment("agentSucceeded");
   } catch (e) {
     metrics?.increment("agentFailed");

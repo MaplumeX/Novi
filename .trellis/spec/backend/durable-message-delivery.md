@@ -32,6 +32,13 @@ class GatewayMessageService {
 
 ChannelAdapter.onMessage?: (message: ChannelMessage) => Promise<void>;
 ChannelAdapter.sendFinalChunk?: (target, text, ordinal) => Promise<{ messageId: string }>;
+
+// Optional fields added by channel-unified-semantics (all optional, schema version 1 unchanged):
+ChannelMessage.attachments?: ChannelAttachment[];     // persisted metadata (kind/mimeType/size/filename/localPath/remoteFileId)
+ChannelMessage.images?: ImageContent[];               // runtime base64, NEVER persisted to inbox
+ChannelSendTarget.replyToMessageId?: string;           // optional outbound reply; default undefined (no forced reply)
+GatewaySessionLocator.replyTo?: string;                // persisted in outbox target; decodeOutboxRecord tolerates absence
+AgentProtocolTurnInput.images?: ImageContent[];        // passed to harness.prompt(text, { images })
 ```
 
 Chat operations are `/messages list [limit]`, `/messages retry <inbox-id>`,
@@ -71,6 +78,18 @@ dismissed`. `sending` recovery becomes due `pending` with
   unavoidable nonterminal excess reports a degraded snapshot.
 - Scheduled jobs retain `JobStore` as their source of truth and only share the
   single-attempt executor, limiter, and error classifier.
+- `ChannelMessage.attachments` (metadata: kind/mimeType/size/filename/localPath/
+  remoteFileId) is persisted in `PersistedInboundMessage` and restored by
+  `restoreMessage`. `ChannelMessage.images` (base64 `ImageContent[]`) is
+  runtime-only and MUST NOT be written to inbox — `service.accept` writes only
+  `attachments`. Crash recovery reconstructs images from `attachments[].localPath`
+  (channel implementation responsibility), never from inbox-stored base64.
+- `ChannelSendTarget.replyToMessageId?` is an optional outbound reply capability
+  (not a default). When present, `sink.enqueueInbox` persists it as
+  `GatewaySessionLocator.replyTo` in the outbox target. `delivery.execute`
+  transparently passes it through `channelTargetForLocator`. Channels that
+  channels that don't ignore it. Default behavior
+  (undefined → no reply) preserves existing edit-stream placeholder semantics.
 
 ### 4. Validation & Error Matrix
 

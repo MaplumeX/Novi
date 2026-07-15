@@ -112,4 +112,33 @@ describe("GatewayMessageService", () => {
     expect(store.getOutbox(delivery.id)?.status).toBe("delivery_failed");
     expect(wake).toHaveBeenCalledTimes(1);
   });
+
+  it("persists attachments from the inbound message and restores them on retry", async () => {
+    const store = await setup();
+    const owner = route("attach");
+    const attachments = [
+      { kind: "image" as const, mimeType: "image/png", size: 2048, filename: "photo.png", remoteFileId: "tg-1" },
+    ];
+    const service = new GatewayMessageService(store);
+    const { record } = await service.accept(
+      { id: "primary", type: "telegram" },
+      {
+        id: "m-attach",
+        remoteChatId: "attach",
+        chatType: "direct",
+        senderId: "user",
+        text: "see photo",
+        timestamp: new Date("2026-07-15T00:00:00.000Z"),
+        attachments,
+      },
+      owner,
+    );
+    expect(record.message.attachments).toEqual(attachments);
+
+    // Mark as interrupted, then retry.
+    await store.updateInbox(record.id, (r) => ({ ...r, status: "processing", startedAt: "2026-07-15T00:00:00.000Z" }));
+    await store.updateInbox(record.id, (r) => ({ ...r, status: "interrupted" }));
+    const retried = await service.retry(owner, record.id);
+    expect(retried.message.attachments).toEqual(attachments);
+  });
 });

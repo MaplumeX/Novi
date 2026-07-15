@@ -128,7 +128,7 @@ export class NoviAgentAdapter implements AgentProtocolAdapter {
   }
 
   async runTurn(input: AgentProtocolTurnInput): Promise<AgentProtocolTurnResult> {
-    const { route, text, callbacks } = input;
+    const { route, text, images, callbacks } = input;
     const entry = await this.getOrCreateHarness(route);
     let finalText = "";
     const guarded = callbacks
@@ -141,7 +141,7 @@ export class NoviAgentAdapter implements AgentProtocolAdapter {
       : null;
 
     try {
-      await entry.harness.prompt(text);
+      await entry.harness.prompt(text, images === undefined ? undefined : { images });
     } catch (error) {
       // `/new` intentionally aborts and invalidates this generation. Its late
       // rejection must not become a channel error for the newly-bound session.

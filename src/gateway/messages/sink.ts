@@ -70,6 +70,7 @@ export class FinalDeliverySink {
       ...inbox.route.locator,
       chat: { ...inbox.route.locator.chat, id: target.chatId },
       ...(target.threadId === undefined ? {} : { thread: target.threadId }),
+      ...(target.replyToMessageId === undefined ? {} : { replyTo: target.replyToMessageId }),
     };
     const outbox = createOutboxRecord({
       source: {

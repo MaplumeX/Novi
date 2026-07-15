@@ -1,0 +1,30 @@
+{
+  "id": "channel-media-feishu-semantics",
+  "name": "channel-media-feishu-semantics",
+  "title": "Channel media, Feishu adapter, unified messaging semantics",
+  "description": "",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "Maplume",
+  "assignee": "Maplume",
+  "createdAt": "2026-07-15",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "07-15-channel-unified-semantics",
+    "07-15-telegram-media",
+    "07-15-feishu-adapter"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

@@ -164,4 +164,74 @@ describe("durable message types", () => {
     expect(decodeOutboxRecord(legacy).suppressAlerts).toBeUndefined();
     expect(() => decodeOutboxRecord({ ...alert, suppressAlerts: false })).toThrow(/suppressAlerts/);
   });
+
+  it("persists attachments in inbox records and decodes them back", () => {
+    const inbox = createInboxRecord(
+      {
+        identity: identity(),
+        route: route(),
+        message: {
+          nativeMessageId: "message-42",
+          senderId: "user-1",
+          text: "hello",
+          timestamp: NOW.toISOString(),
+          attachments: [
+            {
+              kind: "image",
+              mimeType: "image/png",
+              size: 1024,
+              filename: "photo.png",
+              remoteFileId: "tg-file-1",
+            },
+          ],
+        },
+      },
+      NOW,
+    );
+    expect(inbox.message.attachments).toEqual([
+      {
+        kind: "image",
+        mimeType: "image/png",
+        size: 1024,
+        filename: "photo.png",
+        remoteFileId: "tg-file-1",
+      },
+    ]);
+    const decoded = decodeInboxRecord(inbox);
+    expect(decoded.message.attachments).toEqual(inbox.message.attachments);
+  });
+
+  it("accepts inbox records without attachments (legacy compatibility)", () => {
+    const inbox = createInboxRecord(
+      {
+        identity: identity(),
+        route: route(),
+        message: {
+          nativeMessageId: "message-42",
+          senderId: "user-1",
+          text: "hello",
+          timestamp: NOW.toISOString(),
+        },
+      },
+      NOW,
+    );
+    expect(inbox.message.attachments).toBeUndefined();
+    expect(decodeInboxRecord(inbox).message.attachments).toBeUndefined();
+  });
+
+  it("persists replyTo in outbox target locator and decodes it back", () => {
+    const locator = { ...route().locator, replyTo: "msg-77" };
+    const outbox = createOutboxRecord({ source: source(), target: locator, text: "reply" }, NOW);
+    expect(outbox.target.replyTo).toBe("msg-77");
+    const decoded = decodeOutboxRecord(outbox);
+    expect(decoded.target.replyTo).toBe("msg-77");
+  });
+
+  it("accepts outbox records without replyTo (legacy compatibility)", () => {
+    const outbox = createOutboxRecord({ source: source(), target: route().locator, text: "hi" }, NOW);
+    expect(outbox.target.replyTo).toBeUndefined();
+    const legacy = { ...outbox, target: { ...outbox.target } };
+    delete (legacy.target as Record<string, unknown>).replyTo;
+    expect(decodeOutboxRecord(legacy).target.replyTo).toBeUndefined();
+  });
 });

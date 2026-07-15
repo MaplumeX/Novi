@@ -23,6 +23,7 @@ export function channelTargetForLocator(locator: GatewaySessionLocator): Channel
   return {
     chatId: locator.chat.id,
     ...(locator.thread !== undefined ? { threadId: locator.thread } : {}),
+    ...(locator.replyTo !== undefined ? { replyToMessageId: locator.replyTo } : {}),
   };
 }
 
@@ -30,6 +31,9 @@ export function channelTargetForMessage(message: ChannelMessage): ChannelSendTar
   return {
     chatId: message.remoteChatId,
     ...(message.threadId !== undefined ? { threadId: message.threadId } : {}),
+    ...(message.replyToMessageId !== undefined
+      ? { replyToMessageId: message.replyToMessageId }
+      : {}),
   };
 }
 

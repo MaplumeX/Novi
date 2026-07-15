@@ -247,4 +247,23 @@ describe("NoviAgentAdapter", () => {
     await adapter.runTurn({ route: route(), text: "resume old" });
     expect(targets).toEqual([{ kind: "new" }, { kind: "resume", metadata: metadata("old") }]);
   });
+
+  it("passes images through to harness.prompt", async () => {
+    const sessionStore = await store();
+    const harness = new FakeHarness();
+    const factory = vi.fn(async () => created(metadata("img-test"), harness));
+    const adapter = new NoviAgentAdapter(env, sessionStore, factory);
+    const images = [{ type: "image" as const, data: "base64data", mimeType: "image/png" }];
+    await adapter.runTurn({ route: route(), text: "describe this", images });
+    expect(harness.prompt).toHaveBeenCalledWith("describe this", { images });
+  });
+
+  it("calls harness.prompt without options when images is undefined", async () => {
+    const sessionStore = await store();
+    const harness = new FakeHarness();
+    const factory = vi.fn(async () => created(metadata("no-img"), harness));
+    const adapter = new NoviAgentAdapter(env, sessionStore, factory);
+    await adapter.runTurn({ route: route(), text: "plain text" });
+    expect(harness.prompt).toHaveBeenCalledWith("plain text", undefined);
+  });
 });

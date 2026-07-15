@@ -30,6 +30,7 @@ function makeAgentMock(): AgentProtocolAdapter {
     async (input: {
       route: ReturnType<typeof route>;
       text: string;
+      images?: { type: string; data: string; mimeType: string }[];
       callbacks?: {
         onTurnEnd?(text: string): Promise<void>;
       };
@@ -320,5 +321,19 @@ describe("enqueueMessage (queue draining)", () => {
     expect(agent.runTurn).toHaveBeenCalledTimes(3);
     expect(lane.queue).toHaveLength(0);
     expect(lane.status).toBe("idle");
+  });
+});
+
+describe("enqueueMessage (images passthrough)", () => {
+  it("passes msg.images through to agent.runTurn", async () => {
+    const agent = makeAgentMock();
+    const channel = makeChannelMock();
+    const lane = createSessionLane("tg:123");
+    const images = [{ type: "image" as const, data: "base64", mimeType: "image/png" }];
+    const msg = { ...makeMsg("hi"), images };
+    await enqueueMessage(lane, agent, makeEntry(channel, msg, "steer"));
+    expect(agent.runTurn).toHaveBeenCalledWith(
+      expect.objectContaining({ text: "hi", images }),
+    );
   });
 });

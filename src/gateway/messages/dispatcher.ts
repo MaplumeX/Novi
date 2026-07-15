@@ -187,6 +187,7 @@ function restoreMessage(record: InboxRecord): ChannelMessage {
     ...(record.message.replyToMessageId === undefined
       ? {}
       : { replyToMessageId: record.message.replyToMessageId }),
+    ...(record.message.attachments === undefined ? {} : { attachments: record.message.attachments }),
     metadata: { updateId: record.identity.nativeUpdateId },
   };
 }

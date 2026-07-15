@@ -1,7 +1,11 @@
 import { createHash } from "node:crypto";
 import { sessionKeyForLocator } from "../core/routing.js";
 import { truncateUtf8 } from "../core/text.js";
-import type { GatewaySessionLocator, GatewaySessionRoute } from "../core/types.js";
+import type {
+  ChannelAttachment,
+  GatewaySessionLocator,
+  GatewaySessionRoute,
+} from "../core/types.js";
 
 export const GATEWAY_MESSAGE_VERSION = 1 as const;
 export const MAX_GATEWAY_MESSAGE_BYTES = 64 * 1024;
@@ -34,6 +38,7 @@ export interface PersistedInboundMessage {
   textTruncated: boolean;
   timestamp: string;
   replyToMessageId?: string;
+  attachments?: ChannelAttachment[];
 }
 
 export interface InboxRecord {
@@ -291,6 +296,9 @@ export function decodeInboxRecord(value: unknown): InboxRecord {
     messageValue.replyToMessageId,
     "inbox.message.replyToMessageId",
   );
+  if (messageValue.attachments !== undefined) {
+    message.attachments = decodeAttachments(messageValue.attachments, "inbox.message.attachments");
+  }
   if (Buffer.byteLength(message.text, "utf8") > MAX_GATEWAY_MESSAGE_BYTES) {
     throw new Error("inbox.message.text exceeds the durable text limit");
   }
@@ -393,6 +401,25 @@ function decodeReceipt(value: unknown, index: number): OutboxReceipt {
   };
 }
 
+function decodeAttachments(value: unknown, field: string): ChannelAttachment[] {
+  const items = array(value, field);
+  return items.map((entry, index) => {
+    const item = record(entry, `${field}.${index}`);
+    const attachment: ChannelAttachment = {
+      kind: oneOf(item.kind, ["image", "file", "voice"] as const, `${field}.${index}.kind`),
+      mimeType: nonEmptyString(item.mimeType, `${field}.${index}.mimeType`),
+      size: nonNegativeInteger(item.size, `${field}.${index}.size`),
+    };
+    if (item.filename !== undefined)
+      attachment.filename = nonEmptyString(item.filename, `${field}.${index}.filename`);
+    if (item.localPath !== undefined)
+      attachment.localPath = nonEmptyString(item.localPath, `${field}.${index}.localPath`);
+    if (item.remoteFileId !== undefined)
+      attachment.remoteFileId = nonEmptyString(item.remoteFileId, `${field}.${index}.remoteFileId`);
+    return attachment;
+  });
+}
+
 function decodeMessageError(value: unknown, field: string): MessageError {
   const item = record(value, field);
   const code = nonEmptyString(item.code, `${field}.code`);
@@ -439,6 +466,7 @@ function decodeLocator(value: unknown, field: string): GatewaySessionLocator {
     },
   };
   if (item.thread !== undefined) locator.thread = nonEmptyString(item.thread, `${field}.thread`);
+  if (item.replyTo !== undefined) locator.replyTo = nonEmptyString(item.replyTo, `${field}.replyTo`);
   return locator;
 }
 

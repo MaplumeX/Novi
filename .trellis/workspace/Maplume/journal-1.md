@@ -1765,3 +1765,36 @@ Parent + 3 children: P3 unified semantics (silent/thread/reply + attachments mod
 ### Next Steps
 
 - None - task complete
+
+
+## Session 53: Update gateway design doc: Telegram inbound media + Feishu channel
+
+**Date**: 2026-07-16
+**Task**: Update gateway design doc: Telegram inbound media + Feishu channel
+**Branch**: `main`
+
+### Summary
+
+Updated docs/gateway-design.md to reflect two source increments missed since dc1c737: (1) Telegram inbound media — dual-field attachment model (attachments persisted vs images runtime base64), image multimodal path vs file/voice on-disk, animation/sticker diagnostic placeholder, download/encode failure degradation, gateway-media perms and sanitizeFilename; (2) Feishu channel adapter — second capability-limited channel instance validating the channel abstraction boundary (edit/threads/media:false, WebSocket long-connection, 3-second ack fire-and-forget + durable inbox, SDK policy disabled → auth unified in GatewayApp). Woven into existing sections per explain-code-design skill; main path keeps Telegram as sole example, Feishu as contrast anchor. migrations/runtime kept out of scope.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e77fed2` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

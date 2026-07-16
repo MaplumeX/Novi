@@ -410,6 +410,7 @@ export async function prepareGatewayEnv(options: BootstrapOptions = {}): Promise
   const retry = resolvedSettings.retry?.provider;
   const transport = resolvedSettings.transport;
   const streamOptions: AgentHarnessStreamOptions = {
+    cacheRetention: "short",
     ...(transport !== undefined ? { transport } : {}),
     ...(retry?.timeoutMs !== undefined ? { timeoutMs: retry.timeoutMs } : {}),
     ...(retry?.maxRetries !== undefined ? { maxRetries: retry.maxRetries } : {}),

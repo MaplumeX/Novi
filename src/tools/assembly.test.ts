@@ -86,6 +86,25 @@ describe("createToolAssembly", () => {
 
     expect(assembly.activeToolNames).toContain("read_file");
     expect(assembly.activeToolNames).toContain("mcp_demo_echo");
+
+    // Builtins form a contiguous alphabetical prefix; externals form a contiguous suffix.
+    const builtinNames = assembly.descriptors
+      .filter((d) => d.source.kind === "builtin")
+      .map((d) => d.name);
+    const externalNames = assembly.descriptors
+      .filter((d) => d.source.kind === "external")
+      .map((d) => d.name);
+    expect(builtinNames).toEqual([...builtinNames].sort());
+    expect(externalNames).toEqual([...externalNames].sort());
+    // All builtins come before all externals.
+    const lastBuiltinIdx = Math.max(
+      ...builtinNames.map((name) => assembly.descriptors.findIndex((d) => d.name === name)),
+    );
+    const firstExternalIdx = Math.min(
+      ...externalNames.map((name) => assembly.descriptors.findIndex((d) => d.name === name)),
+    );
+    expect(lastBuiltinIdx).toBeLessThan(firstExternalIdx);
+
     const descriptor = assembly.descriptors.find((d) => d.name === "mcp_demo_echo");
     expect(descriptor).toMatchObject({
       source: { kind: "external", id: "mcp:demo" },

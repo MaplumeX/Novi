@@ -6,16 +6,16 @@ import { setupEnv, writeFixture } from "./test-helpers.js";
 import { DEFAULT_TOOL_EXECUTION_BUDGET } from "./runtime/budget.js";
 
 const EXPECTED = [
-  "read_file",
-  "write_file",
-  "edit_file",
   "bash",
-  "ls",
+  "edit_file",
+  "fetch_content",
   "glob",
   "grep",
+  "ls",
+  "read_file",
   "todo",
   "web_search",
-  "fetch_content",
+  "write_file",
 ];
 
 describe("createBuiltinToolAssembly", () => {
@@ -32,10 +32,8 @@ describe("createBuiltinToolAssembly", () => {
         expect(IsObject(tool.parameters)).toBe(true);
         expect(typeof tool.execute).toBe("function");
       }
-      expect(assembly.activeToolNames.sort()).toEqual([...EXPECTED].sort());
-      expect(assembly.descriptors.map((descriptor) => descriptor.name).sort()).toEqual(
-        [...EXPECTED].sort(),
-      );
+      expect(assembly.activeToolNames).toEqual(EXPECTED);
+      expect(assembly.descriptors.map((descriptor) => descriptor.name)).toEqual(EXPECTED);
       expect(assembly.availability.every((entry) => entry.status === "active")).toBe(true);
     } finally {
       await cleanup();

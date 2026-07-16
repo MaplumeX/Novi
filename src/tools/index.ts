@@ -230,8 +230,14 @@ const descriptors: readonly ToolDescriptor[] = [
   },
 ];
 
+function sortByName(descriptors: readonly ToolDescriptor[]): ToolDescriptor[] {
+  return [...descriptors].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+}
+
+const sortedDescriptors = sortByName(descriptors);
+
 const registry = new ToolRegistry();
-for (const descriptor of descriptors) registry.add(descriptor);
+for (const descriptor of sortedDescriptors) registry.add(descriptor);
 
 export interface CreateBuiltinToolAssemblyOptions extends WebToolOptions {
   mode?: import("./contracts.js").ToolRuntimeMode;
@@ -265,7 +271,10 @@ export function createBuiltinToolAssembly(
     workspace: options.workspace ?? env.cwd,
     externalWriteAllowlist: permissions?.externalWriteAllowlist,
   });
-  const activeDescriptors = [...descriptors, ...(options.additionalDescriptors ?? [])];
+  const activeDescriptors = sortByName([
+    ...descriptors,
+    ...(options.additionalDescriptors ?? []),
+  ]);
   const activeRegistry = options.additionalDescriptors?.length ? new ToolRegistry() : registry;
   if (activeRegistry !== registry)
     for (const descriptor of activeDescriptors) activeRegistry.add(descriptor);
@@ -316,7 +325,7 @@ export function getBuiltinToolDescriptor(name: string): Readonly<ToolDescriptor>
   return descriptors.find((descriptor) => descriptor.name === name);
 }
 
-/** Code-owned builtin descriptors (read-only). Used by unified assembly. */
+/** Code-owned builtin descriptors (read-only, alphabetical by name). Used by unified assembly. */
 export function getBuiltinToolDescriptors(): readonly ToolDescriptor[] {
-  return descriptors;
+  return sortedDescriptors;
 }

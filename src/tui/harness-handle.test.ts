@@ -118,16 +118,16 @@ describe("replayHarnessState", () => {
     const setToolsCall = newHarness.calls.find((c) => c[0] === "setTools");
     expect(setToolsCall).toBeDefined();
     expect(setToolsCall![2]).toEqual([
-      "read_file",
-      "write_file",
-      "edit_file",
       "bash",
-      "ls",
+      "edit_file",
+      "fetch_content",
       "glob",
       "grep",
+      "ls",
+      "read_file",
       "todo",
       "web_search",
-      "fetch_content",
+      "write_file",
     ]);
 
     // setModel, setThinkingLevel, setStreamOptions replayed from old.

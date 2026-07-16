@@ -131,12 +131,16 @@ export async function createMcpToolDescriptors(
 /**
  * Merge pre-built external descriptors into a fresh registry with builtins.
  * Callers supply the external descriptors (e.g. from createMcpToolDescriptors).
+ * External descriptors are sorted by name for cache-stable ordering.
  */
 export function mergeToolDescriptors(
   builtinDescriptors: readonly ToolDescriptor[],
   externalDescriptors: readonly ToolDescriptor[],
 ): ToolDescriptor[] {
-  return [...builtinDescriptors, ...externalDescriptors];
+  const sortedExternal = [...externalDescriptors].sort((a, b) =>
+    a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
+  );
+  return [...builtinDescriptors, ...sortedExternal];
 }
 
 async function buildMergedAssembly(
@@ -178,6 +182,11 @@ async function buildMergedAssembly(
     diagnostics: mcpDiagnostics,
   });
 
+  // Sort adapted MCP descriptors by name for cache-stable external ordering.
+  const sortedAdapted = [...adapted].sort(
+    (a, b) => (a.descriptor.name < b.descriptor.name ? -1 : a.descriptor.name > b.descriptor.name ? 1 : 0),
+  );
+
   // One registry + one runtime + one scopeGuard for builtin and MCP tools.
   const registry = new ToolRegistry();
   for (const descriptor of builtinDescriptors) {
@@ -186,7 +195,7 @@ async function buildMergedAssembly(
   for (const descriptor of internalDescriptors) {
     registry.add(descriptor);
   }
-  for (const item of adapted) {
+  for (const item of sortedAdapted) {
     try {
       registry.add(item.descriptor);
     } catch (error) {
@@ -198,7 +207,7 @@ async function buildMergedAssembly(
   const allDescriptors = [
     ...builtinDescriptors,
     ...internalDescriptors,
-    ...adapted.map((item) => item.descriptor),
+    ...sortedAdapted.map((item) => item.descriptor),
   ];
   const wholeToolPermissions = permissions
     ? Object.fromEntries(

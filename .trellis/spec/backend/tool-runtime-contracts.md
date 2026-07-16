@@ -109,6 +109,20 @@ Settings schema:
   No grants are persisted across processes.
 - `bash` is an exact command grant and is not an OS/filesystem sandbox.
 
+Cache-aware tool ordering:
+- Builtin descriptors are sorted alphabetically by `name` at the assembly
+  boundary (`index.ts`) before registration. External (MCP) descriptors are
+  sorted alphabetically by `name` at the merge boundary (`assembly.ts`).
+- Builtins always form a contiguous prefix; externals always form a
+  contiguous suffix. The two groups never interleave.
+- `ToolRegistry.build()` iterates in insertion order; the sort happens before
+  insertion, not inside `build()`.
+- Connecting/disconnecting an MCP server does not change builtin order in the
+  assembled catalog or the model-visible tool list.
+- `bootstrap.ts` sets `cacheRetention: "short"` in `streamOptions` so the
+  provider applies prompt-cache breakpoints (including on the last tool
+  definition for Anthropic-compatible providers via `cacheControlFormat`).
+
 Native file boundary:
 
 - A path is internal only when both its lexical absolute spelling and its
@@ -149,6 +163,8 @@ maps the stable text into `ToolResultEnvelope.error`. Initial codes are
 | valid project allow rule                                                | ignore with diagnostic; never broaden policy           |
 | malformed/ambiguous permission rule                                     | add deny-all fail-closed rule + diagnostic             |
 | symlink target changes after approval                                   | `PERMISSION_INTENT_INVALID` before I/O                 |
+| builtin/external descriptor order not alphabetical                      | sort at assembly boundary; never interleave groups     |
+| MCP server connect/disconnect changes builtin order                    | impossible by construction (separate sorted groups)    |
 
 ### 5. Good / Base / Bad Cases
 
@@ -171,6 +187,9 @@ maps the stable text into `ToolResultEnvelope.error`. Initial codes are
   changed target/command must not inherit authorization.
 - Cross-layer: TUI prompt fields, reload store identity/active set, Gateway
   store isolation, Headless/Gateway structured error projection.
+- Cache-aware ordering: builtin descriptors alphabetical by name, external
+  descriptors alphabetical by name, builtin prefix contiguous, external suffix
+  contiguous, MCP connect/disconnect does not reshuffle builtins.
 - Run `npm run typecheck`, `npm run lint`, `npm run test`, `npm run build`, and
   `git diff --check`.
 
@@ -198,6 +217,27 @@ if (decision.level === "ask" && !store.has(minimalGrant(intents))) {
 ```
 
 Current static deny/boundary checks always precede minimal-scope grants.
+
+#### Wrong
+
+```ts
+// Hardcoded insertion order — not alphabetical, not cache-stable.
+const descriptors = [readFile, writeFile, editFile, bash, ls, ...];
+for (const d of descriptors) registry.add(d);
+```
+
+Tool list sent to the model changes unpredictably when new tools are added,
+breaking prompt-cache prefix stability.
+
+#### Correct
+
+```ts
+function sortByName<T extends { name: string }>(items: readonly T[]): T[] {
+  return [...items].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+}
+const sorted = sortByName(descriptors);
+for (const d of sorted) registry.add(d);
+```
 
 ## Scenario: Govern tool resources and overflow
 

@@ -1,6 +1,33 @@
 /** Default marker appended when durable Gateway text exceeds its byte budget. */
 export const GATEWAY_TRUNCATION_MARKER = "\n[output truncated by Novi]";
 
+import type { ChannelAttachment } from "./types.js";
+
+/**
+ * Build a human-readable attachment description for injection into turn text.
+ *
+ * Only file/voice attachments with a `localPath` are included — images go
+ * through the multimodal `images` path, not text injection.
+ *
+ * Example: `[attachment: file "report.pdf" (application/pdf, 12345 bytes) at gateway-media/ab/<id>-report.pdf]`
+ */
+export function attachmentDescription(
+  attachments: ChannelAttachment[] | undefined,
+): string {
+  if (!attachments || attachments.length === 0) return "";
+  const lines: string[] = [];
+  for (const att of attachments) {
+    if (att.kind === "image") continue; // images go through multimodal path
+    if (!att.localPath) continue; // no local file → skip
+    const parts: string[] = [att.kind];
+    if (att.filename) parts.push(`"${att.filename}"`);
+    parts.push(`(${att.mimeType}, ${att.size} bytes)`);
+    parts.push(`at ${att.localPath}`);
+    lines.push(`[attachment: ${parts.join(" ")}]`);
+  }
+  return lines.join("\n");
+}
+
 /**
  * Bound a string by UTF-8 bytes without splitting a multi-byte code point.
  * The marker is itself bounded so callers may safely use very small budgets.

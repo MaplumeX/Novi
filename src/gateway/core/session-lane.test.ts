@@ -337,3 +337,142 @@ describe("enqueueMessage (images passthrough)", () => {
     );
   });
 });
+
+describe("enqueueMessage (attachment description injection)", () => {
+  it("injects file attachment description into turn text", async () => {
+    const agent = makeAgentMock();
+    const channel = makeChannelMock();
+    const lane = createSessionLane("tg:123");
+    const msg: ChannelMessage = {
+      ...makeMsg("see this report"),
+      attachments: [
+        {
+          kind: "file",
+          mimeType: "application/pdf",
+          size: 12345,
+          filename: "report.pdf",
+          localPath: "gateway-media/ab/id-report.pdf",
+        },
+      ],
+    };
+    await enqueueMessage(lane, agent, makeEntry(channel, msg, "steer"));
+    expect(agent.runTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining('[attachment: file "report.pdf"'),
+      }),
+    );
+    const call = (agent.runTurn as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(call.text).toContain("see this report");
+    expect(call.text).toContain("application/pdf");
+    expect(call.text).toContain("12345 bytes");
+    expect(call.text).toContain("gateway-media/ab/id-report.pdf");
+  });
+
+  it("injects voice attachment description into turn text", async () => {
+    const agent = makeAgentMock();
+    const channel = makeChannelMock();
+    const lane = createSessionLane("tg:123");
+    const msg: ChannelMessage = {
+      ...makeMsg("listen to this"),
+      attachments: [
+        {
+          kind: "voice",
+          mimeType: "audio/ogg",
+          size: 5000,
+          localPath: "gateway-media/cd/id-voice.ogg",
+        },
+      ],
+    };
+    await enqueueMessage(lane, agent, makeEntry(channel, msg, "steer"));
+    const call = (agent.runTurn as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(call.text).toContain("listen to this");
+    expect(call.text).toContain("[attachment: voice");
+    expect(call.text).toContain("audio/ogg");
+  });
+
+  it("does not inject text for image attachments (they go through images)", async () => {
+    const agent = makeAgentMock();
+    const channel = makeChannelMock();
+    const lane = createSessionLane("tg:123");
+    const msg: ChannelMessage = {
+      ...makeMsg("look at this"),
+      attachments: [
+        {
+          kind: "image",
+          mimeType: "image/jpeg",
+          size: 5000,
+          localPath: "gateway-media/ab/id-photo.jpg",
+        },
+      ],
+      images: [{ type: "image", data: "base64", mimeType: "image/jpeg" }],
+    };
+    await enqueueMessage(lane, agent, makeEntry(channel, msg, "steer"));
+    const call = (agent.runTurn as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    // Text should be just the caption, no attachment description for images.
+    expect(call.text).toBe("look at this");
+    expect(call.text).not.toContain("[attachment:");
+  });
+
+  it("does not inject text for attachments without localPath", async () => {
+    const agent = makeAgentMock();
+    const channel = makeChannelMock();
+    const lane = createSessionLane("tg:123");
+    const msg: ChannelMessage = {
+      ...makeMsg("check this"),
+      attachments: [
+        {
+          kind: "file",
+          mimeType: "application/pdf",
+          size: 12345,
+          filename: "report.pdf",
+          remoteFileId: "abc",
+        },
+      ],
+    };
+    await enqueueMessage(lane, agent, makeEntry(channel, msg, "steer"));
+    const call = (agent.runTurn as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(call.text).toBe("check this");
+  });
+
+  it("appends attachment description with newline when caption is non-empty", async () => {
+    const agent = makeAgentMock();
+    const channel = makeChannelMock();
+    const lane = createSessionLane("tg:123");
+    const msg: ChannelMessage = {
+      ...makeMsg("my caption"),
+      attachments: [
+        {
+          kind: "file",
+          mimeType: "text/plain",
+          size: 100,
+          filename: "notes.txt",
+          localPath: "gateway-media/ef/id-notes.txt",
+        },
+      ],
+    };
+    await enqueueMessage(lane, agent, makeEntry(channel, msg, "steer"));
+    const call = (agent.runTurn as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(call.text).toBe("my caption\n[attachment: file \"notes.txt\" (text/plain, 100 bytes) at gateway-media/ef/id-notes.txt]");
+  });
+
+  it("injects attachment description without leading newline when caption is empty", async () => {
+    const agent = makeAgentMock();
+    const channel = makeChannelMock();
+    const lane = createSessionLane("tg:123");
+    const msg: ChannelMessage = {
+      ...makeMsg(""),
+      attachments: [
+        {
+          kind: "file",
+          mimeType: "text/plain",
+          size: 100,
+          filename: "notes.txt",
+          localPath: "gateway-media/ef/id-notes.txt",
+        },
+      ],
+    };
+    await enqueueMessage(lane, agent, makeEntry(channel, msg, "steer"));
+    const call = (agent.runTurn as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(call.text).toBe("[attachment: file \"notes.txt\" (text/plain, 100 bytes) at gateway-media/ef/id-notes.txt]");
+  });
+});

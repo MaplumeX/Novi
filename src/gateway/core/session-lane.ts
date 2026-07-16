@@ -7,6 +7,7 @@ import type {
 import type { QueueMode } from "../config.js";
 import { isSilentReply } from "./routing.js";
 import { channelTargetForMessage } from "./routing.js";
+import { attachmentDescription } from "./text.js";
 import type { GatewayMetrics } from "../runtime/metrics.js";
 
 /** A queued inbound message awaiting dispatch after the current run. */
@@ -183,9 +184,17 @@ async function runTurn(
   };
 
   try {
+    // Inject file/voice attachment descriptions into turn text (runtime only;
+    // inbox persists the original caption). Images go through the multimodal
+    // `images` path, not text injection.
+    const attachmentDesc = attachmentDescription(msg.attachments);
+    const turnText =
+      attachmentDesc.length > 0
+        ? msg.text + (msg.text.length > 0 ? "\n" : "") + attachmentDesc
+        : msg.text;
     await agent.runTurn({
       route: lane.route,
-      text: msg.text,
+      text: turnText,
       ...(msg.images === undefined ? {} : { images: msg.images }),
       callbacks,
     });

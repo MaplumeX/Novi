@@ -1,11 +1,14 @@
 import { Telegraf, TelegramError } from "telegraf";
 import { message } from "telegraf/filters";
 import { AbortController, type AbortSignal } from "abort-controller";
+import type { Context as TgContext } from "telegraf";
 import type {
   Chat as TgChat,
   Update as TgUpdate,
   User as TgUser,
   UserFromGetMe,
+  Message,
+  CommonMessageBundle,
 } from "@telegraf/types";
 import { AbstractChannel } from "../core/abstract-channel.js";
 import { chunkText } from "../core/text.js";
@@ -16,9 +19,19 @@ import type {
   ChannelMessage,
   ChannelSendTarget,
   ChatType,
+  ChannelAttachment,
+  ChannelAttachmentKind,
 } from "../core/types.js";
 import { classifyChannelError } from "../messages/errors.js";
 import type { GatewayLogger } from "../runtime/logger.js";
+import type { ImageContent } from "@earendil-works/pi-ai";
+import { encodeImageBytes } from "../../images/encode.js";
+import {
+  saveAttachmentFile,
+  type MediaDownloader,
+  type DownloadResult,
+} from "./telegram-media.js";
+import { getNoviDir } from "../../config.js";
 
 /** Constructor options for {@link TelegramChannel}. */
 export interface TelegramChannelOptions {
@@ -29,6 +42,8 @@ export interface TelegramChannelOptions {
   /** Minimum interval between edit-message calls (default 1000 ms). */
   editIntervalMs?: number;
   pollingApi?: TelegramPollingApi;
+  /** Injectable file downloader for media messages (defaults to Telegram API). */
+  mediaDownloader?: MediaDownloader;
   logger?: GatewayLogger;
 }
 
@@ -68,6 +83,7 @@ export class TelegramChannel extends AbstractChannel {
   private readonly bot: Telegraf;
   private readonly editIntervalMs: number;
   private readonly pollingApi: TelegramPollingApi;
+  private readonly mediaDownloader: MediaDownloader;
   private readonly streamBuffers = new Map<string, StreamBuffer>();
   private botUserId: number | undefined;
   private botUsername: string | undefined;
@@ -85,6 +101,7 @@ export class TelegramChannel extends AbstractChannel {
     });
     this.editIntervalMs = options.editIntervalMs ?? 1000;
     this.logger = options.logger;
+    this.mediaDownloader = options.mediaDownloader ?? this.createDefaultDownloader();
     this.pollingApi = options.pollingApi ?? {
       getMe: () => this.bot.telegram.getMe(),
       deleteWebhook: () => this.bot.telegram.deleteWebhook({ drop_pending_updates: false }),
@@ -112,6 +129,20 @@ export class TelegramChannel extends AbstractChannel {
           return;
         if (!from) return;
         await this.emitMessage(this.normalizeMessage(chat, tgMsg, from, ctx.update.update_id));
+      });
+      this.bot.on(message("photo"), async (ctx) => {
+        await this.handleMediaMessage(ctx, "image");
+      });
+      this.bot.on(message("document"), async (ctx) => {
+        await this.handleMediaMessage(ctx, "file");
+      });
+      this.bot.on(message("voice"), async (ctx) => {
+        await this.handleMediaMessage(ctx, "voice");
+      });
+      // Stickers don't carry a `document` field, so they never reach the
+      // document handler. Register a dedicated handler to diagnose them.
+      this.bot.on(message("sticker"), async (ctx) => {
+        await this.handleMediaMessage(ctx, "file");
       });
     }
 
@@ -340,6 +371,242 @@ export class TelegramChannel extends AbstractChannel {
     };
   }
 
+  // -----------------------------------------------------------------------
+  // Media message handling (photo / document / voice)
+  // -----------------------------------------------------------------------
+
+  /**
+   * Shared handler for photo/document/voice messages. Extracts caption and
+   * file metadata, normalizes into a {@link ChannelMessage} with attachments
+   * and (for images) runtime base64 images, then emits.
+   */
+  private async handleMediaMessage(
+    ctx: TgContext,
+    kind: ChannelAttachmentKind,
+  ): Promise<void> {
+    const tgMsg = ctx.message as CommonMessageBundle;
+    const chat = ctx.chat as TgChat | undefined;
+    const from = tgMsg.from as TgUser | undefined;
+    if (
+      !chat ||
+      (chat.type !== "private" && chat.type !== "group" && chat.type !== "supergroup")
+    )
+      return;
+    if (!from) return;
+
+    // Exclude animation/sticker from document handler (they have document field
+    // but are not ordinary files). Diagnose without crashing.
+    if (kind === "file" && ("animation" in tgMsg || "sticker" in tgMsg)) {
+      const unsupported = "animation" in tgMsg ? "animation" : "sticker";
+      const placeholder: ChannelMessage = {
+        id: String(tgMsg.message_id),
+        remoteChatId: String(chat.id),
+        chatType: mapChatType(chat.type),
+        senderId: String(from.id),
+        senderName: [from.first_name, from.last_name].filter(Boolean).join(" ") || undefined,
+        senderUsername: from.username,
+        text: `[unsupported media type: ${unsupported}]`,
+        timestamp: new Date(tgMsg.date * 1000),
+        ...("message_thread_id" in tgMsg && typeof tgMsg.message_thread_id === "number"
+          ? { threadId: String(tgMsg.message_thread_id) }
+          : {}),
+        ...(tgMsg.reply_to_message
+          ? { replyToMessageId: String(tgMsg.reply_to_message.message_id) }
+          : {}),
+        metadata: {
+          telegramChatType: chat.type,
+          telegramMessageId: tgMsg.message_id,
+          updateId: ctx.update.update_id,
+          unsupported,
+        },
+      };
+      await this.emitMessage(placeholder);
+      return;
+    }
+
+    try {
+      const normalized = await this.normalizeMediaMessage(
+        chat,
+        tgMsg as Message.PhotoMessage | Message.DocumentMessage | Message.VoiceMessage,
+        from,
+        ctx.update.update_id,
+        kind,
+      );
+      await this.emitMessage(normalized);
+    } catch (error) {
+      // Download or encoding failure — degrade gracefully, don't block emitMessage.
+      const reason = error instanceof Error ? error.message : String(error);
+      const text =
+        kind === "image"
+          ? `[image download failed: ${reason}]`
+          : `[${kind} download failed: ${reason}]`;
+      const fallback: ChannelMessage = {
+        id: String(tgMsg.message_id),
+        remoteChatId: String(chat.id),
+        chatType: mapChatType(chat.type),
+        senderId: String(from.id),
+        senderName: [from.first_name, from.last_name].filter(Boolean).join(" ") || undefined,
+        senderUsername: from.username,
+        text: ("caption" in tgMsg ? (tgMsg.caption ?? "") : "") + ("caption" in tgMsg && tgMsg.caption ? "\n" : "") + text,
+        timestamp: new Date(tgMsg.date * 1000),
+        ...("message_thread_id" in tgMsg && typeof tgMsg.message_thread_id === "number"
+          ? { threadId: String(tgMsg.message_thread_id) }
+          : {}),
+        ...(tgMsg.reply_to_message
+          ? { replyToMessageId: String(tgMsg.reply_to_message.message_id) }
+          : {}),
+        metadata: {
+          telegramChatType: chat.type,
+          telegramMessageId: tgMsg.message_id,
+          updateId: ctx.update.update_id,
+          downloadFailed: true,
+        },
+      };
+      await this.emitMessage(fallback);
+    }
+  }
+
+  /**
+   * Normalize a media message (photo/document/voice) into a {@link ChannelMessage}
+   * with attachments and, for images, runtime base64 images.
+   */
+  private async normalizeMediaMessage(
+    chat: TgChat,
+    tgMsg: Message.PhotoMessage | Message.DocumentMessage | Message.VoiceMessage,
+    from: TgUser,
+    updateId: number,
+    kind: ChannelAttachmentKind,
+  ): Promise<ChannelMessage> {
+    const attachment = this.extractAttachment(tgMsg, kind);
+    const caption = "caption" in tgMsg ? (tgMsg.caption ?? "") : "";
+    const senderName = [from.first_name, from.last_name].filter(Boolean).join(" ") || undefined;
+
+    const base: ChannelMessage = {
+      id: String(tgMsg.message_id),
+      remoteChatId: String(chat.id),
+      chatType: mapChatType(chat.type),
+      senderId: String(from.id),
+      senderName,
+      senderUsername: from.username,
+      text: caption,
+      timestamp: new Date(tgMsg.date * 1000),
+      ...("message_thread_id" in tgMsg && typeof tgMsg.message_thread_id === "number"
+        ? { threadId: String(tgMsg.message_thread_id) }
+        : {}),
+      ...(tgMsg.reply_to_message
+        ? { replyToMessageId: String(tgMsg.reply_to_message.message_id) }
+        : {}),
+      metadata: {
+        telegramChatType: chat.type,
+        telegramMessageId: tgMsg.message_id,
+        updateId,
+        telegramMediaType: kind,
+      },
+    };
+
+    if (kind === "image") {
+      // Download → base64 → ImageContent (multimodal path, no disk persistence).
+      const images = await this.downloadAsImages(attachment);
+      if (images !== undefined) {
+        base.images = images;
+        base.attachments = [attachment];
+      } else {
+        // Image encoding failed (mime/size) — degrade: no images, add note to text.
+        base.text = caption + (caption ? "\n" : "") + `[image could not be encoded: ${attachment.mimeType}]`;
+        base.attachments = [attachment];
+      }
+    } else {
+      // File/voice: download → save to disk → fill localPath.
+      const result = await this.mediaDownloader.download(attachment.remoteFileId!);
+      const localPath = await saveAttachmentFile(
+        getNoviDir(),
+        sessionKeyForChat(chat, this.id),
+        attachment.remoteFileId!,
+        attachment.filename ?? "file",
+        result.bytes,
+      );
+      attachment.localPath = localPath;
+      // Update size from actual download if not set.
+      if (attachment.size === 0) attachment.size = result.bytes.byteLength;
+      base.attachments = [attachment];
+    }
+
+    return base;
+  }
+
+  /** Extract attachment metadata from a Telegram media message. */
+  private extractAttachment(
+    tgMsg: Message.PhotoMessage | Message.DocumentMessage | Message.VoiceMessage,
+    kind: ChannelAttachmentKind,
+  ): ChannelAttachment {
+    if (kind === "image") {
+      const photo = tgMsg as Message.PhotoMessage;
+      const largest = photo.photo[photo.photo.length - 1];
+      return {
+        kind: "image",
+        mimeType: "image/jpeg", // Telegram photos are always JPEG
+        size: largest.file_size ?? 0,
+        remoteFileId: largest.file_id,
+      };
+    }
+    if (kind === "voice") {
+      const voice = tgMsg as Message.VoiceMessage;
+      return {
+        kind: "voice",
+        mimeType: voice.voice.mime_type ?? "audio/ogg",
+        size: voice.voice.file_size ?? 0,
+        remoteFileId: voice.voice.file_id,
+      };
+    }
+    // document / file
+    const doc = tgMsg as Message.DocumentMessage;
+    return {
+      kind: "file",
+      mimeType: doc.document.mime_type ?? "application/octet-stream",
+      size: doc.document.file_size ?? 0,
+      ...(doc.document.file_name ? { filename: doc.document.file_name } : {}),
+      remoteFileId: doc.document.file_id,
+    };
+  }
+
+  /**
+   * Download an image attachment and encode it as base64 {@link ImageContent}.
+   * Returns `undefined` if encoding fails (mime/size rejection).
+   */
+  private async downloadAsImages(
+    attachment: ChannelAttachment,
+  ): Promise<ImageContent[] | undefined> {
+    const result = await this.mediaDownloader.download(attachment.remoteFileId!);
+    const encoded = encodeImageBytes(result.bytes, result.mimeType, attachment.filename ?? "image");
+    if (!encoded.ok) return undefined;
+    return [encoded.value.image];
+  }
+
+  /** Create the default Telegram API-based downloader. */
+  private createDefaultDownloader(): MediaDownloader {
+    return {
+      download: async (fileId: string): Promise<DownloadResult> => {
+        const file = await this.bot.telegram.getFile(fileId);
+        if (!file.file_path) throw new Error("Telegram file has no file_path");
+        // Use getFileLink to get the download URL (handles token internally).
+        const link = await this.bot.telegram.getFileLink(file);
+        const res = await fetch(link);
+        if (!res.ok) throw new Error(`Telegram file download failed: ${res.status}`);
+        const bytes = Buffer.from(await res.arrayBuffer());
+        // Infer mime from file_path extension.
+        const ext = file.file_path.split(".").pop()?.toLowerCase() ?? "";
+        const mimeType = mimeFromExtension(ext) ?? "application/octet-stream";
+        const filename = file.file_path.split("/").pop() ?? "file";
+        return {
+          bytes,
+          mimeType,
+          filename,
+          size: file.file_size ?? bytes.byteLength,
+        };
+      },
+    };
+  }
+
   /**
    * Accumulate a text delta and throttle `editMessageText` by
    * {@link editIntervalMs}. The first delta sends a placeholder message to
@@ -445,6 +712,45 @@ function mapChatType(type: string): ChatType {
     default:
       return "direct";
   }
+}
+
+/**
+ * Build a session key hash for a chat, matching the gateway's
+ * `sessionKeyForLocator` format. Used for media file sharding.
+ */
+function sessionKeyForChat(chat: TgChat, accountId: string): string {
+  const fields = [
+    "gateway",
+    "telegram",
+    accountId,
+    mapChatType(chat.type),
+    String(chat.id),
+  ].map(encodeURIComponent);
+  return fields.join(":");
+}
+
+/** Infer a MIME type from a file extension (lowercase, no dot). */
+function mimeFromExtension(ext: string): string | undefined {
+  const map: Record<string, string> = {
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    png: "image/png",
+    gif: "image/gif",
+    webp: "image/webp",
+    pdf: "application/pdf",
+    txt: "text/plain",
+    ogg: "audio/ogg",
+    mp3: "audio/mpeg",
+    mp4: "video/mp4",
+    zip: "application/zip",
+    doc: "application/msword",
+    docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    xls: "application/vnd.ms-excel",
+    xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    json: "application/json",
+    csv: "text/csv",
+  };
+  return map[ext];
 }
 
 /** Return the `retry_after` (seconds) from a Telegram FloodWait error, if any. */

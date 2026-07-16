@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { envelopeData, getTool, setupEnv, toolEnvelope, writeFixture } from "./helpers.js";
+import { envelopeData, getTool, setupEnv, toolEnvelope, writeFixture } from "./test-helpers.js";
 import { mkdir, symlink } from "node:fs/promises";
 import path from "node:path";
-import { DEFAULT_TOOL_EXECUTION_BUDGET } from "../runtime/budget.js";
+import { DEFAULT_TOOL_EXECUTION_BUDGET } from "./runtime/budget.js";
 
 describe("glob tool", () => {
   it("matches files by extension pattern", async () => {

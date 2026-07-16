@@ -1,8 +1,8 @@
 import { readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { envelopeData, getTool, setupEnv } from "./helpers.js";
-import { resolvePermissionsFromSettings } from "../../permissions/policy.js";
+import { envelopeData, getTool, setupEnv } from "./test-helpers.js";
+import { resolvePermissionsFromSettings } from "../permissions/policy.js";
 
 describe("write_file tool", () => {
   it("writes content to a new file, creating parent dirs", async () => {

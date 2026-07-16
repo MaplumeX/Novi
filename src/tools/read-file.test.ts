@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { envelopeData, getTool, setupEnv, toolEnvelope, writeFixture } from "./helpers.js";
+import { envelopeData, getTool, setupEnv, toolEnvelope, writeFixture } from "./test-helpers.js";
 
 describe("read_file tool", () => {
   it("reads a file and returns its text", async () => {

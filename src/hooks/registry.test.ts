@@ -1,14 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AgentHarness, ExecutionEnv } from "@earendil-works/pi-agent-core/node";
-import { registerHooks, matcherMatches, makeComposedToolCallDispatcher } from "../registry.js";
-import type { HookConfig, RegisterHooksDeps } from "../types.js";
+import { registerHooks, matcherMatches, makeComposedToolCallDispatcher } from "./registry.js";
+import type { HookConfig, RegisterHooksDeps } from "./types.js";
 import {
   PermissionGate,
   SessionPermissionStore,
   type Approver,
   WorkspaceScopeGuard,
-} from "../../permissions/index.js";
-import { getBuiltinToolDescriptor } from "../../tools/index.js";
+} from "../permissions/index.js";
+import { getBuiltinToolDescriptor } from "../tools/index.js";
 
 const deps: RegisterHooksDeps = { env: undefined, cwd: "/test", sessionId: "s1" };
 

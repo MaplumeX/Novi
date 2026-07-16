@@ -3,10 +3,10 @@ import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createTodoTool, __resetTodoStoreForTests } from "../todo.js";
+import { createTodoTool, __resetTodoStoreForTests } from "./todo.js";
 
 let mockedNoviDir = "";
-vi.mock("../../config.js", async (importActual) => {
+vi.mock("../config.js", async (importActual) => {
   const actual = (await importActual()) as Record<string, unknown>;
   return { ...actual, getNoviDir: () => mockedNoviDir };
 });
@@ -149,8 +149,8 @@ describe("todo tool", () => {
       // Simulate a new process: reset modules to clear the in-memory store,
       // re-register the config mock, then re-import the todo module.
       vi.resetModules();
-      vi.doMock("../../config.js", () => ({ getNoviDir: () => mockedNoviDir }));
-      const { createTodoTool: createTodoToolFresh } = await import("../todo.js");
+      vi.doMock("../config.js", () => ({ getNoviDir: () => mockedNoviDir }));
+      const { createTodoTool: createTodoToolFresh } = await import("./todo.js");
       const tool2 = createTodoToolFresh(sessionId);
 
       const list = await tool2.execute("t", { action: "list" });
@@ -165,8 +165,8 @@ describe("todo tool", () => {
       const id = (added.details as { todos: { id: string }[] }).todos[0].id;
 
       vi.resetModules();
-      vi.doMock("../../config.js", () => ({ getNoviDir: () => mockedNoviDir }));
-      const { createTodoTool: createTool2 } = await import("../todo.js");
+      vi.doMock("../config.js", () => ({ getNoviDir: () => mockedNoviDir }));
+      const { createTodoTool: createTool2 } = await import("./todo.js");
       const tool2 = createTool2(sessionId);
 
       await tool2.execute("t", { action: "update", id, status: "done" });

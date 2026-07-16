@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFile } from "node:fs/promises";
-import { envelopeData, getTool, setupEnv, writeFixture } from "./helpers.js";
+import { envelopeData, getTool, setupEnv, writeFixture } from "./test-helpers.js";
 import type { AgentTool } from "@earendil-works/pi-agent-core/node";
 
 async function runEdit(

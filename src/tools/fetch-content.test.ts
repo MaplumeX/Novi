@@ -2,11 +2,11 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { envelopeData, getTool, setupEnv } from "./helpers.js";
-import { createBuiltinToolAssembly } from "../index.js";
-import { guardedRequest, providerJsonRequest } from "../web/network.js";
+import { envelopeData, getTool, setupEnv } from "./test-helpers.js";
+import { createBuiltinToolAssembly } from "./index.js";
+import { guardedRequest, providerJsonRequest } from "./web/network.js";
 
-vi.mock("../web/network.js", () => ({ guardedRequest: vi.fn(), providerJsonRequest: vi.fn() }));
+vi.mock("./web/network.js", () => ({ guardedRequest: vi.fn(), providerJsonRequest: vi.fn() }));
 const mockedGuardedRequest = vi.mocked(guardedRequest);
 const mockedProviderJsonRequest = vi.mocked(providerJsonRequest);
 

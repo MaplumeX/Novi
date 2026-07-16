@@ -3,7 +3,7 @@ import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
-import { loadHooks } from "../loader.js";
+import { loadHooks } from "./loader.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 const realHome = process.env.HOME;

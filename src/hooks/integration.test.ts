@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { NodeExecutionEnv, AgentHarness, JsonlSessionRepo, uuidv7 } from "@earendil-works/pi-agent-core/node";
 import { builtinModels } from "@earendil-works/pi-ai/providers/all";
-import { loadHooks } from "../loader.js";
-import { registerHooks } from "../registry.js";
-import { toHookInput, toCoreResult } from "../field-mapping.js";
+import { loadHooks } from "./loader.js";
+import { registerHooks } from "./registry.js";
+import { toHookInput, toCoreResult } from "./field-mapping.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 const realHome = process.env.HOME;

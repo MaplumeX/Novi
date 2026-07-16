@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { envelopeData, getTool, setupEnv, toolEnvelope } from "./helpers.js";
+import { envelopeData, getTool, setupEnv, toolEnvelope } from "./test-helpers.js";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { DEFAULT_TOOL_EXECUTION_BUDGET } from "../runtime/budget.js";
+import { DEFAULT_TOOL_EXECUTION_BUDGET } from "./runtime/budget.js";
 
 describe("bash tool", () => {
   it("returns stdout on success", async () => {

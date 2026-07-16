@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { envelopeData, getTool, setupEnv, toolEnvelope, writeFixture } from "./helpers.js";
+import { envelopeData, getTool, setupEnv, toolEnvelope, writeFixture } from "./test-helpers.js";
 
 describe("grep tool", () => {
   it("finds matching lines via ripgrep path", async () => {

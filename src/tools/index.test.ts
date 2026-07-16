@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { IsObject } from "typebox";
-import { createBuiltinToolAssembly } from "../index.js";
-import { resolvePermissionsFromSettings } from "../../permissions/policy.js";
-import { setupEnv, writeFixture } from "./helpers.js";
-import { DEFAULT_TOOL_EXECUTION_BUDGET } from "../runtime/budget.js";
+import { createBuiltinToolAssembly } from "./index.js";
+import { resolvePermissionsFromSettings } from "../permissions/policy.js";
+import { setupEnv, writeFixture } from "./test-helpers.js";
+import { DEFAULT_TOOL_EXECUTION_BUDGET } from "./runtime/budget.js";
 
 const EXPECTED = [
   "read_file",

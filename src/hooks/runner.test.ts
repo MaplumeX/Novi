@@ -2,8 +2,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mkdtemp, rm, writeFile, chmod } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { runHookScript } from "../runner.js";
-import type { RegisterHooksDeps } from "../types.js";
+import { runHookScript } from "./runner.js";
+import type { RegisterHooksDeps } from "./types.js";
 
 let tmp: string;
 const cleanups: Array<() => Promise<void>> = [];

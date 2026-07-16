@@ -7,11 +7,11 @@ import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import type { McpPlan } from "../../mcp/types.js";
-import { createToolAssembly, createMcpToolDescriptors } from "../assembly.js";
-import { createBuiltinToolAssembly } from "../index.js";
-import { TOOL_CAPABILITIES } from "../contracts.js";
-import { toolEnvelope } from "./helpers.js";
+import type { McpPlan } from "../mcp/types.js";
+import { createToolAssembly, createMcpToolDescriptors } from "./assembly.js";
+import { createBuiltinToolAssembly } from "./index.js";
+import { TOOL_CAPABILITIES } from "./contracts.js";
+import { toolEnvelope } from "./test-helpers.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 

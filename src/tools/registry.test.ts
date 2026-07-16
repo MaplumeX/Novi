@@ -1,9 +1,9 @@
 import * as Type from "typebox";
 import { describe, expect, it } from "vitest";
 import type { AgentTool, ExecutionEnv } from "@earendil-works/pi-agent-core/node";
-import type { ToolDescriptor } from "../contracts.js";
-import { ToolRegistry } from "../registry.js";
-import { WorkspaceScopeGuard } from "../../permissions/scope.js";
+import type { ToolDescriptor } from "./contracts.js";
+import { ToolRegistry } from "./registry.js";
+import { WorkspaceScopeGuard } from "../permissions/scope.js";
 
 const Parameters = Type.Object({});
 const stubEnv = {} as ExecutionEnv;

@@ -2,11 +2,11 @@ import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
-import { createBuiltinToolAssembly } from "../index.js";
+import { createBuiltinToolAssembly } from "./index.js";
 import type { AgentTool } from "@earendil-works/pi-agent-core/node";
-import { __resetTodoStoreForTests } from "../todo.js";
-import type { CreateBuiltinToolAssemblyOptions } from "../index.js";
-import { isToolResultEnvelope, type ToolResultEnvelope } from "../events.js";
+import { __resetTodoStoreForTests } from "./todo.js";
+import type { CreateBuiltinToolAssemblyOptions } from "./index.js";
+import { isToolResultEnvelope, type ToolResultEnvelope } from "./events.js";
 
 export async function setupEnv(): Promise<{
   env: NodeExecutionEnv;

@@ -7,8 +7,8 @@ import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import { mkdtemp, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { assembleSessionTools } from "../assembly.js";
-import { setMcpApproval } from "../../mcp/index.js";
+import { assembleSessionTools } from "./assembly.js";
+import { setMcpApproval } from "../mcp/index.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 const realNoviHome = process.env.NOVI_HOME;

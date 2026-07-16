@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getTool, setupEnv, toolEnvelope, writeFixture } from "./helpers.js";
+import { getTool, setupEnv, toolEnvelope, writeFixture } from "./test-helpers.js";
 
 describe("ls tool", () => {
   it("lists direct children with kind markers", async () => {

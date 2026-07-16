@@ -266,6 +266,7 @@ async function buildMergedAssembly(
       ...formatPlanStatusDiagnostics(plan),
     ],
     scopeGuard,
+    runtime,
     resolveDescriptor: assembly.resolveDescriptor,
     mcp: handle,
   };

@@ -3,6 +3,7 @@ import type { AgentTool } from "@earendil-works/pi-agent-core/node";
 import type { ExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import type { WorkspaceScopeGuard } from "../permissions/scope.js";
 import { resolveAbsolutePath, textResult, unwrap } from "./shared.js";
+import type { ToolExecutionRuntime } from "./runtime/runtime.js";
 
 const Parameters = Type.Object({
   path: Type.String(),
@@ -15,7 +16,8 @@ const Parameters = Type.Object({
  */
 export function createWriteFileTool(
   env: ExecutionEnv,
-  scopeGuard?: WorkspaceScopeGuard,
+  scopeGuard: WorkspaceScopeGuard | undefined,
+  runtime: ToolExecutionRuntime,
 ): AgentTool<typeof Parameters> {
   return {
     name: "write_file",
@@ -33,6 +35,7 @@ export function createWriteFileTool(
       const abs = await resolveAbsolutePath(env, params.path);
       const res = await env.writeFile(abs, params.content, signal);
       unwrap(res, `write_file failed for "${params.path}"`);
+      runtime.readCache.invalidateByPath(abs);
       const bytes = Buffer.byteLength(params.content, "utf8");
       return textResult(`wrote ${bytes} bytes to ${params.path}`, {
         path: params.path,

@@ -9,6 +9,7 @@ import { ArtifactStore, isArtifactFailure } from "./artifacts.js";
 import type { ToolExecutionBudget } from "./budget.js";
 import { BoundedTextCapture, boundText, type ToolOutputMetrics } from "./output.js";
 import { createToolResultEnvelope } from "../events.js";
+import { ReadResultCache } from "./read-cache.js";
 
 export interface ToolRuntimeOptions {
   sessionId: string;
@@ -21,11 +22,14 @@ export interface ToolRuntimeOptions {
 export class ToolExecutionRuntime {
   readonly budget: ToolExecutionBudget;
   readonly artifacts: ArtifactStore;
+  /** Per-session read-result dedup cache (stat snapshots only). */
+  readonly readCache: ReadResultCache;
   private activeCalls = 0;
   private readonly waiters: Array<() => void> = [];
 
   constructor(options: ToolRuntimeOptions) {
     this.budget = options.budget;
+    this.readCache = new ReadResultCache();
     this.artifacts = new ArtifactStore(
       options.artifactRoot ?? path.join(getNoviDir(), "artifacts"),
       options.sessionId,

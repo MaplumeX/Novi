@@ -540,6 +540,17 @@ export async function createHarnessForSession(
     registerHooks(harness, hookConfig, { env, cwd, sessionId: metadata.id }, { permissionGate });
   }
 
+  // Clear the read-result dedup cache when compaction fires. After compaction,
+  // old tool results are summarized away, so the model must be able to re-read
+  // files and get full content again.
+  if (toolAssembly.runtime) {
+    const readCache = toolAssembly.runtime.readCache;
+    harness.on("session_before_compact", () => {
+      readCache.clear();
+      return undefined;
+    });
+  }
+
   // Apply stream options when any are set (avoids a no-op setStreamOptions).
   const so = gatewayEnv.streamOptions;
   if (Object.keys(so).length > 0) {

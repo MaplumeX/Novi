@@ -3,8 +3,7 @@ import type { AgentTool } from "@earendil-works/pi-agent-core/node";
 import type { ExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import type { WorkspaceScopeGuard } from "../permissions/scope.js";
 import { resolveAbsolutePath, textResult, unwrap } from "./shared.js";
-import type { ToolExecutionBudget } from "./runtime/budget.js";
-import { DEFAULT_TOOL_EXECUTION_BUDGET } from "./runtime/budget.js";
+import type { ToolExecutionRuntime } from "./runtime/runtime.js";
 
 const Parameters = Type.Object({
   path: Type.String(),
@@ -43,8 +42,8 @@ function singleOrMultiError(
  */
 export function createEditFileTool(
   env: ExecutionEnv,
-  scopeGuard?: WorkspaceScopeGuard,
-  budget: ToolExecutionBudget = { ...DEFAULT_TOOL_EXECUTION_BUDGET },
+  scopeGuard: WorkspaceScopeGuard | undefined,
+  runtime: ToolExecutionRuntime,
 ): AgentTool<typeof Parameters> {
   return {
     name: "edit_file",
@@ -64,9 +63,9 @@ export function createEditFileTool(
       try {
         const abs = await resolveAbsolutePath(env, params.path);
         const info = unwrap(await env.fileInfo(abs), `edit_file failed to stat "${params.path}"`);
-        if (info.size > budget.memoryBytes) {
+        if (info.size > runtime.budget.memoryBytes) {
           throw new Error(
-            `NOVI_ERROR:TOOL_MEMORY_LIMIT:edit_file input is ${info.size} bytes (limit ${budget.memoryBytes})`,
+            `NOVI_ERROR:TOOL_MEMORY_LIMIT:edit_file input is ${info.size} bytes (limit ${runtime.budget.memoryBytes})`,
           );
         }
         const readRes = await env.readTextFile(abs, signal);
@@ -120,9 +119,9 @@ export function createEditFileTool(
           result = result.slice(0, m.index) + m.newText + result.slice(m.index + m.oldText.length);
         }
         const resultBytes = Buffer.byteLength(result, "utf8");
-        if (resultBytes > budget.memoryBytes) {
+        if (resultBytes > runtime.budget.memoryBytes) {
           throw new Error(
-            `NOVI_ERROR:TOOL_MEMORY_LIMIT:edit_file result is ${resultBytes} bytes (limit ${budget.memoryBytes})`,
+            `NOVI_ERROR:TOOL_MEMORY_LIMIT:edit_file result is ${resultBytes} bytes (limit ${runtime.budget.memoryBytes})`,
           );
         }
 
@@ -135,6 +134,7 @@ export function createEditFileTool(
         );
         const writeRes = await env.writeFile(abs, result, signal);
         unwrap(writeRes, `edit_file failed to write "${params.path}"`);
+        runtime.readCache.invalidateByPath(abs);
         return textResult(`edited ${params.path}`, { path: params.path, replaced: edits.length });
       } finally {
         scopeGuard?.clearCallApproval(toolCallId);

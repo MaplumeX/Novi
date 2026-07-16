@@ -75,7 +75,7 @@ const descriptors: readonly ToolDescriptor[] = [
     defaultEnabled: true,
     streaming: "none",
     modes: ALL_MODES,
-    factory: ({ env, scopeGuard }) => createWriteFileTool(env, scopeGuard),
+    factory: ({ env, scopeGuard, runtime }) => createWriteFileTool(env, scopeGuard, runtime!),
     resolvePermissionIntents: pathIntent("filesystem.write", "file"),
   },
   {
@@ -88,7 +88,7 @@ const descriptors: readonly ToolDescriptor[] = [
     defaultEnabled: true,
     streaming: "none",
     modes: ALL_MODES,
-    factory: ({ env, scopeGuard, runtime }) => createEditFileTool(env, scopeGuard, runtime!.budget),
+    factory: ({ env, scopeGuard, runtime }) => createEditFileTool(env, scopeGuard, runtime!),
     resolvePermissionIntents: pathIntent("filesystem.write", "file"),
   },
   {
@@ -315,6 +315,7 @@ export function createBuiltinToolAssembly(
     ...assembly,
     tools: assembly.tools.map((tool) => runtime.wrap(tool)),
     scopeGuard,
+    runtime,
     // Prefer registry lookup (covers only builtins here); fall back to static table.
     resolveDescriptor: (name) => assembly.resolveDescriptor(name) ?? getBuiltinToolDescriptor(name),
   };

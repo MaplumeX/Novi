@@ -278,6 +278,16 @@ function resolveToolExecutionBudget(
 class ToolExecutionRuntime {
   wrap(tool: AgentTool): AgentTool;
   createCapture(callId: string, tool: string, direction?: "head" | "tail"): BoundedTextCapture;
+  readonly readCache: ReadResultCache;
+}
+
+class ReadResultCache {
+  get(key: { absPath: string; offset: number; limit: number | undefined },
+       stat: { mtimeMs: number; size: number }): { mtimeMs: number; size: number } | undefined;
+  set(key: { absPath: string; offset: number; limit: number | undefined },
+       stat: { mtimeMs: number; size: number }): void;
+  invalidateByPath(absPath: string): void;
+  clear(): void;
 }
 ```
 
@@ -320,6 +330,14 @@ CLI values are repeatable: `--tool-budget <field>=<positive-safe-integer>`.
   when `rg` is unavailable it uses the same streaming Node scanner and limits.
 - Web TTL controls freshness; retention independently limits cache bytes/age.
   Cleanup is opportunistic single-flight and never follows symlinks.
+- `ToolExecutionRuntime.readCache` is a per-session, in-memory
+  `ReadResultCache` that deduplicates repeated `read_file` calls. Key:
+  `(absPath, offset, limit)`. Value: stat snapshot `{ mtimeMs, size }` only
+  — no file content is stored. On a cache hit (stat matches), `read_file`
+  returns a hint text without opening a file stream. `edit_file` and
+  `write_file` call `invalidateByPath(abs)` after a successful write.
+  `session_before_compact` hook clears the entire cache so the model can
+  re-read files whose previous tool results were summarized away.
 
 ### 4. Validation & Error Matrix
 
@@ -337,6 +355,10 @@ CLI values are repeatable: `--tool-budget <field>=<positive-safe-integer>`.
 | Bash non-zero exit                                           | `NOVI_ERROR:TOOL_EXIT_NONZERO` with bounded tail only               |
 | other thrown tool failure                                    | `NOVI_ERROR:TOOL_EXECUTION_FAILED` with bounded single-line message |
 | artifacts explicitly disabled                                | successful truncation without artifact path                         |
+| `read_file` cache hit (stat matches)                        | hint text returned, no file stream opened, `details.cache: "hit"`  |
+| `read_file` cache miss (no entry or stat mismatch)          | normal streaming read, stat stored, `details.cache: "miss"`        |
+| `edit_file`/`write_file` modifies a file                    | `readCache.invalidateByPath(abs)` clears all entries for that path  |
+| compaction fires (`session_before_compact`)                 | `readCache.clear()` resets all entries                              |
 
 ### 5. Good / Base / Bad Cases
 
@@ -362,6 +384,9 @@ CLI values are repeatable: `--tool-budget <field>=<positive-safe-integer>`.
   symlink non-following, abort, bounded structured matches.
 - Cache: TTL, age and size retention, corrupt files, concurrent cleanup,
   active read safety, symlink non-following, no credential persistence.
+- Read dedup cache: hit/miss on stat match, stale entry deletion, batch
+  invalidation by path after edit/write, clear on compaction, independent
+  offset/limit entries, no file content stored.
 - Cross-mode: fresh/resume/rebuild/Gateway receive the same resolved values.
 
 ### 7. Wrong vs Correct

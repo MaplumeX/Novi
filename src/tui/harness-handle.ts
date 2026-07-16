@@ -302,6 +302,17 @@ export async function replayHarnessState(
     diagnostics.push(`hooks: failed to reload: ${e instanceof Error ? e.message : String(e)}`);
   }
 
+  // Clear the read-result dedup cache when compaction fires. After compaction,
+  // old tool results are summarized away, so the model must be able to re-read
+  // files and get full content again.
+  if (toolAssembly.runtime) {
+    const readCache = toolAssembly.runtime.readCache;
+    newHarness.on("session_before_compact", () => {
+      readCache.clear();
+      return undefined;
+    });
+  }
+
   return {
     diagnostics,
     permissionGate,

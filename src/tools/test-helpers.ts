@@ -38,6 +38,26 @@ export function getTool(
   return tool;
 }
 
+/**
+ * Look up multiple tools by name from a single shared assembly so they share
+ * one `ToolExecutionRuntime` (and its `readCache`).
+ */
+export function getTools(
+  env: NodeExecutionEnv,
+  names: readonly string[],
+  sessionId = "test-session",
+  options: CreateBuiltinToolAssemblyOptions = {},
+): Record<string, AgentTool> {
+  const tools = createBuiltinToolAssembly(env, sessionId, options).tools;
+  const result: Record<string, AgentTool> = {};
+  for (const name of names) {
+    const tool = tools.find((candidate) => candidate.name === name);
+    if (!tool) throw new Error(`tool "${name}" not found in createBuiltinToolAssembly`);
+    result[name] = tool;
+  }
+  return result;
+}
+
 export async function writeFixture(dir: string, rel: string, content: string): Promise<string> {
   const full = path.join(dir, rel);
   await mkdir(path.dirname(full), { recursive: true });

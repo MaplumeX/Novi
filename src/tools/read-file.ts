@@ -3,7 +3,7 @@ import { createInterface } from "node:readline";
 import * as Type from "typebox";
 import type { AgentTool, ExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import type { WorkspaceScopeGuard } from "../permissions/scope.js";
-import { resolveAbsolutePath } from "./shared.js";
+import { resolveAbsolutePath, textResult, unwrap } from "./shared.js";
 import type { ToolExecutionRuntime } from "./runtime/runtime.js";
 
 const Parameters = Type.Object({
@@ -34,6 +34,23 @@ export function createReadFileTool(
       const abs = await resolveAbsolutePath(env, params.path);
       const start = params.offset && params.offset > 0 ? Math.floor(params.offset) : 1;
       const limit = params.limit && params.limit > 0 ? Math.floor(params.limit) : undefined;
+
+      // --- read-result dedup cache check ---
+      const info = unwrap(await env.fileInfo(abs), `read_file failed to stat "${params.path}"`);
+      const cacheKey = { absPath: abs, offset: start, limit };
+      const stat = { mtimeMs: info.mtimeMs, size: info.size };
+      if (runtime.readCache.get(cacheKey, stat)) {
+        return textResult(
+          `[cached] File unchanged since last read (${params.path}, offset=${params.offset ?? 1}, limit=${params.limit ?? "all"}). Refer to that earlier tool_result.`,
+          {
+            cache: "hit",
+            path: params.path,
+            offset: params.offset ?? null,
+            limit: params.limit ?? null,
+          },
+        );
+      }
+
       const capture = runtime.createCapture(toolCallId, "read_file", "head");
       const stream = createReadStream(abs, { encoding: "utf8", signal });
       const lines = createInterface({ input: stream, crlfDelay: Infinity });
@@ -49,9 +66,11 @@ export function createReadFileTool(
           selected += 1;
         }
         const captured = await capture.finalize({ partialUpdates: 0, partialDroppedBytes: 0 });
+        runtime.readCache.set(cacheKey, stat);
         return {
           content: [{ type: "text", text: captured.text }],
           details: {
+            cache: "miss",
             resourceGoverned: true,
             resourceDirection: "head",
             path: params.path,

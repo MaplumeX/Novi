@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFile } from "node:fs/promises";
-import { envelopeData, getTool, setupEnv, writeFixture } from "./test-helpers.js";
+import { envelopeData, getTool, getTools, setupEnv, writeFixture } from "./test-helpers.js";
 import type { AgentTool } from "@earendil-works/pi-agent-core/node";
 
 async function runEdit(
@@ -150,6 +150,34 @@ describe("edit_file tool", () => {
       await expect(runEdit(tool, { path: file, edits: [] })).rejects.toThrow(
         /at least one replacement/,
       );
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("invalidates the read cache after a successful edit", async () => {
+    const { env, cwd, cleanup } = await setupEnv();
+    try {
+      const file = await writeFixture(cwd, "e.txt", "hello\n");
+      const tools = getTools(env, ["read_file", "edit_file"]);
+      const readTool = tools["read_file"]!;
+      const editTool = tools["edit_file"]!;
+
+      // First read: miss
+      const r1 = await readTool.execute("t", { path: file });
+      expect(envelopeData(r1).cache).toBe("miss");
+
+      // Second read: hit (same file, unchanged)
+      const r2 = await readTool.execute("t", { path: file });
+      expect(envelopeData(r2).cache).toBe("hit");
+
+      // Edit the file
+      await runEdit(editTool, { path: file, edits: [{ oldText: "hello", newText: "world" }] });
+
+      // Third read: miss (cache invalidated by edit)
+      const r3 = await readTool.execute("t", { path: file });
+      expect(envelopeData(r3).cache).toBe("miss");
+      expect((r3.content[0] as { text: string }).text).toBe("world\n");
     } finally {
       await cleanup();
     }

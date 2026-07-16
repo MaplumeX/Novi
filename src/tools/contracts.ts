@@ -112,6 +112,8 @@ export interface ToolAssembly {
   diagnostics: string[];
   /** Runtime-only guard shared with the permission gate for this harness. */
   scopeGuard: WorkspaceScopeGuard;
+  /** Session-scoped runtime that owns budget, artifacts, and the read cache. */
+  runtime?: ToolExecutionRuntime;
   /**
    * Live descriptor lookup for PermissionGate (includes factories/resolvers).
    * Must cover both builtin and external/MCP tools present in this assembly.

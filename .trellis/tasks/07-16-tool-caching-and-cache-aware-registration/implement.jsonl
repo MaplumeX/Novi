@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/tool-runtime-contracts.md", "reason": "Parent integration: tool runtime contracts that both children must satisfy — descriptor registration, ToolExecutionRuntime boundary, and event envelope"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Parent integration: quality standards for the combined result of both children"}
+{"file": ".trellis/tasks/07-16-read-result-dedup-cache/design.md", "reason": "Child A design — needed for integration review of combined changes"}
+{"file": ".trellis/tasks/07-16-cache-aware-tool-registration/design.md", "reason": "Child B design — needed for integration review of combined changes"}

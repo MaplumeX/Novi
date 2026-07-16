@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/tool-runtime-contracts.md", "reason": "Tool runtime contracts: defines the ToolExecutionRuntime boundary, event envelope, and validation matrix that the check sub-agent must verify against"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Quality guidelines and forbidden patterns to check against"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Error handling conventions for validating NOVI_ERROR codes and tool failure behavior"}
+{"file": ".trellis/tasks/07-16-read-result-dedup-cache/design.md", "reason": "Design document to verify implementation matches the intended architecture and contracts"}

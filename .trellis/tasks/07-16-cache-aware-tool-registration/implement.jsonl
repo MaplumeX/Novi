@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/tool-runtime-contracts.md", "reason": "Tool runtime contracts: descriptor registration, active-set assembly, and exposure policy — defines the sort boundary and what must remain stable"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Code standards and forbidden patterns for backend changes"}
+{"file": ".trellis/spec/backend/pi-agent-core-api.md", "reason": "Verified pi-agent-core public API: AgentHarnessStreamOptions.cacheRetention, provider forwarding, and harness construction"}
+{"file": ".trellis/tasks/07-16-cache-aware-tool-registration/design.md", "reason": "Technical design for sort strategy, external sort, cacheRetention wiring, and compatibility notes"}

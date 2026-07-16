@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/tool-runtime-contracts.md", "reason": "Tool runtime contracts: descriptor registration, ToolExecutionRuntime ownership, budget, and event envelope contracts — defines where the read cache must live and how it interacts with the existing runtime"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Code standards and forbidden patterns for backend changes"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Error handling conventions for tool execution failures and NOVI_ERROR codes"}
+{"file": ".trellis/spec/backend/pi-agent-core-api.md", "reason": "Verified pi-agent-core public API: ExecutionEnv.fileInfo, AgentTool result shape, harness hook events (session_before_compact)"}
+{"file": ".trellis/tasks/07-16-read-result-dedup-cache/design.md", "reason": "Technical design for the read result cache: ReadResultCache class, wiring into ToolExecutionRuntime, edit/write invalidation, and compaction reset"}

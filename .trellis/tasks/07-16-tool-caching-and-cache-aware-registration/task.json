@@ -1,0 +1,29 @@
+{
+  "id": "tool-caching-and-cache-aware-registration",
+  "name": "tool-caching-and-cache-aware-registration",
+  "title": "Tool-level caching and cache-aware tool registration",
+  "description": "",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "Maplume",
+  "assignee": "Maplume",
+  "createdAt": "2026-07-16",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "07-16-read-result-dedup-cache",
+    "07-16-cache-aware-tool-registration"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

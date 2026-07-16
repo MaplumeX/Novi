@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 53
+- **Total Sessions**: 54
 - **Last Active**: 2026-07-16
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1800 | Active |
+| `journal-1.md` | ~1834 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 54 | 2026-07-16 | Tool-level caching and cache-aware tool registration | `b881a36`, `4cff937` | `main` |
 | 53 | 2026-07-16 | Update gateway design doc: Telegram inbound media + Feishu channel | `e77fed2` | `main` |
 | 52 | 2026-07-16 | Channel media, Feishu adapter, unified messaging semantics | `dc1c737`, `d69a6ea`, `f02e5dc` | `main` |
 | 51 | 2026-07-15 | 交付 Gateway 常驻服务与可靠投递 | `c6d659f`, `299dc22`, `6a908e7`, `bd7d16e`, `ba6b3d9` | `main` |

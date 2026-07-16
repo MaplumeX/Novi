@@ -1798,3 +1798,37 @@ Updated docs/gateway-design.md to reflect two source increments missed since dc1
 ### Next Steps
 
 - None - task complete
+
+
+## Session 54: Tool-level caching and cache-aware tool registration
+
+**Date**: 2026-07-16
+**Task**: Tool-level caching and cache-aware tool registration
+**Branch**: `main`
+
+### Summary
+
+Implemented two independent tool caching improvements: (1) cache-aware tool registration — builtin descriptors sorted alphabetically, external MCP descriptors sorted as separate suffix, cacheRetention: "short" enabled in streamOptions; (2) read result dedup cache — per-session ReadResultCache on ToolExecutionRuntime with stat-based (mtime+size) invalidation, hint text on cache hit, edit/write invalidation by path, and compaction reset via session_before_compact hook. Updated tool-runtime-contracts spec with both new contracts.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b881a36` | (see git log) |
+| `4cff937` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

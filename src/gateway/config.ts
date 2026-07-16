@@ -20,8 +20,21 @@ export interface TelegramChannelConfig {
   connectionMode?: "long-poll" | "webhook";
 }
 
-/** Discriminated union of all channel config shapes (MVP: telegram only). */
-export type ChannelConfig = TelegramChannelConfig;
+/** Feishu (Lark) channel entry in `gateway.json`. */
+export interface FeishuChannelConfig {
+  type: "feishu";
+  /** Stable instance id used in session keys (`<id>:<chatId>`). */
+  id: string;
+  /** Feishu App ID. Supports `${ENV_VAR}` expansion. */
+  appId: string;
+  /** Feishu App Secret. Supports `${ENV_VAR}` expansion. */
+  appSecret: string;
+  /** Feishu domain: "feishu" (default, domestic) or "lark" (overseas). */
+  domain?: "feishu" | "lark";
+}
+
+/** Discriminated union of all channel config shapes. */
+export type ChannelConfig = TelegramChannelConfig | FeishuChannelConfig;
 
 /** Queue delivery mode for messages arriving mid-turn. */
 export type QueueMode = "steer" | "followup" | "interrupt";
@@ -387,6 +400,31 @@ function validateChannels(channels: unknown, warnings: string[]): ChannelConfig[
         id,
         botToken,
         connectionMode: entry.connectionMode as "long-poll" | "webhook" | undefined,
+      });
+    } else if (type === "feishu") {
+      const id = entry.id;
+      const appId = entry.appId;
+      const appSecret = entry.appSecret;
+      if (typeof id !== "string" || !id) {
+        warnings.push(`gateway: channels[${i}] ("feishu") missing "id", skipping`);
+        continue;
+      }
+      if (typeof appId !== "string" || !appId) {
+        warnings.push(`gateway: channels[${i}] ("feishu") missing "appId", skipping`);
+        continue;
+      }
+      if (typeof appSecret !== "string" || !appSecret) {
+        warnings.push(`gateway: channels[${i}] ("feishu") missing "appSecret", skipping`);
+        continue;
+      }
+      valid.push({
+        type: "feishu",
+        id,
+        appId,
+        appSecret,
+        ...(entry.domain === "feishu" || entry.domain === "lark"
+          ? { domain: entry.domain }
+          : {}),
       });
     } else {
       warnings.push(`gateway: channels[${i}] has unknown type "${type ?? ""}", skipping`);

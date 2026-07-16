@@ -266,7 +266,10 @@ describe("loadGatewayConfig", () => {
 
     const { config } = await loadGatewayConfig(env);
     expect(config.channels).toHaveLength(1);
-    expect(config.channels[0].botToken).toBe("tok-xyz");
+    expect(config.channels[0].type).toBe("telegram");
+    if (config.channels[0].type === "telegram") {
+      expect(config.channels[0].botToken).toBe("tok-xyz");
+    }
     delete process.env.MY_BOT_TOKEN;
   });
 
@@ -374,5 +377,117 @@ describe("loadGatewayConfig", () => {
     expect(config.channels[0].id).toBe("good");
     expect(warnings.some((w) => w.includes("missing"))).toBe(true);
     expect(warnings.some((w) => w.includes("unknown type"))).toBe(true);
+  });
+
+  it("loads feishu channels with valid config", async () => {
+    const { env, home, cleanup } = await setupEnv();
+    cleanups.push(cleanup);
+    mockedHome = home;
+
+    await writeJson(path.join(home, "gateway.json"), {
+      channels: [
+        { type: "feishu", id: "fs", appId: "cli_x", appSecret: "secret_x" },
+      ],
+    });
+
+    const { config } = await loadGatewayConfig(env);
+    expect(config.channels).toHaveLength(1);
+    expect(config.channels[0].type).toBe("feishu");
+    if (config.channels[0].type === "feishu") {
+      expect(config.channels[0].id).toBe("fs");
+      expect(config.channels[0].appId).toBe("cli_x");
+      expect(config.channels[0].appSecret).toBe("secret_x");
+    }
+  });
+
+  it("loads feishu channels with domain option", async () => {
+    const { env, home, cleanup } = await setupEnv();
+    cleanups.push(cleanup);
+    mockedHome = home;
+
+    await writeJson(path.join(home, "gateway.json"), {
+      channels: [
+        { type: "feishu", id: "lark", appId: "cli_y", appSecret: "secret_y", domain: "lark" },
+      ],
+    });
+
+    const { config } = await loadGatewayConfig(env);
+    expect(config.channels).toHaveLength(1);
+    if (config.channels[0].type === "feishu") {
+      expect(config.channels[0].domain).toBe("lark");
+    }
+  });
+
+  it("skips feishu channels missing appId with a warning", async () => {
+    const { env, home, cleanup } = await setupEnv();
+    cleanups.push(cleanup);
+    mockedHome = home;
+
+    await writeJson(path.join(home, "gateway.json"), {
+      channels: [
+        { type: "feishu", id: "fs", appSecret: "secret" }, // missing appId
+      ],
+    });
+
+    const { config, warnings } = await loadGatewayConfig(env);
+    expect(config.channels).toHaveLength(0);
+    expect(warnings.some((w) => w.includes("missing \"appId\""))).toBe(true);
+  });
+
+  it("skips feishu channels missing appSecret with a warning", async () => {
+    const { env, home, cleanup } = await setupEnv();
+    cleanups.push(cleanup);
+    mockedHome = home;
+
+    await writeJson(path.join(home, "gateway.json"), {
+      channels: [
+        { type: "feishu", id: "fs", appId: "cli_x" }, // missing appSecret
+      ],
+    });
+
+    const { config, warnings } = await loadGatewayConfig(env);
+    expect(config.channels).toHaveLength(0);
+    expect(warnings.some((w) => w.includes("missing \"appSecret\""))).toBe(true);
+  });
+
+  it("expands ${ENV} in feishu appId/appSecret", async () => {
+    process.env.FEISHU_APP_ID = "cli_env";
+    process.env.FEISHU_APP_SECRET = "secret_env";
+    const { env, home, cleanup } = await setupEnv();
+    cleanups.push(cleanup);
+    mockedHome = home;
+
+    await writeJson(path.join(home, "gateway.json"), {
+      channels: [
+        { type: "feishu", id: "fs", appId: "${FEISHU_APP_ID}", appSecret: "${FEISHU_APP_SECRET}" },
+      ],
+    });
+
+    const { config } = await loadGatewayConfig(env);
+    expect(config.channels).toHaveLength(1);
+    if (config.channels[0].type === "feishu") {
+      expect(config.channels[0].appId).toBe("cli_env");
+      expect(config.channels[0].appSecret).toBe("secret_env");
+    }
+    delete process.env.FEISHU_APP_ID;
+    delete process.env.FEISHU_APP_SECRET;
+  });
+
+  it("loads telegram and feishu channels together", async () => {
+    const { env, home, cleanup } = await setupEnv();
+    cleanups.push(cleanup);
+    mockedHome = home;
+
+    await writeJson(path.join(home, "gateway.json"), {
+      channels: [
+        { type: "telegram", id: "tg", botToken: "tok" },
+        { type: "feishu", id: "fs", appId: "cli_x", appSecret: "secret_x" },
+      ],
+    });
+
+    const { config } = await loadGatewayConfig(env);
+    expect(config.channels).toHaveLength(2);
+    expect(config.channels[0].type).toBe("telegram");
+    expect(config.channels[1].type).toBe("feishu");
   });
 });

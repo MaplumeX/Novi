@@ -1,0 +1,30 @@
+{
+  "id": "mcp-protocol-tool-discovery",
+  "name": "mcp-protocol-tool-discovery",
+  "title": "完善 MCP 协议与工具发现",
+  "description": "",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "Maplume",
+  "assignee": "Maplume",
+  "createdAt": "2026-07-17",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "07-17-mcp-catalog-refresh",
+    "07-17-mcp-tool-discovery-permissions",
+    "07-17-mcp-result-lifecycle"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

@@ -239,6 +239,123 @@ const sorted = sortByName(descriptors);
 for (const d of sorted) registry.add(d);
 ```
 
+## Scenario: Maintain a dynamic MCP tool catalog
+
+### 1. Scope / Trigger
+
+Use this contract when changing MCP `tools/list`, server connection/reconnect,
+tool schema validation, `notifications/tools/list_changed`, or any consumer that
+needs live MCP tool metadata. The committed catalog snapshot is the only
+dynamic MCP tool truth; consumers must not read dependency-owned list caches.
+
+### 2. Signatures
+
+```ts
+interface McpServerCatalogSnapshot {
+  serverName: string;
+  sourceId: `mcp:${string}`;
+  serverFingerprint: string;
+  revision: string; // SHA-256 of canonical execution metadata
+  health: "connected" | "degraded";
+  tools: readonly McpCatalogToolEntry[];
+  schemaBytes: number;
+  committedAt: number;
+  diagnostic?: string;
+}
+
+class McpClientManager {
+  getCatalogSnapshot(): McpCatalogSnapshot;
+  getCatalogSnapshot(serverName: string): McpServerCatalogSnapshot | undefined;
+  resolveCatalogTool(sourceId: string, protocolName: string): McpCatalogToolEntry | undefined;
+  subscribeCatalog(listener: (change: McpCatalogChange) => void): () => void;
+  refresh(serverName: string, reason?: "connect" | "list_changed" | "reconnect"): Promise<void>;
+}
+```
+
+### 3. Contracts
+
+- Fetch every `tools/list` page through public `client.request(...,
+  ListToolsResultSchema)`. The SDK's automatic list-changed fetcher calls one
+  `listTools()` page only, so Novi must not use it as the catalog owner.
+- A refresh builds a temporary complete snapshot, sorts by protocol identity,
+  validates unique/bounded names, compiles schemas, and commits once. Cursor
+  order and page splits must not affect public names or revision.
+- Fixed ceilings are 100 pages, 10,000 tools, 16 MiB canonical metadata, and
+  512 UTF-8 bytes per tool name. A ceiling failure rejects the complete refresh;
+  it never commits a truncated catalog.
+- JSON Schema defaults to draft 2020-12 when `$schema` is absent. Explicit
+  draft-07 uses a separate AJV dialect. Inject those AJV instances through the
+  public `AjvJsonSchemaValidator`; the SDK default AJV accepts 2020-12 metadata
+  but interprets `prefixItems/items` with draft-07 behavior.
+- Validator providers are new per atomic snapshot. Reusing an AJV provider
+  across snapshots can make a repeated `$id` return a validator compiled from
+  the previous revision. Duplicate `$id` values inside one snapshot fail the
+  refresh.
+- Install `ToolListChangedNotificationSchema` manually only when the server
+  declares `tools.listChanged: true`. Per server, use trailing debounce plus
+  one serialized dirty loop; notifications during a refresh request at most
+  one successor refresh.
+- A failed refresh with a previous snapshot retains tools, validators, and
+  revision, then marks health `degraded`. Initial failure remains unavailable.
+  Reconnect uses a connection generation and aborts old refreshes so late work
+  cannot overwrite or resurrect a closed catalog.
+- Identical successful content keeps the revision and emits no content-change
+  event. Recovery from degraded health may emit a health-only change with
+  empty added/changed/removed lists.
+
+### 4. Validation & Error Matrix
+
+| Condition | Behavior / code |
+| --- | --- |
+| repeated cursor or duplicate protocol tool name | reject refresh / `MCP_CATALOG_REFRESH_FAILED` |
+| page, tool, metadata, or name ceiling exceeded | reject refresh / `MCP_CATALOG_LIMIT` |
+| unsupported schema dialect or compile failure | reject refresh / `MCP_CATALOG_REFRESH_FAILED` |
+| first catalog fetch fails | server `unavailable`; no partial snapshot |
+| later catalog fetch fails | keep LKG revision/tools; health `degraded` |
+| identical successful refresh | no content event; revision unchanged |
+| changed/added/removed tool contract | atomic new revision + exact diff |
+| close/reconnect races with refresh | generation mismatch/abort drops late result |
+| one server fails | other MCP servers and builtins remain available |
+
+### 5. Good / Base / Bad Cases
+
+- Good: a 3-page list is fully validated, sorted, compiled, and committed once;
+  a later notification storm coalesces into one current refresh and at most one
+  successor.
+- Base: a one-page static server produces the same direct descriptors and call
+  behavior as before catalog versioning.
+- Bad: a consumer calls `client.listTools()` directly, commits each page, uses
+  SDK output-validator cache as full-catalog state, or clears LKG after a
+  transient list error.
+
+### 6. Tests Required
+
+- Page split/order invariance, cursor loop, duplicate names, every fixed
+  ceiling, invalid schemas, explicit draft-07, default 2020-12, and repeated
+  `$id` across atomic revisions.
+- Exact added/changed/removed diff, identical no-op, LKG degraded/recovery,
+  listChanged debounce/dirty-loop, listener isolation, and bounded diagnostics.
+- Close during refresh, failed/successful reconnect, call abort/timeout, one
+  failed server beside one healthy server, and empty-MCP assembly regression.
+- Run MCP/assembly focused tests plus typecheck, lint, full test, and build.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```ts
+const listed = await client.listTools();
+connection.tools = listed.tools; // first page + dependency-owned validator cache
+```
+
+#### Correct
+
+```ts
+const tools = await fetchEveryToolsListPage(client, limits, signal);
+const next = buildMcpServerCatalogSnapshot(tools); // compile before commit
+if (connection.generation === generation) commit(next);
+```
+
 ## Scenario: Govern tool resources and overflow
 
 ### 1. Scope / Trigger

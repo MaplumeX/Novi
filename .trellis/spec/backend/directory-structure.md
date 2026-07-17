@@ -75,7 +75,8 @@ src/
 │   ├── approval.ts         # User-local ~/.novi/mcp-approvals.json store
 │   ├── plan.ts             # resolveMcpPlan → connectable/pending/denied/invalid
 │   ├── transport.ts        # stdio + Streamable HTTP transport factory
-│   ├── client-manager.ts   # Connect/list/call/close per connectable plan entry
+│   ├── catalog.ts          # Immutable paginated tool snapshots, revisions, schema validators
+│   ├── client-manager.ts   # Connect/full-list/refresh/call/close per connectable plan entry
 │   ├── tool-adapter.ts     # MCP tool → ToolDescriptor/AgentTool (ask, external)
 │   └── index.ts            # Public barrel exports
 ├── images/                # Multimodal image encode + clipboard adapters (TUI pending attachments)

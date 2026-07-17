@@ -28,6 +28,14 @@ export interface AdaptMcpToolsOptions {
   diagnostics?: string[];
 }
 
+export interface CreateMcpToolDescriptorOptions {
+  manager: McpClientManager;
+  serverName: string;
+  tool: Tool;
+  transportKind: "stdio" | "http";
+  name: string;
+}
+
 /**
  * Map connected MCP tools into external ToolDescriptors.
  *
@@ -42,55 +50,63 @@ export function adaptMcpTools(
   const diagnostics = options.diagnostics ?? [];
   const adapted: AdaptedMcpTool[] = [];
 
-  for (const { serverName, tool, transportKind } of manager.getConnectedTools()) {
-    const baseName = buildMcpToolName(serverName, tool.name);
+  for (const entry of manager.getCatalogSnapshot().tools) {
+    const { serverName, transportKind } = entry;
+    const tool = entry.protocolTool;
+    const baseName = entry.publicName;
     const name = allocateUniqueName(baseName, reserved, diagnostics, serverName, tool.name);
     reserved.add(name);
-
-    const sourceId = `mcp:${serverName}`;
-    const capabilities = mapMcpCapabilities(tool);
-    const risk = mapMcpRisk(tool, transportKind);
-    const label = tool.title?.trim() || tool.name;
-    const description =
-      tool.description?.trim() || `MCP tool ${tool.name} from server ${serverName}`;
-    const parameters = mcpInputSchemaToTypeBox(tool.inputSchema);
-    const mcpToolName = tool.name;
-
-    const descriptor: ToolDescriptor = {
-      name,
-      label,
-      source: { kind: "external", id: sourceId },
-      capabilities,
-      risk,
-      defaultPermission: "ask",
-      defaultEnabled: true,
-      streaming: "none",
-      modes: ALL_MODES,
-      optional: true,
-      factory: () =>
-        createMcpAgentTool({
-          name,
-          label,
-          description,
-          parameters,
-          manager,
-          serverName,
-          mcpToolName,
-        }),
-      resolvePermissionIntents: (input) =>
-        resolveMcpPermissionIntents({
-          input,
-          tool,
-          serverName,
-          mcpToolName,
-          capabilities,
-        }),
-    };
-
-    adapted.push({ descriptor, serverName, mcpToolName, name });
+    const descriptor =
+      name === entry.publicName
+        ? entry.descriptor
+        : createMcpToolDescriptor({ manager, serverName, tool, transportKind, name });
+    adapted.push({ descriptor, serverName, mcpToolName: tool.name, name });
   }
 
   return adapted;
+}
+
+/** Create one descriptor from a validated catalog tool and an allocated public name. */
+export function createMcpToolDescriptor(options: CreateMcpToolDescriptorOptions): ToolDescriptor {
+  const { manager, serverName, tool, transportKind, name } = options;
+  const sourceId = `mcp:${serverName}`;
+  const capabilities = mapMcpCapabilities(tool);
+  const risk = mapMcpRisk(tool, transportKind);
+  const label = tool.title?.trim() || tool.name;
+  const description = tool.description?.trim() || `MCP tool ${tool.name} from server ${serverName}`;
+  const parameters = mcpInputSchemaToTypeBox(tool.inputSchema);
+  const mcpToolName = tool.name;
+
+  return {
+    name,
+    label,
+    source: { kind: "external", id: sourceId },
+    capabilities,
+    risk,
+    defaultPermission: "ask",
+    defaultEnabled: true,
+    streaming: "none",
+    modes: ALL_MODES,
+    optional: true,
+    factory: () =>
+      createMcpAgentTool({
+        name,
+        label,
+        description,
+        parameters,
+        manager,
+        serverName,
+        mcpToolName,
+      }),
+    resolvePermissionIntents: (input) =>
+      resolveMcpPermissionIntents({
+        input,
+        tool,
+        serverName,
+        mcpToolName,
+        capabilities,
+      }),
+  };
 }
 
 export function buildMcpToolName(serverName: string, toolName: string): string {
@@ -216,7 +232,8 @@ export function resolveMcpPermissionIntents(args: {
 
   if (capabilities.includes("shell.execute")) {
     // Gate canonicalize rejects empty commands; keep a stable placeholder when absent.
-    const command = firstString(record, ["command", "shell", "cmd", "script"]) ?? "unspecified-command";
+    const command =
+      firstString(record, ["command", "shell", "cmd", "script"]) ?? "unspecified-command";
     intents.push({
       capability: "shell.execute",
       target: command,
@@ -252,7 +269,11 @@ function createMcpAgentTool(args: {
     label,
     description,
     parameters,
-    execute: async (_toolCallId, params, signal): Promise<AgentToolResult<Record<string, unknown>>> => {
+    execute: async (
+      _toolCallId,
+      params,
+      signal,
+    ): Promise<AgentToolResult<Record<string, unknown>>> => {
       const argsRecord =
         params !== null && typeof params === "object" && !Array.isArray(params)
           ? (params as Record<string, unknown>)

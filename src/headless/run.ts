@@ -108,6 +108,10 @@ export async function runJson(opts: RunOptions): Promise<void> {
   );
 
   const projector = new HeadlessEventProjector(opts.result.toolCatalog);
+  const unsubCatalog = opts.result.mcp?.controller?.subscribe((toolCatalog) => {
+    projector.setToolCatalog(toolCatalog);
+    process.stdout.write(JSON.stringify(projectToolCatalog(toolCatalog, "mcp_catalog")) + "\n");
+  });
   const unsub = harness.subscribe((event) => {
     const projected = projector.project(event);
     if (projected) process.stdout.write(JSON.stringify(projected) + "\n");
@@ -125,12 +129,14 @@ export async function runJson(opts: RunOptions): Promise<void> {
     await flushStdout();
     unsub();
     unsubAgentRuns?.();
+    unsubCatalog?.();
     await closeMcp(opts.result);
     process.stderr.write(`Novi: ${message}\n`);
     process.exit(1);
   }
   unsub();
   unsubAgentRuns?.();
+  unsubCatalog?.();
   await flushStdout();
   await closeMcp(opts.result);
   process.exit(0);

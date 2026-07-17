@@ -1,4 +1,8 @@
-import type { ToolDescriptor } from "../tools/contracts.js";
+import type {
+  ToolDescriptor,
+  ToolPermissionIdentity,
+  ToolPermissionSubject,
+} from "../tools/contracts.js";
 import { encodePermissionError } from "./errors.js";
 import { resolveIntentPermission, resolveWholeToolPermission } from "./policy.js";
 import { containsPath, grantKey, WorkspaceScopeGuard } from "./scope.js";
@@ -21,6 +25,7 @@ export class SessionPermissionStore {
       (existing) =>
         existing.capability === grant.capability &&
         existing.scope === "subtree" &&
+        sameIdentity(existing.identity, grant.identity) &&
         existing.lexicalTarget !== undefined &&
         existing.effectiveTarget !== undefined &&
         grant.lexicalTarget !== undefined &&
@@ -31,7 +36,18 @@ export class SessionPermissionStore {
   }
 
   grant(grant: PermissionGrant): void {
-    this.granted.set(grantKey(grant), { ...grant });
+    this.granted.set(grantKey(grant), cloneGrant(grant));
+  }
+
+  /** Revoke grants affected by a live catalog diff. Returns the removal count. */
+  revokeWhere(predicate: (grant: Readonly<PermissionGrant>) => boolean): number {
+    let removed = 0;
+    for (const [key, grant] of this.granted) {
+      if (!predicate(grant)) continue;
+      this.granted.delete(key);
+      removed += 1;
+    }
+    return removed;
   }
 
   clear(): void {
@@ -39,7 +55,7 @@ export class SessionPermissionStore {
   }
 
   list(): PermissionGrant[] {
-    return [...this.granted.values()].map((grant) => ({ ...grant }));
+    return [...this.granted.values()].map(cloneGrant);
   }
 }
 
@@ -111,22 +127,39 @@ export class PermissionGate {
       );
     }
 
-    const whole = resolveWholeToolPermission(this.permissions, descriptor);
+    let subject: ToolPermissionSubject;
+    try {
+      subject = descriptor.resolvePermissionSubject
+        ? descriptor.resolvePermissionSubject(event.input)
+        : { descriptor, input: event.input };
+      assertPermissionSubject(subject);
+    } catch (error) {
+      return blockFromError(error);
+    }
+    const effectiveDescriptor = subject.descriptor;
+    const effectiveToolName = effectiveDescriptor.name;
+    const effectiveInput = subject.input;
+    const identity = subject.identity;
+
+    const whole = resolveWholeToolPermission(this.permissions, effectiveDescriptor);
     if (whole.level === "deny") {
-      return block("TOOL_DISABLED", `tool ${toolName} is denied by current policy`);
+      return block("TOOL_DISABLED", `tool ${effectiveToolName} is denied by current policy`);
     }
 
     let intents: CanonicalPermissionIntent[];
     try {
-      const raw = descriptor.resolvePermissionIntents(event.input);
+      const raw = effectiveDescriptor.resolvePermissionIntents(effectiveInput);
       if (!Array.isArray(raw) || raw.length === 0) {
-        return block("PERMISSION_INTENT_INVALID", `tool ${toolName} produced no permission intent`);
+        return block(
+          "PERMISSION_INTENT_INVALID",
+          `tool ${effectiveToolName} produced no permission intent`,
+        );
       }
       for (const intent of raw) {
-        if (!descriptor.capabilities.includes(intent.capability)) {
+        if (!effectiveDescriptor.capabilities.includes(intent.capability)) {
           return block(
             "PERMISSION_INTENT_INVALID",
-            `tool ${toolName} emitted undeclared capability ${intent.capability}`,
+            `tool ${effectiveToolName} emitted undeclared capability ${intent.capability}`,
           );
         }
       }
@@ -149,7 +182,7 @@ export class PermissionGate {
           `external write is outside the global allowlist: ${intent.target}`,
         );
       }
-      const decision = resolveIntentPermission(this.permissions, descriptor, intent);
+      const decision = resolveIntentPermission(this.permissions, effectiveDescriptor, intent);
       if (decision.level === "deny") {
         return block(
           "PERMISSION_DENIED",
@@ -162,7 +195,9 @@ export class PermissionGate {
     }
 
     // Static deny and workspace boundary checks always run before grants.
-    const ungranted = asks.filter((intent) => !this.store.has(this.scopeGuard.toGrant(intent)));
+    const ungranted = asks.filter(
+      (intent) => !this.store.has(this.scopeGuard.toGrant(intent, identity)),
+    );
     if (ungranted.length === 0 || this.permissions.autoApproveAsks) {
       this.scopeGuard.approveCall(toolCallId, intents);
       return undefined;
@@ -176,9 +211,9 @@ export class PermissionGate {
 
     for (const intent of ungranted) {
       const request: ApprovalRequest = {
-        toolName,
+        toolName: effectiveToolName,
         toolCallId,
-        input: event.input,
+        input: effectiveInput,
         summary: intent.summary,
         capability: intent.capability,
         target: intent.target,
@@ -191,6 +226,7 @@ export class PermissionGate {
         sessionGrantAvailable: !(
           intent.capability === "filesystem.write" && intent.workspaceExternal === true
         ),
+        toolSource: { ...effectiveDescriptor.source },
       };
       let choice;
       try {
@@ -199,15 +235,51 @@ export class PermissionGate {
         return blockFromError(error);
       }
       if (choice === "deny") {
-        return block("PERMISSION_DENIED", `${toolName} blocked by user`);
+        return block("PERMISSION_DENIED", `${effectiveToolName} blocked by user`);
       }
       if (choice === "session" && request.sessionGrantAvailable) {
-        this.store.grant(this.scopeGuard.toGrant(intent));
+        this.store.grant(this.scopeGuard.toGrant(intent, identity));
       }
     }
     this.scopeGuard.approveCall(toolCallId, intents);
     return undefined;
   }
+}
+
+function assertPermissionSubject(subject: ToolPermissionSubject): void {
+  if (!subject || typeof subject !== "object" || !subject.descriptor) {
+    throw new Error(
+      encodePermissionError("PERMISSION_INTENT_INVALID", "invalid permission subject"),
+    );
+  }
+  const identity = subject.identity;
+  if (
+    identity &&
+    (!identity.sourceId || !identity.toolName || !/^[a-f0-9]{64}$/.test(identity.revision))
+  ) {
+    throw new Error(
+      encodePermissionError("PERMISSION_INTENT_INVALID", "invalid external permission identity"),
+    );
+  }
+}
+
+function sameIdentity(
+  left: ToolPermissionIdentity | undefined,
+  right: ToolPermissionIdentity | undefined,
+): boolean {
+  if (!left || !right) return left === right;
+  return (
+    left.sourceId === right.sourceId &&
+    left.toolName === right.toolName &&
+    left.revision === right.revision
+  );
+}
+
+function cloneGrant(grant: PermissionGrant): PermissionGrant {
+  return {
+    ...grant,
+    ...(grant.identity ? { identity: { ...grant.identity } } : {}),
+  };
 }
 
 function blockFromError(error: unknown): { block: true; reason: string } {

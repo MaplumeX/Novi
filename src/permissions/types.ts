@@ -1,4 +1,10 @@
-import type { ToolCapability, ToolPermissionIntent, ToolScopeKind } from "../tools/contracts.js";
+import type {
+  ToolCapability,
+  ToolPermissionIdentity,
+  ToolPermissionIntent,
+  ToolScopeKind,
+  ToolSource,
+} from "../tools/contracts.js";
 
 export type PermissionLevel = "allow" | "ask" | "deny";
 export type PermissionSource = "default" | "global" | "project" | "cli" | "session";
@@ -14,13 +20,16 @@ export type PermissionErrorCode =
 export interface PermissionRule {
   effect: PermissionLevel;
   tool?: string;
+  /** Exact descriptor source id, for example `mcp:github`. */
+  source?: string;
   capability?: ToolCapability;
   target?: string;
   scope?: ToolScopeKind;
 }
 
 export interface ResolvedPermissionRule extends PermissionRule {
-  source: "global" | "project";
+  /** Settings layer provenance; separate from the rule's descriptor selector. */
+  origin: "global" | "project";
 }
 
 export interface ResolvedPermissions {
@@ -54,6 +63,7 @@ export interface PermissionGrant {
   target: string;
   lexicalTarget?: string;
   effectiveTarget?: string;
+  identity?: ToolPermissionIdentity;
 }
 
 export type ApprovalChoice = "once" | "session" | "deny";
@@ -76,6 +86,8 @@ export interface ApprovalRequest {
   shellBoundaryWarning: boolean;
   /** External native writes never receive process-memory grants. */
   sessionGrantAvailable: boolean;
+  /** Real descriptor source; independent from the parent/child approval requester. */
+  toolSource?: ToolSource;
   source?: ApprovalSource;
 }
 

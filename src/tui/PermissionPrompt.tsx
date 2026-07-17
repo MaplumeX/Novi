@@ -62,7 +62,7 @@ export function PermissionPrompt({ prompt, onChoose }: PermissionPromptProps): R
   return (
     <Panel
       title={`Allow ${prompt.toolName}?`}
-      description={`${prompt.capability} · ${prompt.scope}${prompt.source?.kind === "agent-run" ? ` · agent ${prompt.source.label ?? prompt.source.runId} (${prompt.source.profile})` : ""}`}
+      description={`${prompt.capability} · ${prompt.scope}${prompt.toolSource ? ` · ${prompt.toolSource.id}` : ""}${prompt.source?.kind === "agent-run" ? ` · agent ${prompt.source.label ?? prompt.source.runId} (${prompt.source.profile})` : ""}`}
       footer={
         prompt.sessionGrantAvailable
           ? "1/2/3 choose · ↑↓ navigate · Enter confirm · Esc deny"
@@ -74,6 +74,7 @@ export function PermissionPrompt({ prompt, onChoose }: PermissionPromptProps): R
         <Text>Target: {prompt.target}</Text>
         <Text>Reason: {prompt.reason}</Text>
         <Text>Summary: {prompt.summary}</Text>
+        <Text>Input: {prompt.inputPreview}</Text>
         {prompt.shellBoundaryWarning ? (
           <Text color="yellow">
             Warning: shell approval is not a filesystem sandbox; the command and its children may

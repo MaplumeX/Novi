@@ -34,6 +34,8 @@ export interface CreateMcpToolDescriptorOptions {
   tool: Tool;
   transportKind: "stdio" | "http";
   name: string;
+  /** Captured contract revision used to reject stale direct calls. */
+  toolRevision?: string;
 }
 
 /**
@@ -59,7 +61,14 @@ export function adaptMcpTools(
     const descriptor =
       name === entry.publicName
         ? entry.descriptor
-        : createMcpToolDescriptor({ manager, serverName, tool, transportKind, name });
+        : createMcpToolDescriptor({
+            manager,
+            serverName,
+            tool,
+            transportKind,
+            name,
+            toolRevision: entry.toolRevision,
+          });
     adapted.push({ descriptor, serverName, mcpToolName: tool.name, name });
   }
 
@@ -68,7 +77,7 @@ export function adaptMcpTools(
 
 /** Create one descriptor from a validated catalog tool and an allocated public name. */
 export function createMcpToolDescriptor(options: CreateMcpToolDescriptorOptions): ToolDescriptor {
-  const { manager, serverName, tool, transportKind, name } = options;
+  const { manager, serverName, tool, transportKind, name, toolRevision } = options;
   const sourceId = `mcp:${serverName}`;
   const capabilities = mapMcpCapabilities(tool);
   const risk = mapMcpRisk(tool, transportKind);
@@ -77,7 +86,7 @@ export function createMcpToolDescriptor(options: CreateMcpToolDescriptorOptions)
   const parameters = mcpInputSchemaToTypeBox(tool.inputSchema);
   const mcpToolName = tool.name;
 
-  return {
+  const descriptor: ToolDescriptor = {
     name,
     label,
     source: { kind: "external", id: sourceId },
@@ -97,6 +106,7 @@ export function createMcpToolDescriptor(options: CreateMcpToolDescriptorOptions)
         manager,
         serverName,
         mcpToolName,
+        expectedToolRevision: toolRevision,
       }),
     resolvePermissionIntents: (input) =>
       resolveMcpPermissionIntents({
@@ -106,7 +116,24 @@ export function createMcpToolDescriptor(options: CreateMcpToolDescriptorOptions)
         mcpToolName,
         capabilities,
       }),
+    resolvePermissionSubject: (input) => {
+      const entry = resolveCurrentEntry(manager, sourceId, mcpToolName, toolRevision);
+      const argsRecord = inputRecord(input);
+      assertValidMcpInput(entry, argsRecord);
+      return {
+        // Use this projection descriptor so reserved-name remaps remain the
+        // authorization identity even though manager catalog truth is raw.
+        descriptor,
+        input: argsRecord,
+        identity: {
+          sourceId,
+          toolName: mcpToolName,
+          revision: entry.toolRevision,
+        },
+      };
+    },
   };
+  return descriptor;
 }
 
 export function buildMcpToolName(serverName: string, toolName: string): string {
@@ -145,7 +172,9 @@ function allocateUniqueName(
  * `external.invoke` so default ask remains meaningful without overstating risk.
  */
 export function mapMcpCapabilities(tool: Tool): ToolCapability[] {
-  const caps = new Set<ToolCapability>();
+  // Every external execution keeps an explicit invoke authority boundary,
+  // even when conservative filesystem/network/shell hints are also inferred.
+  const caps = new Set<ToolCapability>(["external.invoke"]);
   const annotations = tool.annotations ?? {};
   const propNames = propertyNames(tool.inputSchema);
 
@@ -173,9 +202,6 @@ export function mapMcpCapabilities(tool: Tool): ToolCapability[] {
     }
   }
 
-  if (caps.size === 0) {
-    caps.add("external.invoke");
-  }
   return [...caps];
 }
 
@@ -242,14 +268,12 @@ export function resolveMcpPermissionIntents(args: {
     });
   }
 
-  if (capabilities.includes("external.invoke") || intents.length === 0) {
-    intents.push({
-      capability: "external.invoke",
-      target: `mcp:${serverName}/${mcpToolName}`,
-      scope: "session",
-      summary: tool.title?.trim() || `invoke ${mcpToolName} on ${serverName}`,
-    });
-  }
+  intents.push({
+    capability: "external.invoke",
+    target: `mcp:${serverName}/${mcpToolName}`,
+    scope: "session",
+    summary: tool.title?.trim() || `invoke ${mcpToolName} on ${serverName}`,
+  });
 
   return intents;
 }
@@ -262,8 +286,18 @@ function createMcpAgentTool(args: {
   manager: McpClientManager;
   serverName: string;
   mcpToolName: string;
+  expectedToolRevision?: string;
 }): AgentTool {
-  const { name, label, description, parameters, manager, serverName, mcpToolName } = args;
+  const {
+    name,
+    label,
+    description,
+    parameters,
+    manager,
+    serverName,
+    mcpToolName,
+    expectedToolRevision,
+  } = args;
   return {
     name,
     label,
@@ -274,10 +308,14 @@ function createMcpAgentTool(args: {
       params,
       signal,
     ): Promise<AgentToolResult<Record<string, unknown>>> => {
-      const argsRecord =
-        params !== null && typeof params === "object" && !Array.isArray(params)
-          ? (params as Record<string, unknown>)
-          : {};
+      const argsRecord = inputRecord(params);
+      const entry = resolveCurrentEntry(
+        manager,
+        `mcp:${serverName}`,
+        mcpToolName,
+        expectedToolRevision,
+      );
+      assertValidMcpInput(entry, argsRecord);
       const result = await manager.callTool(serverName, mcpToolName, argsRecord, signal);
       if (result.isError) {
         const preview = mcpResultToPreview(result);
@@ -295,6 +333,39 @@ function createMcpAgentTool(args: {
   };
 }
 
+function inputRecord(input: unknown): Record<string, unknown> {
+  return input !== null && typeof input === "object" && !Array.isArray(input)
+    ? (input as Record<string, unknown>)
+    : {};
+}
+
+function resolveCurrentEntry(
+  manager: McpClientManager,
+  sourceId: string,
+  protocolName: string,
+  expectedToolRevision?: string,
+) {
+  const entry = manager.resolveCatalogTool(sourceId, protocolName);
+  if (!entry || (expectedToolRevision && entry.toolRevision !== expectedToolRevision)) {
+    throw new Error(
+      `NOVI_ERROR:MCP_TOOL_STALE:MCP tool ${sourceId}/${protocolName} changed; search the catalog again`,
+    );
+  }
+  return entry;
+}
+
+function assertValidMcpInput(
+  entry: ReturnType<McpClientManager["resolveCatalogTool"]> & {},
+  input: Record<string, unknown>,
+): void {
+  const result = entry.validateInput(input);
+  if (result.valid) return;
+  const message = result.errorMessage.replace(/[\r\n]+/g, " ").slice(0, 300);
+  throw new Error(
+    `NOVI_ERROR:MCP_INPUT_SCHEMA_INVALID:${entry.sourceId}/${entry.protocolTool.name}: ${message}`,
+  );
+}
+
 /**
  * Convert MCP JSON Schema object into a TypeBox object schema.
  * Registry only requires top-level `IsObject`; nested props may be raw JSON Schema.
@@ -310,12 +381,13 @@ export function mcpInputSchemaToTypeBox(
   const required = Array.isArray(inputSchema?.required)
     ? inputSchema.required.filter((item): item is string => typeof item === "string")
     : [];
-  // Keep TypeBox Object kind (~kind) while overlaying MCP schema fields.
-  return Object.assign(base, {
+  // Keep TypeBox Object kind (~kind) while preserving the complete validated
+  // MCP schema. In particular, never widen `additionalProperties: false`.
+  return Object.assign(base, structuredClone(inputSchema), {
     type: "object" as const,
     properties,
     required,
-    additionalProperties: true,
+    additionalProperties: inputSchema.additionalProperties ?? true,
   });
 }
 

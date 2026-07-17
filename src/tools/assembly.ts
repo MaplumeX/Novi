@@ -4,7 +4,7 @@ import type { ExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import { McpClientManager, type McpClientManagerOptions } from "../mcp/client-manager.js";
 import { adaptMcpTools } from "../mcp/tool-adapter.js";
 import type { McpPlan } from "../mcp/types.js";
-import { resolveWholeToolPermission } from "../permissions/policy.js";
+import type { SessionPermissionStore } from "../permissions/gate.js";
 import { WorkspaceScopeGuard } from "../permissions/scope.js";
 import type { ToolAssembly, ToolDescriptor } from "./contracts.js";
 import {
@@ -12,13 +12,14 @@ import {
   getBuiltinToolDescriptors,
   type CreateBuiltinToolAssemblyOptions,
 } from "./index.js";
-import { ToolRegistry } from "./registry.js";
 import { DEFAULT_TOOL_EXECUTION_BUDGET, ToolExecutionRuntime } from "./runtime/index.js";
+import { SessionToolController } from "./session-tool-controller.js";
 
 /** Lifecycle handle for MCP connections owned by a tool assembly. */
 export interface McpRuntimeHandle {
   plan: McpPlan;
   manager: McpClientManager;
+  controller?: SessionToolController;
   close(): Promise<void>;
   reconnect(serverName?: string): Promise<void>;
   getDiagnostics(): string[];
@@ -37,6 +38,8 @@ export interface CreateToolAssemblyOptions extends CreateBuiltinToolAssemblyOpti
    * Child 3 may pass a plan but delay connect via the returned handle.
    */
   connectMcp?: boolean;
+  /** Session grant store used for revision-scoped revocation on catalog commits. */
+  permissionStore?: SessionPermissionStore;
 }
 
 export type ToolAssemblyWithMcp = ToolAssembly & {
@@ -164,9 +167,6 @@ async function buildMergedAssembly(
 
   const builtinDescriptors = getBuiltinToolDescriptors();
   const internalDescriptors = options.additionalDescriptors ?? [];
-  const reservedNames = new Set(
-    [...builtinDescriptors, ...internalDescriptors].map((descriptor) => descriptor.name),
-  );
 
   const manager = new McpClientManager({
     workspaceCwd: options.workspace ?? env.cwd,
@@ -176,107 +176,51 @@ async function buildMergedAssembly(
     enabledSources: options.exposure?.sources,
   });
 
-  const mcpDiagnostics: string[] = [];
-  const adapted = adaptMcpTools(manager, {
-    reservedNames,
-    diagnostics: mcpDiagnostics,
-  });
-
-  // Sort adapted MCP descriptors by name for cache-stable external ordering.
-  const sortedAdapted = [...adapted].sort(
-    (a, b) => (a.descriptor.name < b.descriptor.name ? -1 : a.descriptor.name > b.descriptor.name ? 1 : 0),
-  );
-
-  // One registry + one runtime + one scopeGuard for builtin and MCP tools.
-  const registry = new ToolRegistry();
-  for (const descriptor of builtinDescriptors) {
-    registry.add(descriptor);
-  }
-  for (const descriptor of internalDescriptors) {
-    registry.add(descriptor);
-  }
-  for (const item of sortedAdapted) {
-    try {
-      registry.add(item.descriptor);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      mcpDiagnostics.push(`mcp descriptor rejected: ${message}`);
-    }
-  }
-
-  const allDescriptors = [
-    ...builtinDescriptors,
-    ...internalDescriptors,
-    ...sortedAdapted.map((item) => item.descriptor),
-  ];
-  const wholeToolPermissions = permissions
-    ? Object.fromEntries(
-        allDescriptors.map((descriptor) => [
-          descriptor.name,
-          resolveWholeToolPermission(permissions, descriptor).level,
-        ]),
-      )
-    : undefined;
-
-  // Connected external MCP sources default enabled unless tools.sources explicitly disables them.
-  // (Registry alone defaults unknown external sources off.)
-  const enabledSources: Record<string, boolean> = { ...(options.exposure?.sources ?? {}) };
-  for (const item of adapted) {
-    const sourceId = item.descriptor.source.id;
-    if (enabledSources[sourceId] === undefined) {
-      enabledSources[sourceId] = true;
-    }
-  }
-
-  const assembly = registry.build(
-    {
-      env,
-      sessionId,
-      options: {
-        webSearch: options.webSearch,
-        fetchContent: options.fetchContent,
-        cacheRoot: options.cacheRoot,
-        cacheRetention: {
-          maxBytes: runtime.budget.webCacheBytes,
-          maxAgeMs: runtime.budget.webCacheMaxAgeMs,
-        },
-        env: options.env,
-      },
-      mode: options.mode ?? "tui",
-      scopeGuard,
-      runtime,
-    },
-    {
-      enabledTools: options.exposure?.enabled,
-      enabledSources,
-      permissions: wholeToolPermissions,
-    },
-  );
-
-  const handle = createMcpRuntimeHandle(manager, plan);
-  return {
-    tools: assembly.tools.map((tool) => runtime.wrap(tool)),
-    descriptors: assembly.descriptors,
-    activeToolNames: assembly.activeToolNames,
-    availability: assembly.availability,
-    diagnostics: [
-      ...assembly.diagnostics,
-      ...manager.getDiagnostics(),
-      ...mcpDiagnostics,
-      ...formatPlanStatusDiagnostics(plan),
-    ],
-    scopeGuard,
+  const controller = new SessionToolController({
+    env,
+    sessionId,
+    manager,
+    builtinDescriptors,
+    internalDescriptors,
+    mode: options.mode ?? "tui",
     runtime,
-    resolveDescriptor: assembly.resolveDescriptor,
+    scopeGuard,
+    webOptions: {
+      webSearch: options.webSearch,
+      fetchContent: options.fetchContent,
+      cacheRoot: options.cacheRoot,
+      cacheRetention: {
+        maxBytes: runtime.budget.webCacheBytes,
+        maxAgeMs: runtime.budget.webCacheMaxAgeMs,
+      },
+      env: options.env,
+    },
+    exposure: options.exposure,
+    permissions,
+    permissionStore: options.permissionStore,
+    baseDiagnostics: [...plan.diagnostics, ...formatPlanStatusDiagnostics(plan)],
+  });
+  const assembly = controller.getAssembly();
+  const handle = createMcpRuntimeHandle(manager, plan, controller);
+  return {
+    ...assembly,
     mcp: handle,
   };
 }
 
-function createMcpRuntimeHandle(manager: McpClientManager, plan: McpPlan): McpRuntimeHandle {
+function createMcpRuntimeHandle(
+  manager: McpClientManager,
+  plan: McpPlan,
+  controller?: SessionToolController,
+): McpRuntimeHandle {
   return {
     plan,
     manager,
-    close: () => manager.close(),
+    ...(controller ? { controller } : {}),
+    close: async () => {
+      controller?.close();
+      await manager.close();
+    },
     reconnect: (serverName?: string) => manager.reconnect(serverName),
     getDiagnostics: () => manager.getDiagnostics(),
   };
@@ -294,6 +238,7 @@ export interface AssembleSessionToolsOptions extends CreateBuiltinToolAssemblyOp
   mcpPlan?: McpPlan;
   /** Optional child-agent allowlist using `mcp:<server>` source ids or server names. */
   mcpSourceAllowlist?: readonly string[];
+  permissionStore?: SessionPermissionStore;
 }
 
 /**

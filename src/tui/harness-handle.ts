@@ -60,6 +60,8 @@ export interface HarnessHandle {
   toolBudget?: ResolvedToolExecutionBudget;
   /** Live MCP connections for the current harness (closed on replace/dispose). */
   mcp?: McpRuntimeHandle;
+  /** Internal live-catalog subscription disposer carried across React handles. */
+  unsubscribeToolCatalog?: () => void;
   /**
    * Rebuild the harness and update the holder state.
    *
@@ -218,8 +220,10 @@ export async function replayHarnessState(
     mcpPlan: opts.mcpPlan,
     mcp: opts.mcpOptions,
     additionalDescriptors: opts.additionalDescriptors,
+    permissionStore: opts.permissionStore,
   });
   await newHarness.setTools(toolAssembly.tools, toolAssembly.activeToolNames);
+  toolAssembly.mcp?.controller?.bindHarness(newHarness);
   diagnostics.push(...toolAssembly.diagnostics);
   if (permissionGate) {
     permissionGate.setScopeGuard(toolAssembly.scopeGuard);
@@ -323,7 +327,7 @@ export async function replayHarnessState(
   return {
     diagnostics,
     permissionGate,
-    toolCatalog: snapshotToolAssembly(toolAssembly),
+    toolCatalog: toolAssembly.mcp?.controller?.getSnapshot() ?? snapshotToolAssembly(toolAssembly),
     mcp: toolAssembly.mcp,
     toolAssembly,
   };
@@ -429,6 +433,7 @@ export function createHarnessHandle(
       const { diagnostics, permissionGate, toolCatalog, mcp } = replayed;
       rebuiltAssembly.current = replayed.toolAssembly;
       // 6. Close previous MCP clients after new ones are connected (process leak).
+      old.unsubscribeToolCatalog?.();
       if (old.mcp) {
         try {
           await old.mcp.close();
@@ -453,6 +458,7 @@ export function createHarnessHandle(
       };
       newHandle.replace = makeReplace(newHandle);
       newHandle.refreshTools = makeRefreshTools(newHandle);
+      bindLiveCatalog(newHandle);
       deps.agentCompletionSink?.bind({
         parent: localParent(sessionMeta),
         harness: newHarness,
@@ -470,7 +476,9 @@ export function createHarnessHandle(
   }
 
   function makeRefreshTools(current: HarnessHandle): HarnessHandle["refreshTools"] {
-    return async (opts = {}): Promise<{ diagnostics: string[]; toolCatalog: ToolCatalogSnapshot }> => {
+    return async (
+      opts = {},
+    ): Promise<{ diagnostics: string[]; toolCatalog: ToolCatalogSnapshot }> => {
       const sessionMeta = await current.session.getMetadata();
       const permissions = current.permissionGate.getPermissions();
       const assemblyRef: { current?: ToolAssemblyWithMcp } = {};
@@ -492,11 +500,19 @@ export function createHarnessHandle(
         connectMcp: true,
         mcpPlan: opts.mcpPlan,
         additionalDescriptors: agentDescriptors,
+        permissionStore: current.permissionStore,
       });
       assemblyRef.current = toolAssembly;
-      await current.harness.setTools(toolAssembly.tools, toolAssembly.activeToolNames);
+      try {
+        await current.harness.setTools(toolAssembly.tools, toolAssembly.activeToolNames);
+      } catch (error) {
+        await toolAssembly.mcp?.close().catch(() => undefined);
+        throw error;
+      }
+      toolAssembly.mcp?.controller?.bindHarness(current.harness);
       current.permissionGate.setScopeGuard(toolAssembly.scopeGuard);
       current.permissionGate.setResolveDescriptor(toolAssembly.resolveDescriptor);
+      current.unsubscribeToolCatalog?.();
       if (current.mcp) {
         try {
           await current.mcp.close();
@@ -504,7 +520,8 @@ export function createHarnessHandle(
           // best-effort
         }
       }
-      const toolCatalog = snapshotToolAssembly(toolAssembly);
+      const toolCatalog =
+        toolAssembly.mcp?.controller?.getSnapshot() ?? snapshotToolAssembly(toolAssembly);
       const nextHandle: HarnessHandle = {
         ...current,
         toolCatalog,
@@ -514,9 +531,25 @@ export function createHarnessHandle(
       };
       nextHandle.replace = makeReplace(nextHandle);
       nextHandle.refreshTools = makeRefreshTools(nextHandle);
+      bindLiveCatalog(nextHandle);
       setHandle(nextHandle);
       return { diagnostics: toolAssembly.diagnostics, toolCatalog };
     };
+  }
+
+  function bindLiveCatalog(current: HarnessHandle): void {
+    current.unsubscribeToolCatalog?.();
+    current.unsubscribeToolCatalog = current.mcp?.controller?.subscribe((toolCatalog) => {
+      const nextHandle: HarnessHandle = {
+        ...current,
+        toolCatalog,
+        replace: async () => ({ diagnostics: [] }),
+        refreshTools: async () => ({ diagnostics: [], toolCatalog }),
+      };
+      nextHandle.replace = makeReplace(nextHandle);
+      nextHandle.refreshTools = makeRefreshTools(nextHandle);
+      setHandle(nextHandle);
+    });
   }
 
   const handle: HarnessHandle = {
@@ -535,6 +568,7 @@ export function createHarnessHandle(
   };
   handle.replace = makeReplace(handle);
   handle.refreshTools = makeRefreshTools(handle);
+  bindLiveCatalog(handle);
   return handle;
 }
 

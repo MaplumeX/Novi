@@ -15,7 +15,7 @@ const deps: RegisterHooksDeps = { env: undefined, cwd: "/test", sessionId: "s1" 
 function makeGate(effect: "allow" | "ask" | "deny", approver?: Approver): PermissionGate {
   return new PermissionGate({
     permissions: {
-      rules: [{ tool: "bash", effect, source: "global" }],
+      rules: [{ tool: "bash", effect, origin: "global" }],
       externalWriteAllowlist: [],
       autoApproveAsks: false,
       diagnostics: [],

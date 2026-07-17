@@ -140,6 +140,7 @@ export function resolveAgentPolicy(input: ResolveAgentPolicyInput): ResolvedAgen
     ...input.parent.permissions.rules.map((rule) => ({
       effect: rule.effect,
       ...(rule.tool ? { tool: rule.tool } : {}),
+      ...(rule.source ? { source: rule.source } : {}),
       ...(rule.capability ? { capability: rule.capability } : {}),
       ...(rule.target ? { target: rule.target } : {}),
       ...(rule.scope ? { scope: rule.scope } : {}),

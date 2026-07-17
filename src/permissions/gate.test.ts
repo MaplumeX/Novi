@@ -4,6 +4,7 @@ import path from "node:path";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getBuiltinToolDescriptor } from "../tools/index.js";
+import type { ToolDescriptor } from "../tools/contracts.js";
 import { decodePermissionError } from "./errors.js";
 import {
   PermissionGate,
@@ -93,6 +94,7 @@ describe("PermissionGate", () => {
       permissions?: ResolvedPermissions;
       store?: SessionPermissionStore;
       choice?: "once" | "session" | "deny";
+      resolveDescriptor?: (name: string) => Readonly<ToolDescriptor> | undefined;
     } = {},
   ): { gate: PermissionGate; request: ReturnType<typeof vi.fn> } {
     const resolved = opts.permissions ?? permissions();
@@ -108,7 +110,7 @@ describe("PermissionGate", () => {
           workspace: cwd,
           externalWriteAllowlist: resolved.externalWriteAllowlist,
         }),
-        resolveDescriptor: getBuiltinToolDescriptor,
+        resolveDescriptor: opts.resolveDescriptor ?? getBuiltinToolDescriptor,
         interactive: true,
       }),
       request,
@@ -292,5 +294,84 @@ describe("PermissionGate", () => {
     expect(decodePermissionError(denied?.reason)).toMatchObject({
       code: "PERMISSION_INTERACTION_REQUIRED",
     });
+  });
+
+  it("authorizes a proxy call as the real external subject and binds grants to revision", async () => {
+    const store = new SessionPermissionStore();
+    let revision = "a".repeat(64);
+    const real: ToolDescriptor = {
+      name: "mcp_demo_read",
+      label: "Read Demo",
+      source: { kind: "external", id: "mcp:demo" },
+      capabilities: ["external.invoke", "filesystem.read"],
+      risk: "read",
+      defaultPermission: "ask",
+      defaultEnabled: true,
+      streaming: "none",
+      modes: ["tui"],
+      factory: () => ({}) as never,
+      resolvePermissionIntents: (input) => [
+        {
+          capability: "filesystem.read",
+          target: (input as { path: string }).path,
+          scope: "file",
+          summary: "read demo",
+        },
+        {
+          capability: "external.invoke",
+          target: "mcp:demo/read",
+          scope: "session",
+          summary: "invoke demo",
+        },
+      ],
+    };
+    const proxy: ToolDescriptor = {
+      ...real,
+      name: "mcp_tool_invoke",
+      label: "Invoke MCP Tool",
+      source: { kind: "builtin", id: "mcp-runtime" },
+      capabilities: ["external.invoke"],
+      resolvePermissionSubject: (input) => ({
+        descriptor: real,
+        input: (input as { arguments: unknown }).arguments,
+        identity: { sourceId: "mcp:demo", toolName: "read", revision },
+      }),
+      resolvePermissionIntents: () => [
+        { capability: "external.invoke", target: "mcp:proxy", scope: "session", summary: "proxy" },
+      ],
+    };
+    const { gate: permissionGate, request } = gate({
+      permissions: permissions([{ capability: "filesystem.read", effect: "allow" }]),
+      store,
+      choice: "session",
+      resolveDescriptor: (name) =>
+        name === proxy.name ? proxy : name === real.name ? real : undefined,
+    });
+
+    const call = () =>
+      permissionGate.onToolCall({
+        toolName: proxy.name,
+        toolCallId: crypto.randomUUID(),
+        input: { toolRef: "opaque", arguments: { path: path.join(cwd, "a.txt") } },
+      });
+    expect(await call()).toBeUndefined();
+    expect(await call()).toBeUndefined();
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request.mock.calls[0]![0]).toMatchObject({
+      toolName: real.name,
+      toolSource: { id: "mcp:demo" },
+      input: { path: path.join(cwd, "a.txt") },
+      capability: "external.invoke",
+    });
+    expect(store.list()[0]!.identity).toEqual({
+      sourceId: "mcp:demo",
+      toolName: "read",
+      revision,
+    });
+
+    revision = "b".repeat(64);
+    expect(await call()).toBeUndefined();
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(store.revokeWhere((grant) => grant.identity?.revision !== revision)).toBe(1);
   });
 });

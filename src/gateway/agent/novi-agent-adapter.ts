@@ -149,7 +149,7 @@ export class NoviAgentAdapter implements AgentProtocolAdapter {
         })
       : undefined;
     const unsubscribe = guarded
-      ? createEventBridge(entry.harness, guarded, entry.toolCatalog)
+      ? createEventBridge(entry.harness, guarded, entry.toolCatalog, entry.mcp?.controller)
       : null;
 
     try {
@@ -244,7 +244,12 @@ export class NoviAgentAdapter implements AgentProtocolAdapter {
     const guarded = this.guardCallbacks(entry, callbacks ?? {}, (text) => {
       finalText = text;
     });
-    const unsubscribe = createEventBridge(entry.harness, guarded, entry.toolCatalog);
+    const unsubscribe = createEventBridge(
+      entry.harness,
+      guarded,
+      entry.toolCatalog,
+      entry.mcp?.controller,
+    );
     try {
       await entry.harness.prompt(`${INTERNAL_AGENT_COMPLETION_WAKE_PREFIX}${run.id}.`);
     } finally {
@@ -374,7 +379,7 @@ export class NoviAgentAdapter implements AgentProtocolAdapter {
     created: CreatedSession,
     generation: number,
   ): SessionEntry {
-    return {
+    const entry: SessionEntry = {
       route,
       generation,
       harness: created.harness,
@@ -384,6 +389,10 @@ export class NoviAgentAdapter implements AgentProtocolAdapter {
       resolveToolDescriptor: created.resolveToolDescriptor,
       mcp: created.mcp,
     };
+    created.mcp?.controller?.subscribe((toolCatalog) => {
+      entry.toolCatalog = toolCatalog;
+    });
+    return entry;
   }
 
   private harnessOptions(route: GatewaySessionRoute): HarnessSessionOptions | undefined {

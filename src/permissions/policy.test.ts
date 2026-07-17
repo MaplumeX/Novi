@@ -20,9 +20,10 @@ const read = {
 
 const external = {
   name: "mcp_demo_echo",
+  source: { kind: "external", id: "mcp:demo" },
   capabilities: ["external.invoke"],
   defaultPermission: "ask",
-} as Pick<ToolDescriptor, "name" | "capabilities" | "defaultPermission">;
+} as Pick<ToolDescriptor, "name" | "source" | "capabilities" | "defaultPermission">;
 
 describe("scoped permission policy", () => {
   it("uses descriptor defaults instead of an implicit allow map", () => {
@@ -120,5 +121,26 @@ describe("scoped permission policy", () => {
     );
     expect(resolveWholeToolPermission(permissions, external).level).toBe("deny");
     expect(resolveWholeToolPermission(permissions, bash).level).toBe("ask");
+  });
+
+  it("matches exact source selectors and ANDs them with tool/capability selectors", () => {
+    const permissions = resolvePermissionsFromSettings(
+      {
+        permissions: {
+          rules: [
+            { source: "mcp:other", capability: "external.invoke", effect: "deny" },
+            {
+              source: "mcp:demo",
+              tool: "mcp_demo_echo",
+              capability: "external.invoke",
+              effect: "allow",
+            },
+          ],
+        },
+      },
+      { workspace: "/work" },
+    );
+    expect(resolveWholeToolPermission(permissions, external).level).toBe("allow");
+    expect(permissions.rules[1]).toMatchObject({ source: "mcp:demo", origin: "global" });
   });
 });

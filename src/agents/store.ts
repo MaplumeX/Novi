@@ -327,10 +327,11 @@ function permissionArray(value: unknown, label: string): PermissionRule[] {
   if (!Array.isArray(value)) invalid(`${label} must be an array`);
   return value.map((raw, index) => {
     const rule = record(raw, `${label}.${index}`);
-    exactKeys(rule, ["effect", "tool", "capability", "target", "scope"], `${label}.${index}`);
+    exactKeys(rule, ["effect", "tool", "source", "capability", "target", "scope"], `${label}.${index}`);
     return {
       effect: oneOf(rule.effect, ["allow", "ask", "deny"] as const, `${label}.${index}.effect`),
       ...(rule.tool !== undefined ? { tool: text(rule.tool, `${label}.${index}.tool`) } : {}),
+      ...(rule.source !== undefined ? { source: text(rule.source, `${label}.${index}.source`) } : {}),
       ...(rule.capability !== undefined ? { capability: text(rule.capability, `${label}.${index}.capability`) as PermissionRule["capability"] } : {}),
       ...(rule.target !== undefined ? { target: text(rule.target, `${label}.${index}.target`) } : {}),
       ...(rule.scope !== undefined ? { scope: text(rule.scope, `${label}.${index}.scope`) as PermissionRule["scope"] } : {}),

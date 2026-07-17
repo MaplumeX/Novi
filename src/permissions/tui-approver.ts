@@ -11,6 +11,8 @@ export interface PermissionPromptState {
   reason: string;
   shellBoundaryWarning: boolean;
   sessionGrantAvailable: boolean;
+  inputPreview: string;
+  toolSource?: ApprovalRequest["toolSource"];
   source?: ApprovalRequest["source"];
 }
 
@@ -61,6 +63,8 @@ export class TuiApprover implements Approver {
       reason: this.active.req.reason,
       shellBoundaryWarning: this.active.req.shellBoundaryWarning,
       sessionGrantAvailable: this.active.req.sessionGrantAvailable,
+      inputPreview: boundedInputPreview(this.active.req.input),
+      ...(this.active.req.toolSource ? { toolSource: { ...this.active.req.toolSource } } : {}),
       ...(this.active.req.source ? { source: { ...this.active.req.source } } : {}),
     };
   }
@@ -128,5 +132,15 @@ export class TuiApprover implements Approver {
     for (const listener of this.listeners) {
       listener(prompt);
     }
+  }
+}
+
+function boundedInputPreview(input: unknown): string {
+  try {
+    return JSON.stringify(input)
+      .replace(/[\r\n]+/g, " ")
+      .slice(0, 500);
+  } catch {
+    return "[unserializable input]";
   }
 }

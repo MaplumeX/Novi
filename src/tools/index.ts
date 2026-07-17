@@ -244,6 +244,9 @@ export interface CreateBuiltinToolAssemblyOptions extends WebToolOptions {
   exposure?: {
     enabled?: Record<string, boolean>;
     sources?: Record<string, boolean>;
+    mcpExposure?: "direct" | "auto" | "deferred";
+    mcpDirectSchemaBytes?: number;
+    mcpPinned?: string[];
   };
   permissions?: ResolvedPermissions;
   workspace?: string;

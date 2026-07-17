@@ -457,13 +457,14 @@ export class McpClientManager {
         transportKind: connection.transportKind,
         tools,
         committedAt: this.now(),
-        createDescriptor: ({ tool, publicName, transportKind }) =>
+        createDescriptor: ({ tool, publicName, transportKind, toolRevision }) =>
           createMcpToolDescriptor({
             manager: this,
             serverName,
             tool,
             transportKind,
             name: publicName,
+            toolRevision,
           }),
       });
 

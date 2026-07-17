@@ -10,6 +10,7 @@ import {
   applyPatch,
   getAgentsMdCandidates,
   loadSettings,
+  resolveMcpExposureSettings,
   type NoviSettings,
 } from "./settings.js";
 
@@ -74,6 +75,43 @@ describe("mergeSettings", () => {
       enabled: {},
       sources: {},
     });
+  });
+
+  it("resolves MCP exposure with project tighten-only semantics", () => {
+    const resolved = resolveMcpExposureSettings({
+      global: {
+        tools: {
+          mcpExposure: "direct",
+          mcpDirectSchemaBytes: 64 * 1024,
+          mcpPinned: ["mcp_demo_read"],
+        },
+      },
+      project: {
+        tools: {
+          mcpExposure: "deferred",
+          mcpDirectSchemaBytes: 16 * 1024,
+          mcpPinned: ["mcp_demo_write"],
+        },
+      },
+    });
+    expect(resolved).toMatchObject({
+      mode: "deferred",
+      directSchemaBytes: 16 * 1024,
+      pinned: ["mcp_demo_read"],
+      sources: { mode: "project", directSchemaBytes: "project", pinned: "global" },
+    });
+    expect(resolved.diagnostics.join("\n")).toContain("mcpPinned ignored");
+  });
+
+  it("ignores project attempts to broaden MCP exposure or raise its budget", () => {
+    const resolved = resolveMcpExposureSettings({
+      global: { tools: { mcpExposure: "deferred", mcpDirectSchemaBytes: 1024 } },
+      project: { tools: { mcpExposure: "direct", mcpDirectSchemaBytes: 2048 } },
+    });
+    expect(resolved.mode).toBe("deferred");
+    expect(resolved.directSchemaBytes).toBe(1024);
+    expect(resolved.diagnostics.join("\n")).toContain("cannot broaden");
+    expect(resolved.diagnostics.join("\n")).toContain("cannot raise");
   });
 
   it("uses the dedicated tighten-only merge for subagents", () => {
@@ -273,6 +311,9 @@ describe("resolveSettings", () => {
     expect(out._sources["tools.enabled.bash"]).toBe("project");
     expect(out._sources["tools.enabled.grep"]).toBe("global");
     expect(out._sources["tools.sources.builtin"]).toBe("global");
+    expect(out.tools?.mcpExposure).toBe("auto");
+    expect(out.tools?.mcpDirectSchemaBytes).toBe(32 * 1024);
+    expect(out._sources["tools.mcpExposure"]).toBe("default");
   });
 
   it("does not retain a rejected project allow rule", () => {

@@ -59,6 +59,10 @@ export interface NoviSettings {
   tools?: {
     enabled?: Record<string, boolean>;
     sources?: Record<string, boolean>;
+    mcpExposure?: McpExposureMode;
+    mcpDirectSchemaBytes?: number;
+    /** Global-only public MCP names kept direct when auto switches to deferred. */
+    mcpPinned?: string[];
   };
   /** Descriptor-default policy plus global/project scoped overrides. */
   permissions?: {
@@ -97,6 +101,22 @@ export interface SettingsLoadResult {
   /** Split layers (for source provenance in the `/settings` UI). */
   layers: SettingsLayers;
   /** Non-fatal parse warnings (stderr only, never throws). */
+  diagnostics: string[];
+}
+
+export type McpExposureMode = "direct" | "auto" | "deferred";
+export const DEFAULT_MCP_EXPOSURE: McpExposureMode = "auto";
+export const DEFAULT_MCP_DIRECT_SCHEMA_BYTES = 32 * 1024;
+
+export interface ResolvedMcpExposureSettings {
+  mode: McpExposureMode;
+  directSchemaBytes: number;
+  pinned: string[];
+  sources: {
+    mode: SettingSource;
+    directSchemaBytes: SettingSource;
+    pinned: SettingSource;
+  };
   diagnostics: string[];
 }
 
@@ -145,6 +165,7 @@ export async function loadSettings(
 
   const layers: SettingsLayers = { global, project };
   diagnostics.push(...resolveSubagentSettings(layers).diagnostics);
+  diagnostics.push(...resolveMcpExposureSettings(layers).diagnostics);
   if (!global && !project) {
     return { merged: null, layers, diagnostics };
   }
@@ -259,6 +280,10 @@ function mergeToolExposureSettings(
   const p = project ?? {};
   const enabled = mergeToolExposureMap(g.enabled, p.enabled);
   const sources = mergeToolExposureMap(g.sources, p.sources);
+  const resolvedMcp = resolveMcpExposureSettings({
+    global: { tools: g as NoviSettings["tools"] },
+    project: { tools: p as NoviSettings["tools"] },
+  });
   if (
     Object.keys(enabled).length === 0 &&
     Object.keys(sources).length === 0 &&
@@ -272,7 +297,111 @@ function mergeToolExposureSettings(
     ...p,
     enabled,
     sources,
+    ...(g.mcpExposure !== undefined || p.mcpExposure !== undefined
+      ? { mcpExposure: resolvedMcp.mode }
+      : {}),
+    ...(g.mcpDirectSchemaBytes !== undefined || p.mcpDirectSchemaBytes !== undefined
+      ? { mcpDirectSchemaBytes: resolvedMcp.directSchemaBytes }
+      : {}),
+    ...(g.mcpPinned !== undefined || p.mcpPinned !== undefined
+      ? { mcpPinned: resolvedMcp.pinned }
+      : {}),
   };
+}
+
+/** Resolve global MCP exposure plus a trusted project layer that can only tighten it. */
+export function resolveMcpExposureSettings(layers: SettingsLayers): ResolvedMcpExposureSettings {
+  const diagnostics: string[] = [];
+  const globalTools = asRecord(layers.global?.tools);
+  const projectTools = asRecord(layers.project?.tools);
+  const globalMode = parseMcpExposureMode(globalTools.mcpExposure);
+  if (globalTools.mcpExposure !== undefined && globalMode === undefined) {
+    diagnostics.push("settings [global] tools.mcpExposure is invalid; using auto");
+  }
+  let mode = globalMode ?? DEFAULT_MCP_EXPOSURE;
+  let modeSource: SettingSource = globalMode ? "global" : "default";
+  const projectMode = parseMcpExposureMode(projectTools.mcpExposure);
+  if (projectTools.mcpExposure !== undefined && projectMode === undefined) {
+    diagnostics.push("settings [project] tools.mcpExposure is invalid; ignored");
+  } else if (projectMode !== undefined) {
+    if (mcpExposureRank(projectMode) < mcpExposureRank(mode)) {
+      diagnostics.push("settings [project] tools.mcpExposure cannot broaden global exposure; ignored");
+    } else {
+      mode = projectMode;
+      modeSource = "project";
+    }
+  }
+
+  const globalBudget = positiveSafeInteger(globalTools.mcpDirectSchemaBytes);
+  if (globalTools.mcpDirectSchemaBytes !== undefined && globalBudget === undefined) {
+    diagnostics.push("settings [global] tools.mcpDirectSchemaBytes is invalid; using default");
+  }
+  let directSchemaBytes = globalBudget ?? DEFAULT_MCP_DIRECT_SCHEMA_BYTES;
+  let budgetSource: SettingSource = globalBudget ? "global" : "default";
+  const projectBudget = positiveSafeInteger(projectTools.mcpDirectSchemaBytes);
+  if (projectTools.mcpDirectSchemaBytes !== undefined && projectBudget === undefined) {
+    diagnostics.push("settings [project] tools.mcpDirectSchemaBytes is invalid; ignored");
+  } else if (projectBudget !== undefined) {
+    if (projectBudget > directSchemaBytes) {
+      diagnostics.push(
+        "settings [project] tools.mcpDirectSchemaBytes cannot raise the global/default budget; ignored",
+      );
+    } else {
+      directSchemaBytes = projectBudget;
+      budgetSource = "project";
+    }
+  }
+
+  const pinned = stringNameList(globalTools.mcpPinned, diagnostics);
+  if (projectTools.mcpPinned !== undefined) {
+    diagnostics.push("settings [project] tools.mcpPinned ignored (global settings only)");
+  }
+  return {
+    mode,
+    directSchemaBytes,
+    pinned,
+    sources: {
+      mode: modeSource,
+      directSchemaBytes: budgetSource,
+      pinned: pinned.length > 0 ? "global" : "default",
+    },
+    diagnostics,
+  };
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function parseMcpExposureMode(value: unknown): McpExposureMode | undefined {
+  return value === "direct" || value === "auto" || value === "deferred" ? value : undefined;
+}
+
+function mcpExposureRank(value: McpExposureMode): number {
+  return value === "direct" ? 0 : value === "auto" ? 1 : 2;
+}
+
+function positiveSafeInteger(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : undefined;
+}
+
+function stringNameList(value: unknown, diagnostics: string[]): string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    diagnostics.push("settings [global] tools.mcpPinned must be an array; ignored");
+    return [];
+  }
+  const names: string[] = [];
+  for (const item of value) {
+    if (typeof item !== "string" || !/^[a-z][a-z0-9_]*$/.test(item)) {
+      diagnostics.push("settings [global] tools.mcpPinned contains an invalid public name; ignored");
+      continue;
+    }
+    names.push(item);
+  }
+  return [...new Set(names)];
 }
 
 /**
@@ -468,6 +597,17 @@ export function resolveSettings(
   {
     const tools = mergeToolExposureSettings(layers.global?.tools, layers.project?.tools);
     if (tools) settings.tools = tools;
+
+    const mcp = resolveMcpExposureSettings(layers);
+    settings.tools = {
+      ...(settings.tools ?? {}),
+      mcpExposure: mcp.mode,
+      mcpDirectSchemaBytes: mcp.directSchemaBytes,
+      mcpPinned: mcp.pinned,
+    };
+    _sources["tools.mcpExposure"] = mcp.sources.mode;
+    _sources["tools.mcpDirectSchemaBytes"] = mcp.sources.directSchemaBytes;
+    _sources["tools.mcpPinned"] = mcp.sources.pinned;
 
     for (const mapName of ["enabled", "sources"] as const) {
       const globalMap = sanitizeBooleanMap(layers.global?.tools?.[mapName]);

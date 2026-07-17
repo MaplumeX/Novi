@@ -89,3 +89,36 @@ export {
   type AdaptMcpToolsOptions,
   type CreateMcpToolDescriptorOptions,
 } from "./tool-adapter.js";
+
+export {
+  MAX_MCP_TOOL_REF_BYTES,
+  decodeMcpToolRef,
+  encodeMcpToolRef,
+  resolveMcpToolRef,
+  type McpToolRefPayload,
+} from "./tool-ref.js";
+
+export {
+  MAX_MCP_SEARCH_RESULTS,
+  MAX_MCP_SEARCH_QUERY_BYTES,
+  MAX_MCP_SEARCH_RESPONSE_BYTES,
+  MAX_MCP_SEARCH_SCHEMA_BYTES,
+  MAX_MCP_SEARCH_SOURCE_BYTES,
+  MAX_MCP_SEARCH_TEXT_BYTES,
+  normalizeMcpSearchText,
+  searchMcpTools,
+  McpToolSearchIndex,
+  type McpToolSearchQuery,
+  type McpToolSearchResponse,
+  type McpToolSearchResult,
+} from "./search.js";
+
+export {
+  isMcpEntryVisible,
+  mcpAgentToolSchemaBytes,
+  projectMcpExposure,
+  type McpExposurePolicy,
+  type McpExposureProjection,
+} from "./exposure.js";
+
+export { createMcpProxyDescriptors, type CreateMcpProxyDescriptorsOptions } from "./proxy-tools.js";

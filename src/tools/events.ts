@@ -249,7 +249,9 @@ function errorFrom(
   if (!found) return undefined;
   return {
     ...found,
-    retryable: /(?:TIMEOUT|RATE_LIMIT|NETWORK|ARTIFACT_WRITE_FAILED)/.test(found.code),
+    retryable: /(?:TIMEOUT|RATE_LIMIT|NETWORK|ARTIFACT_WRITE_FAILED|MCP_TOOL_STALE)/.test(
+      found.code,
+    ),
   };
 }
 
@@ -412,11 +414,17 @@ export function isToolResultEnvelope(value: unknown): value is ToolResultEnvelop
 }
 
 export class ToolEventDecoder {
-  private readonly descriptors: Map<string, SerializableToolDescriptor>;
+  private readonly descriptors = new Map<string, SerializableToolDescriptor>();
   private readonly calls = new Map<string, DecoderCall>();
 
   constructor(catalog?: ToolCatalogSnapshot) {
-    this.descriptors = new Map(catalog?.descriptors.map((item) => [item.name, item]) ?? []);
+    this.setCatalog(catalog);
+  }
+
+  /** Atomically replace metadata for future calls; in-flight call refs stay captured. */
+  setCatalog(catalog?: ToolCatalogSnapshot): void {
+    this.descriptors.clear();
+    for (const item of catalog?.descriptors ?? []) this.descriptors.set(item.name, item);
   }
 
   decode(event: AgentHarnessEvent, at: number = Date.now()): NoviToolEvent | undefined {

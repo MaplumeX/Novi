@@ -161,6 +161,25 @@ describe("ToolResultEnvelope", () => {
     expect(() => assertJsonSafe(envelope)).not.toThrow();
   });
 
+  it("marks stale MCP references retryable so the model can search again", () => {
+    const envelope = createToolResultEnvelope({
+      result: {
+        content: [
+          {
+            type: "text",
+            text: "NOVI_ERROR:MCP_TOOL_STALE:mcp:demo/read changed; run search again",
+          },
+        ],
+        details: {},
+      },
+      isError: true,
+      startedAt: 1,
+      at: 2,
+      input: {},
+    });
+    expect(envelope.error).toMatchObject({ code: "MCP_TOOL_STALE", retryable: true });
+  });
+
   it("rejects unsafe public JSON and redacts unsafe decoder inputs", () => {
     const cyclic: Record<string, unknown> = {};
     cyclic.self = cyclic;

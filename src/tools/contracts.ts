@@ -14,6 +14,8 @@ export const TOOL_CAPABILITIES = [
   "state.todo",
   "state.jobs",
   "state.agents",
+  /** Read the host-owned dynamic tool catalog without invoking an external tool. */
+  "state.tools",
   /** Conservative fallback for external/MCP tools without a tighter capability map. */
   "external.invoke",
 ] as const;
@@ -41,6 +43,19 @@ export interface ToolPermissionIntent {
 
 export type PermissionIntentResolver = (input: unknown) => readonly ToolPermissionIntent[];
 
+export interface ToolPermissionIdentity {
+  sourceId: string;
+  toolName: string;
+  revision: string;
+}
+
+/** Effective authorization subject for transport/proxy tools. */
+export interface ToolPermissionSubject {
+  descriptor: Readonly<ToolDescriptor>;
+  input: unknown;
+  identity?: ToolPermissionIdentity;
+}
+
 export interface ToolFactoryContext {
   env: ExecutionEnv;
   sessionId: string;
@@ -67,6 +82,8 @@ export interface ToolDescriptor {
   optional?: boolean;
   factory: ToolFactory;
   resolvePermissionIntents: PermissionIntentResolver;
+  /** Resolve a proxy/transport call to the real descriptor and arguments. */
+  resolvePermissionSubject?: (input: unknown) => ToolPermissionSubject;
 }
 
 export interface SerializableToolDescriptor {
@@ -82,7 +99,7 @@ export interface SerializableToolDescriptor {
   optional: boolean;
 }
 
-export type ToolAvailabilityStatus = "active" | "disabled" | "unavailable" | "denied";
+export type ToolAvailabilityStatus = "active" | "deferred" | "disabled" | "unavailable" | "denied";
 
 export interface ToolAvailability {
   name: string;
@@ -92,6 +109,7 @@ export interface ToolAvailability {
     | "SOURCE_DISABLED"
     | "MODE_UNSUPPORTED"
     | "TOOL_DISABLED"
+    | "MCP_DEFERRED"
     | "INITIALIZATION_FAILED"
     | "PERMISSION_DENIED";
   reason?: string;
@@ -111,6 +129,15 @@ export interface ToolAssembly {
   activeToolNames: string[];
   availability: ToolAvailability[];
   diagnostics: string[];
+  /** Dynamic external catalog revision, absent for builtin-only assemblies. */
+  catalogRevision?: string;
+  externalSources?: Array<{
+    sourceId: string;
+    revision: string;
+    health: "connected" | "degraded";
+    diagnostic?: string;
+  }>;
+  projectionHealth?: "ready" | "degraded";
   /** Runtime-only guard shared with the permission gate for this harness. */
   scopeGuard: WorkspaceScopeGuard;
   /** Session-scoped runtime that owns budget, artifacts, and the read cache. */
@@ -128,6 +155,14 @@ export interface ToolCatalogSnapshot {
   activeToolNames: string[];
   availability: ToolAvailability[];
   diagnostics: string[];
+  catalogRevision?: string;
+  externalSources?: Array<{
+    sourceId: string;
+    revision: string;
+    health: "connected" | "degraded";
+    diagnostic?: string;
+  }>;
+  projectionHealth?: "ready" | "degraded";
 }
 
 export function snapshotToolAssembly(assembly: ToolAssembly): ToolCatalogSnapshot {
@@ -144,5 +179,10 @@ export function snapshotToolAssembly(assembly: ToolAssembly): ToolCatalogSnapsho
       source: { ...availability.source },
     })),
     diagnostics: [...assembly.diagnostics],
+    ...(assembly.catalogRevision ? { catalogRevision: assembly.catalogRevision } : {}),
+    ...(assembly.externalSources
+      ? { externalSources: assembly.externalSources.map((source) => ({ ...source })) }
+      : {}),
+    ...(assembly.projectionHealth ? { projectionHealth: assembly.projectionHealth } : {}),
   };
 }

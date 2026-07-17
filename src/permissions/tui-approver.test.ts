@@ -81,4 +81,20 @@ describe("TuiApprover", () => {
     a.respond("deny");
     await expect(childTwo).resolves.toBe("deny");
   });
+
+  it("projects the real external source and bounded effective input", () => {
+    const approver = new TuiApprover();
+    void approver.request({
+      ...request("mcp", "invoke"),
+      toolName: "mcp_demo_read",
+      input: { path: "/work/report.txt" },
+      toolSource: { kind: "external", id: "mcp:demo" },
+    });
+    expect(approver.currentPrompt()).toMatchObject({
+      toolName: "mcp_demo_read",
+      toolSource: { kind: "external", id: "mcp:demo" },
+      inputPreview: '{"path":"/work/report.txt"}',
+    });
+    approver.respond("deny");
+  });
 });

@@ -71,6 +71,7 @@ export interface BuildMcpServerCatalogInput {
     tool: Tool;
     publicName: string;
     transportKind: McpTransportKind;
+    toolRevision: string;
   }): ToolDescriptor;
 }
 
@@ -115,15 +116,16 @@ export function buildMcpServerCatalogSnapshot(
           validatorProviders,
         )
       : undefined;
-    const descriptor = input.createDescriptor({
-      tool,
-      publicName,
-      transportKind: input.transportKind,
-    });
     const toolRevision = digestCanonical({
       serverFingerprint: input.serverFingerprint,
       publicName,
       tool,
+    });
+    const descriptor = input.createDescriptor({
+      tool,
+      publicName,
+      transportKind: input.transportKind,
+      toolRevision,
     });
     return Object.freeze({
       serverName: input.serverName,

@@ -36,7 +36,7 @@ describe("capability / risk mapping", () => {
       },
       annotations: { readOnlyHint: true },
     });
-    expect(mapMcpCapabilities(t)).toEqual(["filesystem.read"]);
+    expect(mapMcpCapabilities(t)).toEqual(["external.invoke", "filesystem.read"]);
     expect(mapMcpRisk(t, "stdio")).toBe("read");
   });
 
@@ -111,6 +111,17 @@ describe("schema + result mapping", () => {
     });
     expect(IsObject(schema)).toBe(true);
     expect(schema.required).toEqual(["q"]);
+  });
+
+  it("preserves closed MCP input schemas for direct provider exposure", () => {
+    const schema = mcpInputSchemaToTypeBox({
+      type: "object",
+      properties: { value: { type: "string" } },
+      additionalProperties: false,
+    });
+    expect((schema as unknown as { additionalProperties?: boolean }).additionalProperties).toBe(
+      false,
+    );
   });
 
   it("previews MCP text content", () => {

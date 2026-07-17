@@ -1,6 +1,11 @@
 import path from "node:path";
 import type { ExecutionEnv } from "@earendil-works/pi-agent-core/node";
-import type { ToolCapability, ToolPermissionIntent, ToolScopeKind } from "../tools/contracts.js";
+import type {
+  ToolCapability,
+  ToolPermissionIdentity,
+  ToolPermissionIntent,
+  ToolScopeKind,
+} from "../tools/contracts.js";
 import { encodePermissionError } from "./errors.js";
 import type { CanonicalPermissionIntent, PermissionGrant } from "./types.js";
 
@@ -65,6 +70,9 @@ export class WorkspaceScopeGuard {
     }
     if (intent.capability === "state.agents") {
       return { ...intent, target: intent.target || "current-session" };
+    }
+    if (intent.capability === "state.tools") {
+      return { ...intent, target: intent.target || "mcp:catalog" };
     }
     if (intent.capability === "external.invoke") {
       // Session-scoped MCP/external invokes keep the adapter-provided target as-is.
@@ -166,13 +174,14 @@ export class WorkspaceScopeGuard {
     return current;
   }
 
-  toGrant(intent: CanonicalPermissionIntent): PermissionGrant {
+  toGrant(intent: CanonicalPermissionIntent, identity?: ToolPermissionIdentity): PermissionGrant {
     return {
       capability: intent.capability,
       scope: intent.scope,
       target: intent.target,
       lexicalTarget: intent.lexicalTarget,
       effectiveTarget: intent.effectiveTarget,
+      ...(identity ? { identity: { ...identity } } : {}),
     };
   }
 
@@ -230,6 +239,9 @@ export function grantKey(grant: PermissionGrant): string {
     grant.target,
     grant.lexicalTarget,
     grant.effectiveTarget,
+    grant.identity?.sourceId,
+    grant.identity?.toolName,
+    grant.identity?.revision,
   ]);
 }
 

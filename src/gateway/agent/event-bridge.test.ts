@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { AgentHarnessEvent } from "@earendil-works/pi-agent-core/node";
 import { createEventBridge } from "./event-bridge.js";
 import type { AgentProtocolTurnCallbacks } from "../core/types.js";
+import type { ToolCatalogSnapshot } from "../../tools/contracts.js";
 
 /**
  * Build a fake `AgentHarness` whose `subscribe` captures the listener so tests
@@ -254,4 +255,71 @@ describe("createEventBridge", () => {
     unsub();
     expect(unsubscribe).toHaveBeenCalledTimes(1);
   });
+
+  it("uses live catalog metadata for calls that start after a projection update", () => {
+    const { harness, emit, unsubscribe } = makeHarnessMock();
+    const onToolEvent = vi.fn();
+    let publishCatalog: ((snapshot: ToolCatalogSnapshot) => void) | undefined;
+    const unsubscribeCatalog = vi.fn();
+    const liveCatalog = {
+      subscribe: vi.fn((listener: (snapshot: ToolCatalogSnapshot) => void) => {
+        publishCatalog = listener;
+        return unsubscribeCatalog;
+      }),
+    };
+    const initial = catalog("Old label");
+    const unsub = createEventBridge(
+      harness as never,
+      { onToolEvent },
+      initial,
+      liveCatalog,
+    );
+    publishCatalog?.(catalog("New label"));
+    emit({
+      type: "tool_execution_start",
+      toolCallId: "live",
+      toolName: "mcp_demo_echo",
+      args: {},
+    } as AgentHarnessEvent);
+    expect(onToolEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "tool.start",
+        tool: expect.objectContaining({
+          label: "New label",
+          source: expect.objectContaining({ id: "mcp:demo" }),
+        }),
+      }),
+    );
+    unsub();
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+    expect(unsubscribeCatalog).toHaveBeenCalledTimes(1);
+  });
 });
+
+function catalog(label: string): ToolCatalogSnapshot {
+  return {
+    descriptors: [
+      {
+        name: "mcp_demo_echo",
+        label,
+        source: { kind: "external", id: "mcp:demo" },
+        capabilities: ["external.invoke"],
+        risk: "execute",
+        defaultPermission: "ask",
+        defaultEnabled: true,
+        streaming: "none",
+        modes: ["gateway"],
+        optional: true,
+      },
+    ],
+    activeToolNames: ["mcp_demo_echo"],
+    availability: [
+      {
+        name: "mcp_demo_echo",
+        source: { kind: "external", id: "mcp:demo" },
+        status: "active",
+      },
+    ],
+    diagnostics: [],
+  };
+}

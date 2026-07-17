@@ -526,6 +526,10 @@ export async function createHarnessForSession(
       ? options.additionalToolDescriptors({ metadata, harness, session })
       : options.additionalToolDescriptors;
 
+  const permissionStore =
+    options.permissionStore ??
+    permissionStoreForHarness(gatewayEnv.toolMode, gatewayEnv.permissionStore);
+
   const toolAssembly = await assembleSessionTools(env, metadata.id, cwd, {
     webSearch: gatewayEnv.resolvedSettings.webSearch,
     fetchContent: gatewayEnv.resolvedSettings.fetchContent,
@@ -538,6 +542,7 @@ export async function createHarnessForSession(
     connectMcp: options.connectMcp !== false,
     mcpSourceAllowlist: options.mcpSourceAllowlist,
     additionalDescriptors: additionalToolDescriptors,
+    permissionStore,
   });
   for (const diagnostic of toolAssembly.diagnostics) {
     process.stderr.write(`warning: ${diagnostic}\n`);
@@ -546,15 +551,13 @@ export async function createHarnessForSession(
     ? toolAssembly.activeToolNames.filter((name) => options.activeToolAllowlist?.includes(name))
     : toolAssembly.activeToolNames;
   await harness.setTools(toolAssembly.tools, activeToolNames);
+  toolAssembly.mcp?.controller?.bindHarness(harness, options.activeToolAllowlist);
 
   await harness.setResources({
     skills: options.resources?.skills ?? resources.skills,
     promptTemplates: options.resources?.promptTemplates ?? resources.promptTemplates,
   });
 
-  const permissionStore =
-    options.permissionStore ??
-    permissionStoreForHarness(gatewayEnv.toolMode, gatewayEnv.permissionStore);
   const permissionGate = buildPermissionGate(
     {
       permissions: options.permissions ?? gatewayEnv.permissions,
@@ -598,7 +601,7 @@ export async function createHarnessForSession(
     metadata,
     sessionPath,
     permissionGate,
-    toolCatalog: snapshotToolAssembly(toolAssembly),
+    toolCatalog: toolAssembly.mcp?.controller?.getSnapshot() ?? snapshotToolAssembly(toolAssembly),
     permissionStore,
     resolveToolDescriptor: toolAssembly.resolveDescriptor,
     mcp: toolAssembly.mcp,

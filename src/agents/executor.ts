@@ -205,7 +205,7 @@ export class AgentRunExecutor {
 
 function permissionsForRun(run: AgentRun, autoApproveAsks: boolean): ResolvedPermissions {
   return {
-    rules: run.policySnapshot.permissions.map((rule) => ({ ...rule, source: "global" })),
+    rules: run.policySnapshot.permissions.map((rule) => ({ ...rule, origin: "global" })),
     externalWriteAllowlist: [],
     autoApproveAsks,
     diagnostics: [],

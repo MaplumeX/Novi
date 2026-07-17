@@ -79,6 +79,9 @@ export function projectToolCatalog(
       };
     }),
     diagnostics: catalog.diagnostics,
+    ...(catalog.catalogRevision ? { catalogRevision: catalog.catalogRevision } : {}),
+    ...(catalog.externalSources ? { externalSources: catalog.externalSources } : {}),
+    ...(catalog.projectionHealth ? { projectionHealth: catalog.projectionHealth } : {}),
   };
 }
 
@@ -222,9 +225,16 @@ export function projectAgentRunEvent(event: AgentRunEvent): Record<string, unkno
 /** Stateful Headless boundary. One instance must be retained for a JSON run. */
 export class HeadlessEventProjector {
   private readonly toolDecoder: ToolEventDecoder;
+  private toolCatalog?: ToolCatalogSnapshot;
 
-  constructor(private readonly toolCatalog?: ToolCatalogSnapshot) {
+  constructor(toolCatalog?: ToolCatalogSnapshot) {
+    this.toolCatalog = toolCatalog;
     this.toolDecoder = new ToolEventDecoder(toolCatalog);
+  }
+
+  setToolCatalog(toolCatalog: ToolCatalogSnapshot): void {
+    this.toolCatalog = toolCatalog;
+    this.toolDecoder.setCatalog(toolCatalog);
   }
 
   project(event: AgentHarnessEvent): Record<string, unknown> | NoviToolEvent | undefined {

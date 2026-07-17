@@ -25,6 +25,9 @@ export interface PermissionSettingsLike {
   };
 }
 
+type PermissionDescriptor = Pick<ToolDescriptor, "name" | "capabilities" | "defaultPermission"> &
+  Partial<Pick<ToolDescriptor, "source">>;
+
 /** Resolve global rules plus tighten-only project rules into one immutable policy. */
 export function resolvePermissionsFromSettings(
   settings: PermissionSettingsLike | null | undefined,
@@ -74,7 +77,7 @@ export function resolvePermissionsFromSettings(
 /** Whole-tool/capability rules only; scoped rules must not hide a descriptor. */
 export function resolveWholeToolPermission(
   permissions: ResolvedPermissions,
-  descriptor: Pick<ToolDescriptor, "name" | "capabilities" | "defaultPermission">,
+  descriptor: PermissionDescriptor,
 ): PermissionDecision {
   const matches = permissions.rules.filter(
     (rule) =>
@@ -88,7 +91,7 @@ export function resolveWholeToolPermission(
 /** Resolve one canonical intent; deny > ask > allow > descriptor default. */
 export function resolveIntentPermission(
   permissions: ResolvedPermissions,
-  descriptor: Pick<ToolDescriptor, "name" | "capabilities" | "defaultPermission">,
+  descriptor: PermissionDescriptor,
   intent: CanonicalPermissionIntent,
 ): PermissionDecision {
   const matches = permissions.rules.filter(
@@ -109,16 +112,17 @@ function strongestDecision(
   );
   return {
     level: strongest.effect,
-    source: strongest.source,
-    reason: `${strongest.source} permission rule: ${strongest.effect}`,
+    source: strongest.origin,
+    reason: `${strongest.origin} permission rule: ${strongest.effect}`,
   };
 }
 
 function ruleMatchesDescriptor(
   rule: ResolvedPermissionRule,
-  descriptor: Pick<ToolDescriptor, "name" | "capabilities">,
+  descriptor: Pick<PermissionDescriptor, "name" | "source" | "capabilities">,
 ): boolean {
   if (rule.tool !== undefined && rule.tool !== descriptor.name) return false;
+  if (rule.source !== undefined && rule.source !== descriptor.source?.id) return false;
   if (rule.capability !== undefined && !descriptor.capabilities.includes(rule.capability)) {
     return false;
   }
@@ -160,23 +164,23 @@ function targetMatchesPath(
 
 function sanitizePermissionRules(
   raw: unknown,
-  source: "global" | "project",
+  origin: "global" | "project",
   workspace: string,
   diagnostics: string[],
 ): ResolvedPermissionRule[] {
   if (raw === undefined) return [];
   if (!Array.isArray(raw)) {
-    diagnostics.push(`permissions: ${source} rules must be an array; failing closed`);
-    return [{ effect: "deny", source }];
+    diagnostics.push(`permissions: ${origin} rules must be an array; failing closed`);
+    return [{ effect: "deny", origin }];
   }
   const out: ResolvedPermissionRule[] = [];
   for (const [index, value] of raw.entries()) {
-    const parsed = parseRule(value, source, workspace);
+    const parsed = parseRule(value, origin, workspace);
     if (parsed) {
       out.push(parsed);
     } else {
-      diagnostics.push(`permissions: invalid ${source} rule at index ${index}; failing closed`);
-      out.push({ effect: "deny", source });
+      diagnostics.push(`permissions: invalid ${origin} rule at index ${index}; failing closed`);
+      out.push({ effect: "deny", origin });
     }
   }
   return out;
@@ -184,7 +188,7 @@ function sanitizePermissionRules(
 
 function parseRule(
   raw: unknown,
-  source: "global" | "project",
+  origin: "global" | "project",
   workspace: string,
 ): ResolvedPermissionRule | undefined {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
@@ -192,6 +196,18 @@ function parseRule(
   const effect = value.effect;
   if (effect !== "allow" && effect !== "ask" && effect !== "deny") return undefined;
   const tool = typeof value.tool === "string" && value.tool.trim() ? value.tool.trim() : undefined;
+  const source =
+    typeof value.source === "string" && value.source.trim() ? value.source.trim() : undefined;
+  if (value.source !== undefined && source === undefined) return undefined;
+  if (
+    source &&
+    (Buffer.byteLength(source, "utf8") > 512 ||
+      [...source].some(
+        (character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127,
+      ))
+  ) {
+    return undefined;
+  }
   const capability =
     typeof value.capability === "string" && CAPABILITIES.has(value.capability)
       ? (value.capability as ResolvedPermissionRule["capability"])
@@ -204,14 +220,14 @@ function parseRule(
   if (value.scope !== undefined && scope === undefined) return undefined;
   let target = typeof value.target === "string" && value.target ? value.target : undefined;
   if (value.target !== undefined && target === undefined) return undefined;
-  if (!tool && !capability) return undefined;
+  if (!tool && !source && !capability) return undefined;
   if ((target === undefined) !== (scope === undefined)) return undefined;
   if (target && (scope === "file" || scope === "directory" || scope === "subtree")) {
     target = path.resolve(workspace, target);
   } else if (target && scope === "domain") {
     target = target.toLowerCase().replace(/\.$/, "");
   }
-  return { effect, tool, capability, target, scope, source };
+  return { effect, tool, source, capability, target, scope, origin };
 }
 
 function sanitizeAllowlist(raw: unknown, workspace: string, diagnostics: string[]): string[] {

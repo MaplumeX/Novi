@@ -52,7 +52,7 @@ function parent() {
     activeToolNames: tools.map((tool) => tool.name),
     skillNames: ["one", "two"],
     permissions: {
-      rules: [{ effect: "deny" as const, tool: "bash", source: "global" as const }],
+      rules: [{ effect: "deny" as const, tool: "bash", origin: "global" as const }],
       externalWriteAllowlist: [],
       autoApproveAsks: false,
       diagnostics: [],

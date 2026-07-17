@@ -37,11 +37,17 @@ export function createEventBridge(
   harness: AgentHarness,
   callbacks: AgentProtocolTurnCallbacks,
   toolCatalog?: ToolCatalogSnapshot,
+  liveToolCatalog?: {
+    subscribe(listener: (snapshot: ToolCatalogSnapshot) => void): () => void;
+  },
 ): () => void {
   let lastAssistantText = "";
   const toolDecoder = new ToolEventDecoder(toolCatalog);
+  const unsubscribeCatalog = liveToolCatalog?.subscribe((snapshot) => {
+    toolDecoder.setCatalog(snapshot);
+  });
 
-  return harness.subscribe((event: AgentHarnessEvent) => {
+  const unsubscribeHarness = harness.subscribe((event: AgentHarnessEvent) => {
     const toolEvent = toolDecoder.decode(event);
     if (toolEvent) {
       void callbacks.onToolEvent?.(toolEvent);
@@ -85,4 +91,8 @@ export function createEventBridge(
         break;
     }
   });
+  return () => {
+    unsubscribeHarness();
+    unsubscribeCatalog?.();
+  };
 }

@@ -170,6 +170,12 @@ export const THINKING_LEVELS: readonly ThinkingLevel[] = [
 export function formatToolCatalog(catalog: ToolCatalogSnapshot): string {
   const availability = new Map(catalog.availability.map((entry) => [entry.name, entry]));
   const lines = ["Tools:"];
+  if (catalog.catalogRevision) lines.push(`  catalog revision ${catalog.catalogRevision}`);
+  for (const source of catalog.externalSources ?? []) {
+    lines.push(
+      `  ${source.sourceId}  ${source.health}  revision=${source.revision}${source.diagnostic ? `  ${source.diagnostic}` : ""}`,
+    );
+  }
   for (const descriptor of catalog.descriptors) {
     const state = availability.get(descriptor.name);
     const status = state?.status ?? "unavailable";

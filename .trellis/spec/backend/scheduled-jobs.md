@@ -72,6 +72,13 @@ class JobService {
 - Automation harnesses pin a model, disable fallback, MCP, Skills, templates,
   project hooks, and the `jobs` tool, and activate only the unattended tool
   intersection. Project configuration may tighten but not broaden it.
+- Automation and child-agent runners share `executeHarnessPrompt` for prompt
+  deadlines, usage collection, UTF-8 result bounds, and abort behavior. They
+  retain separate ledgers, policies, cleanup, and recovery state machines.
+- Gateway constructs one `RunConcurrencyLimiter` from
+  `automation.maxConcurrentLlmRuns` and injects it into scheduled automation
+  and child-agent executors. This process-local provider limit is additional
+  to each subsystem's own queue limit; it is not a cross-process semaphore.
 - Heartbeat is a single configured synthetic job. Missing/empty/no-due input
   makes no model call. Stable silence markers suppress delivery.
 - Scheduler preparation acquires the singleton lock, cleans retention, and
@@ -93,6 +100,7 @@ class JobService {
 | `sending` on restart                          | mark ambiguous/possible duplicate and resend          |
 | pinned model missing or unauthenticated       | fail run; never fallback                              |
 | daily token or cost limit reached             | suppress later LLM runs; alert at most once/day       |
+| shared provider limit reached                 | await FIFO permit; do not increment execution attempt |
 | target binding missing/revoked                | delivery failure; never send through an arbitrary id  |
 | automation asks for `jobs`, shell, write, MCP | tool is absent or gate denies fail-closed             |
 
@@ -118,6 +126,8 @@ class JobService {
   receipts, persisted-result retry, origin run-id dedupe and lane ordering.
 - Scheduler/Heartbeat: reminder catch-up, Cron no-catch-up, interrupted retry,
   budget alert once/day, empty/no-due/silent/active-hours behavior.
+- Shared execution: scheduled and child runs honor one provider limiter,
+  release permits on success/failure/abort, and preserve their public schemas.
 - Run typecheck, lint, full tests, build, and `git diff --check`.
 
 ### 7. Wrong vs Correct

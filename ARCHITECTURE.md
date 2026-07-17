@@ -46,6 +46,7 @@ flowchart TB
     CFG["config / settings / credentials / trust"]
     RES["resources / models-loader / hooks / compaction"]
     TOOLS["tools/** + permissions/** + mcp/**"]
+    AGENTS["agents/** + runs/**<br/>durable child-agent runtime"]
   end
 
   subgraph surfaces["Runtime surfaces"]
@@ -61,6 +62,7 @@ flowchart TB
   BS --> CFG
   BS --> RES
   BS --> TOOLS
+  BS --> AGENTS
   BS --> PAC
   BS --> PAI
   TUI --> PAC
@@ -252,12 +254,29 @@ Trust **不热重载**：`/trust` 写 `trust.json`，下次启动才改变 `incl
 
 ---
 
-## 7. Gateway 子系统
+## 7. Agent Run Runtime
+
+**设计说明**：[docs/agent-runs-design.md](docs/agent-runs-design.md)
+**代码根**：`src/agents/`、`src/runs/`
+
+`bootstrap` 为 TUI/Headless 创建当前 parent 的 runtime；`runGateway` 创建
+覆盖所有 route 的单一 runtime。父 harness 注入 `agents` 与
+`agents_yield` descriptor，`AgentRunManager` 统一负责 durable ledger、全局/
+parent 并发、cwd 写租约、取消、恢复和 completion。每个 child 通过
+`createHarnessForSession` 获得独立 session，并按 profile 对父 tools、模型、
+thinking、skills、MCP 与 permissions 做交集收紧。
+
+completion 先写 run ledger，再由表面适配器回灌父 session。Gateway 必须经过
+对应 route 的 system-operation lane，并把最终回复写入 durable outbox；TUI/
+Headless 使用本地串行 completion lane。普通父 turn abort 不取消 child，
+`/new` 则取消旧 session generation。
+
+## 8. Gateway 子系统
 
 **设计与运维**：[docs/gateway-design.md](docs/gateway-design.md)
 **代码根**：`src/gateway/`
 
-### 7.1 启动（`runGateway`）
+### 8.1 启动（`runGateway`）
 
 1. `status` / `health` / `messages` 通过私有 control socket；`migrate` / `service` 进入各自运维层（均无 harness）
 2. 默认 `run` 先做只读 schema preflight，再做 provider probe（未配置则 fail + guidance）
@@ -270,7 +289,7 @@ Trust **不热重载**：`/trust` 写 `trust.json`，下次启动才改变 `incl
 9. `SIGHUP`：仅 access / group-routing 热更；token/channel/queue/automation 等需重启
 10. SIGINT/SIGTERM → scheduler 停止 claim/排空，再 `app.stop()`
 
-### 7.2 组件边界
+### 8.2 组件边界
 
 | 组件                      | 路径                                        | 职责                                                             |
 | ------------------------- | ------------------------------------------- | ---------------------------------------------------------------- |
@@ -289,7 +308,7 @@ Trust **不热重载**：`/trust` 写 `trust.json`，下次启动才改变 `incl
 | State migrations          | `migrations/*`                              | schema inventory、私有备份、事务迁移、崩溃恢复与 rollback        |
 | systemd user service      | `service/*`                                 | deterministic unit、安装 ownership、生命周期、linger/status/logs |
 
-### 7.3 架构规则
+### 8.3 架构规则
 
 - **N1**：`gateway/` **不得** import `tui/`。
 - **N2**：channels 只收 callbacks，不直接读 `AgentHarnessEvent`。
@@ -297,7 +316,7 @@ Trust **不热重载**：`/trust` 写 `trust.json`，下次启动才改变 `incl
 - multi-turn 工具调用：bridge 在 `message_end`(assistant) 缓冲文本，**仅在 `agent_end`** 调 `onTurnEnd`（避免多条“最终回复”）。
 - 静默投递：最终文本为 `SILENT` / `[SILENT]` / `NO_REPLY` / `NO REPLY` 时不发送；lane 对可能的 marker 前缀缓冲再放行 delta。
 
-### 7.4 Gateway 入站流
+### 8.4 Gateway 入站流
 
 ```mermaid
 sequenceDiagram
@@ -323,9 +342,9 @@ sequenceDiagram
 
 ---
 
-## 8. 关键控制 / 数据流
+## 9. 关键控制 / 数据流
 
-### 8.1 交互一轮（TUI）
+### 9.1 交互一轮（TUI）
 
 ```text
 用户输入 (InputBox / command / bang)
@@ -338,7 +357,7 @@ sequenceDiagram
   → JSONL session 由 pi-agent-core 追加
 ```
 
-### 8.2 Tool call 路径
+### 9.2 Tool call 路径
 
 ```mermaid
 flowchart TD
@@ -356,7 +375,7 @@ flowchart TD
 
 权限错误稳定前缀：`NOVI_ERROR:<code>:<message>`（见 tool-runtime-contracts）。
 
-### 8.3 Headless JSON 生命周期
+### 9.3 Headless JSON 生命周期
 
 ```text
 bootstrap → stdout projectToolCatalog(...)（type: "tools_update"）
@@ -369,13 +388,13 @@ bootstrap → stdout projectToolCatalog(...)（type: "tools_update"）
 
 `--print` 通过 `harness.subscribe` 保留最后一次 assistant `message_end` 文本后退出，不发射完整事件协议。
 
-### 8.4 Gateway 入站（摘要）
+### 9.4 Gateway 入站（摘要）
 
 见 §7.4。额外：授权顺序是 **先 normalize/dedupe，再授权**；group 内的 pairing approve 不得转发进 agent；session key 含 forum topic 维度，避免与父 chat 共享 harness。
 
 ---
 
-## 9. 持久化与配置面
+## 10. 持久化与配置面
 
 Novi **无数据库**；文件持久化。总览：[database-guidelines](.trellis/spec/backend/database-guidelines.md)。
 
@@ -392,6 +411,7 @@ Novi **无数据库**；文件持久化。总览：[database-guidelines](.trelli
 | `~/.novi/gateway.json`                           | gateway 配置（项目层可叠加，受 trust）                     |
 | `~/.novi/jobs/store.json`                        | job 定义、预算与 Heartbeat runtime state                   |
 | `~/.novi/jobs/runs/<jobId>/<runId>.json`         | 原子、版本化、有界的主动 run 记录                          |
+| `~/.novi/agent-runs/runs/<parentId>/<runId>.json` | 子代理状态、策略快照、usage、结果与 completion ledger       |
 | `~/.novi/HEARTBEAT.md`                           | 用户级低频主动检查指令                                     |
 | `~/.novi/sessions/<encoded-cwd>/…jsonl`          | `JsonlSessionRepo` 会话                                    |
 | `~/.novi/todos/<sessionId>.json`                 | 会话 todo                                                  |
@@ -409,9 +429,9 @@ Novi **无数据库**；文件持久化。总览：[database-guidelines](.trelli
 
 ---
 
-## 10. 模块索引 / 延伸阅读
+## 11. 模块索引 / 延伸阅读
 
-### 10.1 源码锚点
+### 11.1 源码锚点
 
 | 区域        | 路径                                             | 说明                                                          |
 | ----------- | ------------------------------------------------ | ------------------------------------------------------------- |
@@ -430,11 +450,12 @@ Novi **无数据库**；文件持久化。总览：[database-guidelines](.trelli
 | Hooks       | `src/hooks/**`                                   | 用户脚本 hooks + gate compose                                 |
 | Headless    | `src/headless/**`                                | print / json / projector                                      |
 | Gateway     | `src/gateway/**`                                 | multi-channel 子系统                                          |
+| Agent runs  | `src/agents/**` / `src/runs/**`                 | 子代理策略、执行、队列、恢复、completion 与共享运行基础       |
 | TUI         | `src/tui/**`                                     | Ink UI；`useHarnessState` 唯一 harness 订阅                   |
 | Images      | `src/images/**`                                  | 多模态附件编码 / clipboard                                    |
 | Onboarding  | `src/onboarding.ts` + `tui/OnboardingWizard.tsx` | provider 引导                                                 |
 
-### 10.2 深文档
+### 11.2 深文档
 
 | 主题                     | 文档                                                                                               |
 | ------------------------ | -------------------------------------------------------------------------------------------------- |
@@ -446,11 +467,12 @@ Novi **无数据库**；文件持久化。总览：[database-guidelines](.trelli
 | TUI 目录                 | [.trellis/spec/frontend/directory-structure.md](.trellis/spec/frontend/directory-structure.md)     |
 | 持久化                   | [.trellis/spec/backend/database-guidelines.md](.trellis/spec/backend/database-guidelines.md)       |
 | Gateway 运维             | [docs/gateway.md](docs/gateway.md)                                                                 |
+| 子代理与后台运行         | [docs/agent-runs-design.md](docs/agent-runs-design.md)                                             |
 | 功能与 MCP/权限用户说明  | [README.md](README.md)                                                                             |
 
 ---
 
-## 11. 维护说明
+## 12. 维护说明
 
 1. **本文件保持“薄地图”**：新增长表、provider 矩阵、完整 event schema 应写进 `docs/*` 或 `.trellis/spec/*`，这里只加锚点与链接。
 2. **改接线时同步核对**：`cli.ts` 分支、`bootstrap` 三 API、`assembleSessionTools`、`GatewayApp` 授权顺序、各表面订阅点。

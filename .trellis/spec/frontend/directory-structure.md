@@ -20,6 +20,7 @@ harness subscriber; raw tool payload interpretation belongs to the shared
 src/tui/
 ├── App.tsx                # Root component: wires hooks + child components + overlay
 ├── useHarnessState.ts     # Sole TUI subscriber; delegates tool events to shared reducer
+├── useAgentRunState.ts    # Agent Run event-bus projection for queued/running counts
 ├── harness-handle.ts      # HarnessHandle wrapper: replace() rebuilds harness + session
 ├── MessageList.tsx        # Renders conversation history + streaming text/tool calls
 ├── ThinkingBlock.tsx      # Compact/default + detailed thinking presentation

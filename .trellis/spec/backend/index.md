@@ -23,6 +23,7 @@ This directory contains guidelines for backend development. Fill in each file wi
 | [Web Tool Contracts](./web-tools.md)                          | Batch search/fetch contracts, providers, guarded network, cache, and continuation                      | ✅ Filled |
 | [Tool Runtime Contracts](./tool-runtime-contracts.md)         | Descriptor assembly, permissions, resource budgets, artifacts, and unified tool result/event contracts | ✅ Filled |
 | [Scheduled Jobs](./scheduled-jobs.md)                         | Durable scheduling, recovery, unattended harness policy, delivery, and Heartbeat contracts             | ✅ Filled |
+| [Child-Agent Runs](./agent-runs.md)                           | Durable immediate delegation, profiles, concurrency, recovery, completion, and surface contracts       | ✅ Filled |
 | [Durable Gateway Messages](./durable-message-delivery.md)     | Inbox/outbox schemas, Telegram polling acknowledgement, recovery, retry, rate limits, and management   | ✅ Filled |
 | [Gateway Runtime Control](./gateway-runtime-observability.md) | Unix socket ownership, live health, JSON logs, metrics, local operations, and durable alerts           | ✅ Filled |
 | [Gateway State Migrations](./gateway-state-migrations.md)     | Version inspection, offline migration, private backups, crash recovery, and rollback                   | ✅ Filled |

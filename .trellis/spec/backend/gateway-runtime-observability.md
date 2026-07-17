@@ -27,8 +27,10 @@
   frames, and unknown methods return stable errors without stopping the daemon.
 - Supported methods are `status.get`, `health.live`, `health.ready`,
   `messages.list`, `messages.retry`, `messages.retryDelivery`, and
-  `messages.dismiss`. Message mutations delegate to `GatewayMessageService`;
-  transport code must not reproduce store transition rules.
+  `messages.dismiss`, plus `agents.list`, `agents.get`, `agents.cancel`, and
+  `agents.retry` when subagents are enabled. Message mutations delegate to
+  `GatewayMessageService`; agent mutations delegate to `AgentRunManager`.
+  Transport code must not reproduce either store's transition rules.
 
 ### 3. Snapshot and CLI Contract
 
@@ -46,6 +48,10 @@
   a non-secret configuration digest, channel lifecycle, session stats, message
   state counts, oldest pending age, retry/exhaustion counts, scheduler stats,
   worker state, process counters, live gauges, and degradation reasons.
+- When enabled, `agentRuns` exposes only aggregate total, queued, running,
+  interrupted, pending-completion, delivery-failed, and usage values. Agent
+  operator records use `summarizeAgentRun`; task, result, error text, and
+  transcript paths are excluded from the control socket.
 - Status and message-management responses must never include persisted inbox or
   outbox text, sender names, tokens, pairing codes, or raw channel responses.
 
@@ -65,6 +71,10 @@
 - `GatewayMetrics` counters live for one process lifetime. Durable facts come
   from stores rather than a second counter database. Gauges are sampled from
   live component/store state.
+- Agent gauges include queued, running, interrupted, and pending completion.
+  Scheduled automation usage remains in scheduler stats; agent usage remains
+  in `agentRuns.usage`, allowing one snapshot to observe both ledgers without
+  merging their hard budget contracts.
 
 ### 5. Operations Alerts
 
@@ -74,7 +84,8 @@
   the route has a durable `GatewaySessionStore` binding, and the current DM or
   group policy still authorizes it.
 - Fault keys include prolonged channel outage, durable-message backlog,
-  delivery retry exhaustion, and store capacity degradation. Fault state and
+  delivery retry exhaustion, agent-completion delivery failure, and store
+  capacity degradation. Fault state and
   last attempt/sent timestamps persist in
   `$NOVI_HOME/gateway-operations.json` through a synced temporary-file rename.
 - Cooldown applies across restarts and also to failed enqueue attempts. A
@@ -96,7 +107,7 @@
 - Health: all runtime states, live/ready matrix, human/JSON formatting, stopped
   synthesis, and exit-code mapping.
 - Privacy: secret/body/raw-response negative assertions for logs, snapshot, and
-  message operator output.
+  message and agent operator output.
 - Metrics: accepted/deduped/interrupted ingress, Agent outcome, delivery
   attempts/outcomes/retries, queue age/depth, and channel gauges.
 - Alerts: target rejection, persisted cooldown after reopen, threshold timing,

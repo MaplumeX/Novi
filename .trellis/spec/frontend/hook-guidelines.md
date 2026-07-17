@@ -6,9 +6,11 @@
 
 ## Overview
 
-Novi has one central custom hook today: `useHarnessState`. It is the sole
-bridge between the `AgentHarness` event stream and React state. The frontend
-intentionally keeps hook usage minimal — components stay props-driven.
+Novi keeps event-boundary hooks small and source-specific. `useHarnessState`
+is the sole bridge from the `AgentHarness` event stream, while
+`useAgentRunState` projects the separate platform-neutral Agent Run event bus
+into queued/running counts. Components remain props-driven and never subscribe
+to either source directly.
 
 ---
 
@@ -106,6 +108,8 @@ void compactor.maybeCompact(harness, …, () => setState((prev) => ({ …prev, p
 
 - Do not create additional `useEffect` subscriptions to the harness. Route all
   events through `useHarnessState`.
+- Agent Run UI state must subscribe through `useAgentRunState`; do not fold
+  manager events into the harness event decoder or subscribe from `StatusBar`.
 - Do not read `messages` from React state inside async callbacks — use the ref
   mirror instead (stale closure).
 - Do not call structural harness methods (`prompt`, `compact`,

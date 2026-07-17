@@ -1,5 +1,60 @@
 # Novi
 
+## Child agents and immediate background runs
+
+Novi can delegate independent work to durable child-agent runs on TUI,
+Headless JSON, and Gateway surfaces. The `agents` tool returns immediately;
+the child runs in its own JSONL session, and a persisted completion event wakes
+the parent when the result is ready. `agents_yield` lets the parent end its
+current loop without polling.
+
+Built-in profiles are `explorer` and `reviewer` (read-only) plus `worker`
+(write-capable only where the parent was already allowed). Child profiles can
+never gain the `agents`, `jobs`, or channel messaging tools. Defaults allow 8
+global and 5 per-parent active children, so three parallel delegates are a
+supported baseline rather than a fixed ceiling.
+
+```json
+{
+  "subagents": {
+    "enabled": true,
+    "maxConcurrent": 8,
+    "maxChildrenPerParent": 5,
+    "maxSpawnDepth": 1,
+    "runTimeoutMs": 900000,
+    "maxResultBytes": 65536,
+    "retentionDays": 30,
+    "allowedModels": ["anthropic/claude-sonnet-4-5"]
+  }
+}
+```
+
+Trusted project settings may only tighten these limits and profile
+capabilities. Every child has a run-scoped permission store; TUI approval shows
+the run/profile source, while Headless and Gateway remain fail-closed for
+residual `ask` decisions.
+
+Operator commands:
+
+```text
+/agents list
+/agents info <run-id>
+/agents log <run-id>
+/agents cancel <run-id>
+/agents retry <run-id>
+/agents stop-all
+
+novi --gateway agents list [--json]
+novi --gateway agents get|cancel|retry <run-id> [--json]
+```
+
+Run ledgers live under
+`~/.novi/agent-runs/runs/<parentSessionId>/<runId>.json`. Queued work survives
+restart; an in-flight read-only run may safely retry once, but a write-capable
+worker is recorded as interrupted and is never automatically replayed. These
+immediate runs are separate from durable scheduled jobs: they share bounded
+execution and provider concurrency primitives, not scheduling semantics.
+
 ## Gateway as a systemd user service
 
 On Linux with systemd 240+, build/install Novi and migrate legacy Gateway state before installing the user service:

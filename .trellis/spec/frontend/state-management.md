@@ -16,6 +16,7 @@ There are five categories of state:
 | Category | Mechanism | Owner |
 |----------|-----------|-------|
 | Agent/session state (messages, phase, model, queue, tools) | `HarnessState` via `useHarnessState` | `App.tsx` passes down as props |
+| Child-run counts | `AgentRunState` via `useAgentRunState` | `App.tsx` passes counts to `StatusBar` |
 | HarnessHandle state (replaceable harness + session) | `useState<HarnessHandle>` in `App` | `App.tsx` — `handle.replace()` triggers re-subscription |
 | Local UI state (notice, input buffer, overlay) | `useState` in the component | `App.tsx` / `InputBox.tsx` |
 | Pending image attachments (multimodal) | `useState<PendingImage[]>` in `App` | `App.tsx` — shared by commands + submit handlers; InputBox only displays |
@@ -36,6 +37,12 @@ useHarnessState  ──►  HarnessState (React state)
   │
   ▼
 Display components (MessageList, StatusBar, InputBox)
+```
+
+The child-run path is parallel and domain-specific:
+
+```text
+AgentRunManager.events → useAgentRunState → AgentRunState → StatusBar props
 ```
 
 - **One direction.** Harness → events → `useHarnessState` → props →

@@ -13,8 +13,11 @@ import {
 import {
   snapshotToolAssembly,
   type ToolCatalogSnapshot,
+  type ToolDescriptor,
   type ToolRuntimeMode,
 } from "../tools/contracts.js";
+import type { AgentRunRuntime } from "../agents/runtime.js";
+import type { LocalAgentCompletionSink } from "../agents/local-completion.js";
 import { loadResources } from "../resources.js";
 import { loadHooks, registerHooks } from "../hooks/index.js";
 import type { ResolvedSettings, SettingsLayers } from "../settings.js";
@@ -123,6 +126,8 @@ export interface CreateHarnessHandleDeps {
   toolMode: ToolRuntimeMode;
   toolBudget?: ResolvedToolExecutionBudget;
   toolBudgetOverrides?: ToolBudgetOverrides;
+  agentRuns?: AgentRunRuntime;
+  agentCompletionSink?: LocalAgentCompletionSink;
 }
 
 /**
@@ -168,6 +173,7 @@ export async function replayHarnessState(
     mcpPlan?: import("../mcp/types.js").McpPlan;
     /** Injectable MCP transport options for tests. */
     mcpOptions?: import("../tools/assembly.js").CreateToolAssemblyOptions["mcp"];
+    additionalDescriptors?: readonly ToolDescriptor[];
   } = {},
 ): Promise<{
   diagnostics: string[];
@@ -211,6 +217,7 @@ export async function replayHarnessState(
     connectMcp: true,
     mcpPlan: opts.mcpPlan,
     mcp: opts.mcpOptions,
+    additionalDescriptors: opts.additionalDescriptors,
   });
   await newHarness.setTools(toolAssembly.tools, toolAssembly.activeToolNames);
   diagnostics.push(...toolAssembly.diagnostics);
@@ -362,6 +369,15 @@ export function createHarnessHandle(
       const session = next.session ?? old.session;
       const sessionPath = next.sessionPath ?? old.sessionPath;
       const sessionMeta = await session.getMetadata();
+      const oldSessionMeta = await old.session.getMetadata();
+      if (deps.agentRuns && sessionMeta.id !== oldSessionMeta.id) {
+        await deps.agentRuns.manager.cancelAll({
+          parentSessionId: oldSessionMeta.id,
+          generation: oldSessionMeta.id,
+        });
+        await deps.agentRuns.waitForIdle();
+        deps.agentCompletionSink?.unbind(localParent(oldSessionMeta));
+      }
       if (next.settingsLayers) {
         settingsLayers = next.settingsLayers;
         toolBudget = resolveToolExecutionBudget(settingsLayers, deps.toolBudgetOverrides);
@@ -377,11 +393,18 @@ export function createHarnessHandle(
         model: old.harness.getModel(),
         systemPrompt,
       });
+      const rebuiltAssembly: { current?: ToolAssemblyWithMcp } = {};
+      const agentDescriptors = deps.agentRuns?.createToolDescriptors({
+        parent: localParent(sessionMeta),
+        harness: newHarness,
+        session,
+        resolveToolDescriptor: (name) => rebuiltAssembly.current?.resolveDescriptor(name),
+      });
       // 5. Replay state from old → new. Trust decision is reused from the old
       //    handle (trust is cwd-scoped, not session-scoped; re-resolving would
       //    require a fresh trust prompt mid-session, which we don't support).
       //    Session permission store is the same instance (AC13).
-      const { diagnostics, permissionGate, toolCatalog, mcp } = await replayHarnessState(
+      const replayed = await replayHarnessState(
         newHarness,
         old.harness,
         env,
@@ -400,8 +423,11 @@ export function createHarnessHandle(
           approver,
           toolMode,
           toolBudget,
+          additionalDescriptors: agentDescriptors,
         },
       );
+      const { diagnostics, permissionGate, toolCatalog, mcp } = replayed;
+      rebuiltAssembly.current = replayed.toolAssembly;
       // 6. Close previous MCP clients after new ones are connected (process leak).
       if (old.mcp) {
         try {
@@ -427,6 +453,17 @@ export function createHarnessHandle(
       };
       newHandle.replace = makeReplace(newHandle);
       newHandle.refreshTools = makeRefreshTools(newHandle);
+      deps.agentCompletionSink?.bind({
+        parent: localParent(sessionMeta),
+        harness: newHarness,
+        session,
+      });
+      if (deps.agentRuns && sessionMeta.id !== oldSessionMeta.id) {
+        await deps.agentRuns.initialize({
+          parentSessionId: sessionMeta.id,
+          generation: sessionMeta.id,
+        });
+      }
       setHandle(newHandle);
       return { diagnostics };
     };
@@ -436,6 +473,13 @@ export function createHarnessHandle(
     return async (opts = {}): Promise<{ diagnostics: string[]; toolCatalog: ToolCatalogSnapshot }> => {
       const sessionMeta = await current.session.getMetadata();
       const permissions = current.permissionGate.getPermissions();
+      const assemblyRef: { current?: ToolAssemblyWithMcp } = {};
+      const agentDescriptors = deps.agentRuns?.createToolDescriptors({
+        parent: localParent(sessionMeta),
+        harness: current.harness,
+        session: current.session,
+        resolveToolDescriptor: (name) => assemblyRef.current?.resolveDescriptor(name),
+      });
       const toolAssembly = await assembleSessionTools(env, sessionMeta.id, cwd, {
         webSearch: resolvedSettings?.webSearch,
         fetchContent: resolvedSettings?.fetchContent,
@@ -447,7 +491,9 @@ export function createHarnessHandle(
         artifactsEnabled: toolBudget?.artifactsEnabled,
         connectMcp: true,
         mcpPlan: opts.mcpPlan,
+        additionalDescriptors: agentDescriptors,
       });
+      assemblyRef.current = toolAssembly;
       await current.harness.setTools(toolAssembly.tools, toolAssembly.activeToolNames);
       current.permissionGate.setScopeGuard(toolAssembly.scopeGuard);
       current.permissionGate.setResolveDescriptor(toolAssembly.resolveDescriptor);
@@ -490,4 +536,12 @@ export function createHarnessHandle(
   handle.replace = makeReplace(handle);
   handle.refreshTools = makeRefreshTools(handle);
   return handle;
+}
+
+function localParent(metadata: JsonlSessionMetadata) {
+  return {
+    surface: "tui" as const,
+    session: metadata,
+    generation: metadata.id,
+  };
 }

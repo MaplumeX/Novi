@@ -13,6 +13,7 @@ export const TOOL_CAPABILITIES = [
   "network.fetch",
   "state.todo",
   "state.jobs",
+  "state.agents",
   /** Conservative fallback for external/MCP tools without a tighter capability map. */
   "external.invoke",
 ] as const;

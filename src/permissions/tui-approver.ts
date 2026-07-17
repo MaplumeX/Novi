@@ -11,6 +11,7 @@ export interface PermissionPromptState {
   reason: string;
   shellBoundaryWarning: boolean;
   sessionGrantAvailable: boolean;
+  source?: ApprovalRequest["source"];
 }
 
 type Listener = (prompt: PermissionPromptState | null) => void;
@@ -60,6 +61,7 @@ export class TuiApprover implements Approver {
       reason: this.active.req.reason,
       shellBoundaryWarning: this.active.req.shellBoundaryWarning,
       sessionGrantAvailable: this.active.req.sessionGrantAvailable,
+      ...(this.active.req.source ? { source: { ...this.active.req.source } } : {}),
     };
   }
 
@@ -88,6 +90,26 @@ export class TuiApprover implements Approver {
       item.resolve("deny");
     }
     this.emit();
+  }
+
+  /** Deny only approvals owned by one child run without disturbing unrelated work. */
+  denyForRun(runId: string): void {
+    if (this.active?.req.source?.kind === "agent-run" && this.active.req.source.runId === runId) {
+      const { resolve } = this.active;
+      this.active = null;
+      resolve("deny");
+    }
+    const retained: QueueItem[] = [];
+    for (const item of this.queue) {
+      if (item.req.source?.kind === "agent-run" && item.req.source.runId === runId) {
+        item.resolve("deny");
+      } else {
+        retained.push(item);
+      }
+    }
+    this.queue.splice(0, this.queue.length, ...retained);
+    this.emit();
+    this.pump();
   }
 
   private pump(): void {

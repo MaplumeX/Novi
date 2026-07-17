@@ -292,6 +292,8 @@ export interface AssembleSessionToolsOptions extends CreateBuiltinToolAssemblyOp
   mcp?: McpClientManagerOptions;
   /** Override plan resolution (tests / hot path that already has a plan). */
   mcpPlan?: McpPlan;
+  /** Optional child-agent allowlist using `mcp:<server>` source ids or server names. */
+  mcpSourceAllowlist?: readonly string[];
 }
 
 /**
@@ -313,6 +315,19 @@ export async function assembleSessionTools(
   if (plan === undefined) {
     const { resolveMcpPlan } = await import("../mcp/plan.js");
     plan = await resolveMcpPlan(env, cwd);
+  }
+  if (options.mcpSourceAllowlist !== undefined) {
+    const allowed = new Set(
+      options.mcpSourceAllowlist.flatMap((source) =>
+        source.startsWith("mcp:") ? [source, source.slice(4)] : [source, `mcp:${source}`],
+      ),
+    );
+    plan = {
+      ...plan,
+      entries: plan.entries.filter(
+        (entry) => allowed.has(entry.name) || allowed.has(`mcp:${entry.name}`),
+      ),
+    };
   }
   return createToolAssembly(env, sessionId, {
     ...options,

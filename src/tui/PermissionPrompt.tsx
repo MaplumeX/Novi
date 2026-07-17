@@ -62,7 +62,7 @@ export function PermissionPrompt({ prompt, onChoose }: PermissionPromptProps): R
   return (
     <Panel
       title={`Allow ${prompt.toolName}?`}
-      description={`${prompt.capability} · ${prompt.scope}`}
+      description={`${prompt.capability} · ${prompt.scope}${prompt.source?.kind === "agent-run" ? ` · agent ${prompt.source.label ?? prompt.source.runId} (${prompt.source.profile})` : ""}`}
       footer={
         prompt.sessionGrantAvailable
           ? "1/2/3 choose · ↑↓ navigate · Enter confirm · Esc deny"

@@ -58,6 +58,10 @@ export interface PermissionGrant {
 
 export type ApprovalChoice = "once" | "session" | "deny";
 
+export type ApprovalSource =
+  | { kind: "parent" }
+  | { kind: "agent-run"; runId: string; label?: string; profile: string };
+
 export interface ApprovalRequest {
   toolName: string;
   toolCallId: string;
@@ -72,6 +76,7 @@ export interface ApprovalRequest {
   shellBoundaryWarning: boolean;
   /** External native writes never receive process-memory grants. */
   sessionGrantAvailable: boolean;
+  source?: ApprovalSource;
 }
 
 export interface Approver {

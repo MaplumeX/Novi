@@ -2,6 +2,10 @@ import type { AgentHarnessEvent } from "@earendil-works/pi-agent-core/node";
 import type { ToolCatalogSnapshot } from "../tools/contracts.js";
 import { ToolEventDecoder, type NoviToolEvent } from "../tools/events.js";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
+import { extractTextContent } from "../runs/execution.js";
+import { isInternalAgentCompletionWake } from "../agents/local-completion.js";
+import { summarizeAgentRun } from "../agents/format.js";
+import type { AgentRunEvent } from "../agents/types.js";
 
 type PrivateToolHarnessEvent = Extract<
   AgentHarnessEvent,
@@ -23,17 +27,7 @@ type PublicNonToolHarnessEvent = Exclude<AgentHarnessEvent, PrivateToolHarnessEv
  * Headless JSON projection and `runPrint` share a single decoder (see
  * cross-layer-thinking-guide.md, "Every Consumer Parses The Same Payload").
  */
-export function extractText(content: string | readonly unknown[]): string {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content
-    .filter(
-      (c): c is { type: "text"; text: string } =>
-        typeof c === "object" && c !== null && (c as { type?: string }).type === "text",
-    )
-    .map((c) => c.text)
-    .join("");
-}
+export const extractText = extractTextContent;
 
 /** Project the usage stats of an assistant message, or `undefined`. */
 function projectUsage(
@@ -103,12 +97,26 @@ function projectHarnessEvent(
     case "turn_end":
       return { ...base, role: event.message.role };
     case "message_start":
+      if (
+        event.message.role === "user" &&
+        isInternalAgentCompletionWake(
+          extractText((event.message as { content?: string | unknown[] }).content ?? ""),
+        )
+      )
+        return { type: "agent_completion_wake" };
       return { ...base, role: event.message.role };
     case "message_update":
       return event.assistantMessageEvent.type === "text_delta"
         ? { ...base, delta: event.assistantMessageEvent.delta }
         : { ...base, subType: event.assistantMessageEvent.type };
     case "message_end":
+      if (
+        event.message.role === "user" &&
+        isInternalAgentCompletionWake(
+          extractText((event.message as { content?: string | unknown[] }).content ?? ""),
+        )
+      )
+        return { type: "agent_completion_wake" };
       return {
         ...base,
         role: event.message.role,
@@ -133,6 +141,7 @@ function projectHarnessEvent(
     case "settled":
       return { ...base, nextTurnCount: event.nextTurnCount };
     case "before_agent_start":
+      if (isInternalAgentCompletionWake(event.prompt)) return { type: "agent_completion_wake" };
       return {
         ...base,
         prompt: event.prompt,
@@ -198,6 +207,16 @@ function projectHarnessEvent(
     default:
       return { ...base, _raw: "unknown" };
   }
+}
+
+export function projectAgentRunEvent(event: AgentRunEvent): Record<string, unknown> {
+  return {
+    type: event.type,
+    event: event.event,
+    runId: event.run.id,
+    parentSessionId: event.run.parent.session.id,
+    run: summarizeAgentRun(event.run),
+  };
 }
 
 /** Stateful Headless boundary. One instance must be retained for a JSON run. */

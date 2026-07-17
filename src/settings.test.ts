@@ -76,6 +76,25 @@ describe("mergeSettings", () => {
     });
   });
 
+  it("uses the dedicated tighten-only merge for subagents", () => {
+    const merged = mergeSettings(
+      {
+        subagents: {
+          maxConcurrent: 10,
+          allowedModels: ["anthropic/a", "openai/b"],
+        },
+      },
+      {
+        subagents: {
+          maxConcurrent: 6,
+          allowedModels: ["openai/b", "other/c"],
+        },
+      },
+    );
+    expect(merged.subagents?.maxConcurrent).toBe(6);
+    expect(merged.subagents?.allowedModels).toEqual(["openai/b"]);
+  });
+
   it("merges retry one level deep (project.provider replaces global.provider)", () => {
     // mergeSettings is one level deep: `retry` is merged, but `provider` (a
     // nested object beyond one level) is replaced wholesale by project.

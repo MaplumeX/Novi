@@ -19,6 +19,8 @@ import {
 } from "./usage.js";
 import type { ToolCatalogSnapshot } from "../tools/contracts.js";
 import { ToolEventDecoder, reduceToolCallState, type ToolCallView } from "../tools/events.js";
+import { isInternalAgentCompletionWake } from "../agents/local-completion.js";
+import { extractTextContent } from "../runs/execution.js";
 
 export type { ToolCallView } from "../tools/events.js";
 
@@ -132,7 +134,8 @@ export function useHarnessState(
         if (cancelled) return;
         const msgs = branch
           .filter((e): e is Extract<typeof e, { type: "message" }> => e.type === "message")
-          .map((e) => e.message);
+          .map((e) => e.message)
+          .filter((message) => !isInternalWakeMessage(message));
         messagesRef.current = msgs;
         setState((prev) => ({
           ...prev,
@@ -206,6 +209,7 @@ export function useHarnessState(
           // Update the ref synchronously so post-turn handlers (`settled`)
           // see the just-appended message.
           {
+            if (isInternalWakeMessage(event.message)) break;
             const messages = [...messagesRef.current, event.message];
             messagesRef.current = messages;
             const isAssistantMsg = event.message.role === "assistant";
@@ -302,4 +306,11 @@ export function useHarnessState(
   }, [harness, session, compactionSettings, toolCatalog]);
 
   return state;
+}
+
+function isInternalWakeMessage(message: AgentMessage): boolean {
+  return (
+    message.role === "user" &&
+    isInternalAgentCompletionWake(extractTextContent(message.content))
+  );
 }

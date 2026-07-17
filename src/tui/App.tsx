@@ -30,6 +30,7 @@ import type { TuiApprover, PermissionPromptState } from "../permissions/index.js
 import { icons, theme } from "./theme.js";
 import { IMAGE_EXTENSIONS, loadImageFile, type PendingImage } from "../images/encode.js";
 import { nonVisionWarning, toPromptImages } from "./image-submit.js";
+import { useAgentRunState } from "./useAgentRunState.js";
 
 /** Overlay union: null = normal input; settings = form; filePicker = @file; sessionPicker = /resume. */
 // Type re-exported from commands.ts to keep the variants in one place.
@@ -50,6 +51,8 @@ interface AppProps {
   settingsLayers: BootstrapResult["settingsLayers"];
   /** Interactive Approver (shared with bootstrap gate). */
   tuiApprover: TuiApprover | undefined;
+  agentRuns: BootstrapResult["agentRuns"];
+  agentCompletionSink: BootstrapResult["agentCompletionSink"];
 }
 
 function App({
@@ -65,6 +68,8 @@ function App({
   yes,
   settingsLayers,
   tuiApprover,
+  agentRuns,
+  agentCompletionSink,
 }: AppProps): React.ReactElement {
   // ref so the handle created in the useState initializer can reach it.
   // setHandle is assigned immediately after useState returns, well before any
@@ -100,6 +105,8 @@ function App({
         toolMode: initialHandle.toolMode,
         toolBudget: initialHandle.toolBudget,
         toolBudgetOverrides: cliOverrides.toolBudgetOverrides,
+        agentRuns,
+        agentCompletionSink,
       },
     ),
   );
@@ -115,6 +122,7 @@ function App({
     compactionSettings,
     handle.toolCatalog,
   );
+  const agentRunState = useAgentRunState(agentRuns, handle.session);
   const { exit } = useApp();
   const [notice, setNotice] = useState<string[]>([]);
   const [overlay, setOverlay] = useState<Overlay>(null);
@@ -150,6 +158,7 @@ function App({
     // Best-effort: stop stdio MCP children before process.exit (design risk).
     void (async () => {
       try {
+        await agentRuns?.stop();
         await handle.mcp?.close();
       } catch {
         // ignore
@@ -179,6 +188,7 @@ function App({
     pendingImages,
     addPendingImages,
     clearPendingImages: () => setPendingImages([]),
+    agentRuns,
   };
 
   function recordHistory(text: string): void {
@@ -533,6 +543,7 @@ function App({
         cumulativeUsage={state.cumulativeUsage}
         sessionPath={handle.sessionPath}
         detailed={detailMode}
+        agentRuns={agentRunState}
       />
     </>
   );
@@ -588,6 +599,8 @@ export function renderApp(
       toolMode: bootstrapResult.toolMode,
       toolBudget: bootstrapResult.toolBudget,
       toolBudgetOverrides: cliOverrides.toolBudgetOverrides,
+      agentRuns: bootstrapResult.agentRuns,
+      agentCompletionSink: bootstrapResult.agentCompletionSink,
     },
   );
 
@@ -605,6 +618,8 @@ export function renderApp(
       yes={bootstrapResult.yes}
       settingsLayers={bootstrapResult.settingsLayers}
       tuiApprover={tuiApprover}
+      agentRuns={bootstrapResult.agentRuns}
+      agentCompletionSink={bootstrapResult.agentCompletionSink}
     />,
   );
 }

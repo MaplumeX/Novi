@@ -42,6 +42,8 @@ import { createClipboardImageReader, type ClipboardImageReader } from "../images
 import * as skillsHub from "../skills-hub/skills-hub.js";
 import type { UpdateResult } from "../skills-hub/skills-hub.js";
 import type { Risk, SkillLockEntry } from "../skills-hub/types.js";
+import type { AgentRunRuntime } from "../agents/runtime.js";
+import { summarizeAgentRun } from "../agents/format.js";
 
 export interface ParsedCommand {
   name: string;
@@ -128,6 +130,8 @@ export interface CommandContext {
   addPendingImages: (items: PendingImage[]) => void;
   /** Clear all pending images. */
   clearPendingImages: () => void;
+  /** Process-level child-agent runtime, absent when disabled. */
+  agentRuns?: AgentRunRuntime;
   /** Optional injectable clipboard reader (tests / platform override). */
   clipboardReader?: ClipboardImageReader;
 }
@@ -705,6 +709,13 @@ export const COMMANDS: readonly Command[] = [
     },
   },
   {
+    name: "agents",
+    description: "Inspect and manage child-agent runs",
+    run: async (ctx, args) => {
+      await runAgentsCommand(ctx, args);
+    },
+  },
+  {
     name: "skills",
     description: "Manage skills (search/install/update/uninstall/list)",
     run: async (ctx, args) => {
@@ -714,7 +725,62 @@ export const COMMANDS: readonly Command[] = [
 ];
 
 const COMMAND_HINT =
-  "Try /quit /model /tools /mcp /session /new /resume /name /compact /settings /trust /scoped-models /reload /image /paste-image /skills /skill:<name>.";
+  "Try /quit /model /tools /agents /mcp /session /new /resume /name /compact /settings /trust /scoped-models /reload /image /paste-image /skills /skill:<name>.";
+
+async function runAgentsCommand(ctx: CommandContext, args: string): Promise<void> {
+  if (!ctx.agentRuns) {
+    ctx.print("Child agents are disabled.");
+    return;
+  }
+  const metadata = await ctx.session.getMetadata();
+  const owner = { parentSessionId: metadata.id, generation: metadata.id };
+  const [sub = "list", runId] = args.trim().split(/\s+/, 2);
+  if (sub === "list") {
+    const runs = await ctx.agentRuns.manager.list(owner);
+    ctx.print(
+      runs.length > 0
+        ? runs.map((run) => JSON.stringify(summarizeAgentRun(run))).join("\n")
+        : "No agent runs.",
+    );
+    return;
+  }
+  if (sub === "stop-all" || (sub === "cancel" && runId === "all")) {
+    const runs = await ctx.agentRuns.manager.cancelAll(owner);
+    ctx.print(`Cancellation requested for ${runs.length} agent run(s).`);
+    return;
+  }
+  if (!runId) {
+    ctx.print("Usage: /agents list|info|log|cancel|retry|stop-all [run-id]");
+    return;
+  }
+  if (sub === "cancel") {
+    const run = await ctx.agentRuns.manager.cancel(owner, runId);
+    ctx.print(JSON.stringify(summarizeAgentRun(run)));
+    return;
+  }
+  if (sub === "retry") {
+    const run = await ctx.agentRuns.manager.retry(owner, runId);
+    ctx.print(`Retried as ${run.id}.`);
+    return;
+  }
+  if (sub === "info" || sub === "log") {
+    const run = await ctx.agentRuns.manager.get(owner, runId);
+    if (!run) {
+      ctx.print(`Agent run not found: ${runId}`);
+      return;
+    }
+    ctx.print(
+      [
+        JSON.stringify(summarizeAgentRun(run)),
+        ...(run.childSession ? [`Transcript: ${run.childSession.path}`] : []),
+        ...(run.result !== undefined ? [`Result:\n${run.result}`] : []),
+        ...(run.error ? [`Error ${run.error.code}: ${run.error.message}`] : []),
+      ].join("\n"),
+    );
+    return;
+  }
+  ctx.print("Usage: /agents list|info|log|cancel|retry|stop-all [run-id]");
+}
 
 /** `/mcp` subcommands: list / approve / deny / reconnect. */
 async function runMcpCommand(ctx: CommandContext, args: string): Promise<void> {

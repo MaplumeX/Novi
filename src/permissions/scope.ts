@@ -63,6 +63,9 @@ export class WorkspaceScopeGuard {
     if (intent.capability === "state.jobs") {
       return { ...intent, target: intent.target || "current-route" };
     }
+    if (intent.capability === "state.agents") {
+      return { ...intent, target: intent.target || "current-session" };
+    }
     if (intent.capability === "external.invoke") {
       // Session-scoped MCP/external invokes keep the adapter-provided target as-is.
       return { ...intent, target: intent.target || "external" };

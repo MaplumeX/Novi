@@ -243,5 +243,6 @@ describe("createToolAssembly", () => {
 describe("TOOL_CAPABILITIES", () => {
   it("includes external.invoke fallback vocabulary", () => {
     expect(TOOL_CAPABILITIES).toContain("external.invoke");
+    expect(TOOL_CAPABILITIES).toContain("state.agents");
   });
 });

@@ -1,9 +1,15 @@
 import type { BootstrapResult } from "../bootstrap.js";
-import { extractText, HeadlessEventProjector, projectToolCatalog } from "./events.js";
+import {
+  extractText,
+  HeadlessEventProjector,
+  projectAgentRunEvent,
+  projectToolCatalog,
+} from "./events.js";
 import { mergePrompt, readStdinIfPiped } from "./stdin.js";
 
 /** Best-effort MCP shutdown so stdio servers do not leak past process exit. */
 async function closeMcp(result: BootstrapResult): Promise<void> {
+  await result.agentRuns?.stop().catch(() => undefined);
   if (!result.mcp) return;
   try {
     await result.mcp.close();
@@ -65,6 +71,7 @@ export async function runPrint(opts: RunOptions): Promise<void> {
 
   try {
     await harness.prompt(fullPrompt);
+    await opts.result.agentRuns?.waitForIdle();
   } catch (e) {
     unsub();
     const message = e instanceof Error ? e.message : String(e);
@@ -105,19 +112,25 @@ export async function runJson(opts: RunOptions): Promise<void> {
     const projected = projector.project(event);
     if (projected) process.stdout.write(JSON.stringify(projected) + "\n");
   });
+  const unsubAgentRuns = opts.result.agentRuns?.manager.events.subscribe((event) => {
+    process.stdout.write(JSON.stringify(projectAgentRunEvent(event)) + "\n");
+  });
 
   try {
     await harness.prompt(fullPrompt);
+    await opts.result.agentRuns?.waitForIdle();
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     process.stdout.write(JSON.stringify({ type: "error", message }) + "\n");
     await flushStdout();
     unsub();
+    unsubAgentRuns?.();
     await closeMcp(opts.result);
     process.stderr.write(`Novi: ${message}\n`);
     process.exit(1);
   }
   unsub();
+  unsubAgentRuns?.();
   await flushStdout();
   await closeMcp(opts.result);
   process.exit(0);

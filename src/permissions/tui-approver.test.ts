@@ -59,4 +59,26 @@ describe("TuiApprover", () => {
     a.respond("deny");
     expect(listener).toHaveBeenLastCalledWith(null);
   });
+
+  it("denies one child run without disturbing parent or other child requests", async () => {
+    const a = new TuiApprover();
+    const childOne = a.request({
+      ...request("1", "child-one"),
+      source: { kind: "agent-run", runId: "run_1", profile: "worker" },
+    });
+    const parent = a.request({ ...request("2", "parent"), source: { kind: "parent" } });
+    const childTwo = a.request({
+      ...request("3", "child-two"),
+      source: { kind: "agent-run", runId: "run_2", profile: "worker" },
+    });
+
+    a.denyForRun("run_1");
+    await expect(childOne).resolves.toBe("deny");
+    expect(a.currentPrompt()?.toolCallId).toBe("2");
+    a.respond("once");
+    await expect(parent).resolves.toBe("once");
+    expect(a.currentPrompt()?.source).toMatchObject({ kind: "agent-run", runId: "run_2" });
+    a.respond("deny");
+    await expect(childTwo).resolves.toBe("deny");
+  });
 });

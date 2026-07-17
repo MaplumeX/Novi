@@ -42,7 +42,13 @@ describe("bootstrap session target", () => {
       expect(await resumed.session.getMetadata()).toEqual(expected);
       expect(resumed.sessionPath).toBe(first.sessionPath);
       expect(resumed.toolCatalog.descriptors).toEqual(first.toolCatalog.descriptors);
+      expect(first.toolCatalog.activeToolNames).toEqual(
+        expect.arrayContaining(["agents", "agents_yield"]),
+      );
+      expect(first.agentRuns).toBeDefined();
     } finally {
+      await resumed?.agentRuns?.stop();
+      await first?.agentRuns?.stop();
       await resumed?.mcp?.close();
       await first?.mcp?.close();
       await resumed?.env.cleanup();

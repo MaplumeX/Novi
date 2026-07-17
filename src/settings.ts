@@ -1,6 +1,8 @@
 import os from "node:os";
 import path from "node:path";
 import type { ExecutionEnv, ThinkingLevel } from "@earendil-works/pi-agent-core/node";
+import { mergeSubagentSettings, resolveSubagentSettings } from "./agents/config.js";
+import type { SubagentSettings } from "./agents/types.js";
 import { getNoviDir } from "./config.js";
 import type { PermissionRule } from "./permissions/types.js";
 import { resolveToolExecutionBudget, type ToolBudgetOverrides } from "./tools/runtime/budget.js";
@@ -70,6 +72,8 @@ export interface NoviSettings {
   artifacts?: {
     enabled?: boolean;
   };
+  /** Immediate child-agent runtime. Trusted project values are tighten-only. */
+  subagents?: SubagentSettings;
 }
 
 /** Which layer sourced a given setting leaf. */
@@ -140,6 +144,7 @@ export async function loadSettings(
         );
 
   const layers: SettingsLayers = { global, project };
+  diagnostics.push(...resolveSubagentSettings(layers).diagnostics);
   if (!global && !project) {
     return { merged: null, layers, diagnostics };
   }
@@ -197,6 +202,13 @@ export function mergeSettings(global: NoviSettings, project: NoviSettings): Novi
       out[key] = mergeToolExposureSettings(
         (g ?? {}) as NoviSettings["tools"],
         (p ?? {}) as NoviSettings["tools"],
+      );
+      continue;
+    }
+    if (key === "subagents") {
+      out[key] = mergeSubagentSettings(
+        g as NoviSettings["subagents"] | undefined,
+        p as NoviSettings["subagents"] | undefined,
       );
       continue;
     }
@@ -511,6 +523,15 @@ export function resolveSettings(
       _sources[`toolBudgets.${field}`] = budget.sources[field];
     }
     _sources["artifacts.enabled"] = budget.artifactsEnabledSource;
+  }
+
+  // Child-agent limits and profiles use a dedicated tighten-only resolver.
+  {
+    const subagents = resolveSubagentSettings(layers);
+    settings.subagents = subagents.values;
+    for (const [key, source] of Object.entries(subagents.sources)) {
+      _sources[`subagents.${key}`] = source;
+    }
   }
 
   return { ...settings, _sources };

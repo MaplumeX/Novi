@@ -10,6 +10,7 @@ interface StatusBarProps extends Pick<
 > {
   sessionPath: string;
   detailed: boolean;
+  agentRuns?: { queued: number; running: number };
 }
 
 /** Compact footer for runtime context and the one global transcript toggle. */
@@ -20,6 +21,7 @@ export function StatusBar({
   cumulativeUsage,
   sessionPath,
   detailed,
+  agentRuns,
 }: StatusBarProps): React.ReactElement {
   const usageBar = formatUsageBar(lastUsage, cumulativeUsage, model.contextWindow ?? 0);
   const sessionName = path.basename(sessionPath);
@@ -28,6 +30,9 @@ export function StatusBar({
       <Text color={theme.text.muted} wrap="wrap">
         {model.provider}/{model.id} {icons.mode} think:{thinkingLevel} {icons.mode} {usageBar}{" "}
         {icons.mode} session:{sessionName} {icons.mode} Ctrl-O{" "}
+        {agentRuns && agentRuns.queued + agentRuns.running > 0
+          ? `agents:${agentRuns.running} running/${agentRuns.queued} queued ${icons.mode} `
+          : ""}
         {detailed ? "hide details" : "show details"} {icons.mode} /help
       </Text>
     </Box>

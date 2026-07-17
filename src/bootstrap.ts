@@ -30,6 +30,8 @@ import {
   type ToolRuntimeMode,
 } from "./tools/contracts.js";
 import type { WorkspaceScopeGuard } from "./permissions/scope.js";
+import type { AgentRunRuntime } from "./agents/runtime.js";
+import type { LocalAgentCompletionSink } from "./agents/local-completion.js";
 import { loadResources } from "./resources.js";
 import { loadCustomModels } from "./models-loader.js";
 import { loadHooks, registerHooks } from "./hooks/index.js";
@@ -140,6 +142,10 @@ export interface BootstrapResult {
   toolBudget: ResolvedToolExecutionBudget;
   /** Live MCP runtime (undefined when no MCP config / not connected). */
   mcp?: McpRuntimeHandle;
+  /** Child-agent runtime for TUI/print/JSON; absent when disabled. */
+  agentRuns?: AgentRunRuntime;
+  /** Local parent-session completion adapter retained across TUI harness rebuilds. */
+  agentCompletionSink?: LocalAgentCompletionSink;
 }
 
 /**
@@ -452,6 +458,7 @@ export interface CreatedSession {
   permissionGate: PermissionGate;
   toolCatalog: ToolCatalogSnapshot;
   permissionStore: SessionPermissionStore;
+  resolveToolDescriptor: (name: string) => Readonly<ToolDescriptor> | undefined;
   mcp?: McpRuntimeHandle;
 }
 
@@ -462,12 +469,24 @@ export type HarnessSessionTarget =
 
 export interface HarnessSessionOptions {
   model?: Model<Api>;
+  thinkingLevel?: ThinkingLevel;
   systemPrompt?: GatewayEnv["systemPrompt"];
   resources?: AgentHarnessResources;
   connectMcp?: boolean;
+  mcpSourceAllowlist?: readonly string[];
   registerUserHooks?: boolean;
   activeToolAllowlist?: readonly string[];
-  additionalToolDescriptors?: readonly ToolDescriptor[];
+  additionalToolDescriptors?:
+    | readonly ToolDescriptor[]
+    | ((context: {
+      metadata: JsonlSessionMetadata;
+      harness: AgentHarness;
+      session: Session<JsonlSessionMetadata>;
+      }) => readonly ToolDescriptor[]);
+  permissions?: ResolvedPermissions;
+  permissionStore?: SessionPermissionStore;
+  approver?: Approver;
+  workspace?: string;
 }
 
 /**
@@ -499,20 +518,26 @@ export async function createHarnessForSession(
     models,
     model: options.model ?? model,
     systemPrompt: options.systemPrompt ?? systemPrompt,
-    thinkingLevel,
+    thinkingLevel: options.thinkingLevel ?? thinkingLevel,
   });
+
+  const additionalToolDescriptors =
+    typeof options.additionalToolDescriptors === "function"
+      ? options.additionalToolDescriptors({ metadata, harness, session })
+      : options.additionalToolDescriptors;
 
   const toolAssembly = await assembleSessionTools(env, metadata.id, cwd, {
     webSearch: gatewayEnv.resolvedSettings.webSearch,
     fetchContent: gatewayEnv.resolvedSettings.fetchContent,
     exposure: gatewayEnv.resolvedSettings.tools,
-    permissions: gatewayEnv.permissions,
+    permissions: options.permissions ?? gatewayEnv.permissions,
     mode: gatewayEnv.toolMode,
-    workspace: cwd,
+    workspace: options.workspace ?? cwd,
     budget: gatewayEnv.toolBudget.values,
     artifactsEnabled: gatewayEnv.toolBudget.artifactsEnabled,
     connectMcp: options.connectMcp !== false,
-    additionalDescriptors: options.additionalToolDescriptors,
+    mcpSourceAllowlist: options.mcpSourceAllowlist,
+    additionalDescriptors: additionalToolDescriptors,
   });
   for (const diagnostic of toolAssembly.diagnostics) {
     process.stderr.write(`warning: ${diagnostic}\n`);
@@ -527,12 +552,15 @@ export async function createHarnessForSession(
     promptTemplates: options.resources?.promptTemplates ?? resources.promptTemplates,
   });
 
-  const permissionStore = permissionStoreForHarness(
-    gatewayEnv.toolMode,
-    gatewayEnv.permissionStore,
-  );
+  const permissionStore =
+    options.permissionStore ??
+    permissionStoreForHarness(gatewayEnv.toolMode, gatewayEnv.permissionStore);
   const permissionGate = buildPermissionGate(
-    { ...gatewayEnv, permissionStore },
+    {
+      permissions: options.permissions ?? gatewayEnv.permissions,
+      permissionStore,
+      approver: options.approver ?? gatewayEnv.approver,
+    },
     toolAssembly.scopeGuard,
     toolAssembly.resolveDescriptor,
   );
@@ -572,6 +600,7 @@ export async function createHarnessForSession(
     permissionGate,
     toolCatalog: snapshotToolAssembly(toolAssembly),
     permissionStore,
+    resolveToolDescriptor: toolAssembly.resolveDescriptor,
     mcp: toolAssembly.mcp,
   };
 }
@@ -629,7 +658,57 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
     }
     target = { kind: "resume", metadata: { path: absResult.value } };
   }
-  const created = await createHarnessForSession(gatewayEnv, target);
+  let created: CreatedSession | undefined;
+  let agentRuns: AgentRunRuntime | undefined;
+  let agentCompletionSink: LocalAgentCompletionSink | undefined;
+  if (gatewayEnv.resolvedSettings.subagents?.enabled !== false) {
+    const [{ createAgentRunRuntime }, { LocalAgentCompletionSink }] = await Promise.all([
+      import("./agents/runtime.js"),
+      import("./agents/local-completion.js"),
+    ]);
+    const completionSink = new LocalAgentCompletionSink();
+    agentCompletionSink = completionSink;
+    agentRuns = await createAgentRunRuntime(gatewayEnv, {
+      completionSink,
+      initialize: false,
+    });
+    try {
+      created = await createHarnessForSession(gatewayEnv, target, {
+        additionalToolDescriptors: ({ metadata, harness, session }) => {
+          const parent = {
+            surface: gatewayEnv.toolMode === "tui" ? ("tui" as const) : ("json" as const),
+            session: metadata,
+            generation: metadata.id,
+          };
+          return agentRuns?.createToolDescriptors({
+            parent,
+            harness,
+            session,
+            resolveToolDescriptor: (name) => created?.resolveToolDescriptor(name),
+          }) ?? [];
+        },
+      });
+      const parent = {
+        surface: gatewayEnv.toolMode === "tui" ? ("tui" as const) : ("json" as const),
+        session: created.metadata,
+        generation: created.metadata.id,
+      };
+      completionSink.bind({
+        parent,
+        harness: created.harness,
+        session: created.session,
+      });
+      await agentRuns.initialize({
+        parentSessionId: created.metadata.id,
+        generation: created.metadata.id,
+      });
+    } catch (error) {
+      await agentRuns.stop().catch(() => undefined);
+      throw error;
+    }
+  } else {
+    created = await createHarnessForSession(gatewayEnv, target);
+  }
 
   return {
     harness: created.harness,
@@ -657,5 +736,7 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<Bootstr
     toolMode: gatewayEnv.toolMode,
     toolBudget: gatewayEnv.toolBudget,
     mcp: created.mcp,
+    ...(agentRuns ? { agentRuns } : {}),
+    ...(agentCompletionSink ? { agentCompletionSink } : {}),
   };
 }

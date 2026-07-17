@@ -1901,3 +1901,37 @@ Implemented two independent tool caching improvements: (1) cache-aware tool regi
 ### Next Steps
 
 - None - task complete
+
+
+## Session 57: MCP deferred tool discovery and permissions
+
+**Date**: 2026-07-18
+**Task**: MCP deferred tool discovery and permissions
+**Branch**: `main`
+
+### Summary
+
+Implemented bounded same-turn MCP search/invoke proxies, direct/auto/deferred exposure, real descriptor permission delegation, revision-bound grants, live session projections, and cross-surface catalog updates; added regression coverage and runtime contracts.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4dc9c79` | (see git log) |
+| `35ef5ec` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

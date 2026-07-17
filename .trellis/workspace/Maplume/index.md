@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 56
-- **Last Active**: 2026-07-17
+- **Total Sessions**: 57
+- **Last Active**: 2026-07-18
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1903 | Active |
+| `journal-1.md` | ~1937 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 57 | 2026-07-18 | MCP deferred tool discovery and permissions | `4dc9c79`, `35ef5ec` | `main` |
 | 56 | 2026-07-17 | 完成 MCP catalog 分页与动态刷新 | `49869d1`, `15ca52c` | `main` |
 | 55 | 2026-07-17 | 实现耐久子代理与后台任务运行时 | `97a6748`, `bd11263`, `72215b4` | `main` |
 | 54 | 2026-07-16 | Tool-level caching and cache-aware tool registration | `b881a36`, `4cff937` | `main` |

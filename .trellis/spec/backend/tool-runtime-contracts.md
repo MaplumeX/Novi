@@ -29,6 +29,11 @@ interface ToolDescriptor {
   optional?: boolean;
   factory(context: ToolFactoryContext): AgentTool;
   resolvePermissionIntents(input: unknown): readonly ToolPermissionIntent[];
+  resolvePermissionSubject?(input: unknown): {
+    descriptor: Readonly<ToolDescriptor>;
+    input: unknown;
+    identity?: { sourceId: string; toolName: string; revision: string };
+  };
 }
 
 function createBuiltinToolAssembly(
@@ -47,6 +52,7 @@ class PermissionGate {
   onToolCall(event: ToolCallEvent): Promise<{ block: true; reason: string } | undefined>;
   setPermissions(next: ResolvedPermissions): void;
   setScopeGuard(next: WorkspaceScopeGuard): void;
+  setResolveDescriptor(next: (name: string) => Readonly<ToolDescriptor> | undefined): void;
 }
 ```
 
@@ -64,12 +70,15 @@ Settings schema:
 {
   "tools": {
     "enabled": { "grep": false },
-    "sources": { "builtin": true }
+    "sources": { "builtin": true },
+    "mcpExposure": "auto",
+    "mcpDirectSchemaBytes": 32768,
+    "mcpPinned": ["mcp_github_get_issue"]
   },
   "permissions": {
     "rules": [
       {
-        "tool": "bash",
+        "source": "mcp:github",
         "capability": "shell.execute",
         "effect": "ask"
       },
@@ -85,10 +94,14 @@ Settings schema:
 }
 ```
 
-- A rule requires `effect` and at least one of `tool` or `capability`.
+- A rule requires `effect` and at least one of `tool`, `source`, or
+  `capability`. Multiple selectors are ANDed; `source` is an exact descriptor
+  source-id match such as `mcp:github`.
 - `target` and `scope` must appear together. File targets are normalized
   against the startup workspace; domain targets are lowercase.
-- Capability vocabulary includes builtin domains plus `external.invoke`, the
+- Capability vocabulary includes builtin domains plus `state.tools` and
+  `external.invoke`. `state.tools` reads the host-owned catalog without
+  invoking a server; `external.invoke` is the
   conservative fallback for MCP/external tools without a tighter map.
   `WorkspaceScopeGuard.canonicalize` accepts `external.invoke` (session-scoped
   target) so PermissionGate can evaluate default-`ask` MCP tools instead of
@@ -102,9 +115,10 @@ Settings schema:
   stable unique names (`mcp_<server>_<tool>`, collision suffix `_2`…),
   `defaultPermission="ask"`, and `optional=true`. Server connect failures are
   fail-soft (source unavailable diagnostics) and must not remove builtins.
-- Session grants use capability + scope + canonical target. File grants also
-  retain lexical/effective paths; subtree grants match descendants only when
-  both paths remain contained.
+- Session grants use capability + scope + canonical target. External grants
+  additionally bind `{sourceId, toolName, revision}`. File grants also retain
+  lexical/effective paths; subtree grants match descendants only when both
+  paths and the optional external identity remain contained/equal.
 - TUI rebuilds retain one in-memory store. Each Gateway chat gets a new store.
   No grants are persisted across processes.
 - `bash` is an exact command grant and is not an OS/filesystem sandbox.
@@ -165,6 +179,8 @@ maps the stable text into `ToolResultEnvelope.error`. Initial codes are
 | symlink target changes after approval                                   | `PERMISSION_INTENT_INVALID` before I/O                 |
 | builtin/external descriptor order not alphabetical                      | sort at assembly boundary; never interleave groups     |
 | MCP server connect/disconnect changes builtin order                    | impossible by construction (separate sorted groups)    |
+| malformed proxy subject or ref                                         | `PERMISSION_INTENT_INVALID`                             |
+| valid ref no longer matches current MCP contract/projection            | retryable `MCP_TOOL_STALE`                              |
 
 ### 5. Good / Base / Bad Cases
 
@@ -184,7 +200,8 @@ maps the stable text into `ToolResultEnvelope.error`. Initial codes are
 - Scope: lexical/effective containment, missing target under symlink parent,
   allowlisted external target, symlink redirection between approval and I/O.
 - Grants: exact file, directory, domain, search, command; descendant subtree;
-  changed target/command must not inherit authorization.
+  changed target/command must not inherit authorization; external grants must
+  not cross source/tool/revision and must be revoked on changed/removed tools.
 - Cross-layer: TUI prompt fields, reload store identity/active set, Gateway
   store isolation, Headless/Gateway structured error projection.
 - Cache-aware ordering: builtin descriptors alphabetical by name, external
@@ -238,6 +255,179 @@ function sortByName<T extends { name: string }>(items: readonly T[]): T[] {
 const sorted = sortByName(descriptors);
 for (const d of sorted) registry.add(d);
 ```
+
+## Scenario: Expose and authorize a large MCP tool catalog
+
+### 1. Scope / Trigger
+
+Use this contract when changing MCP tool discovery, provider-facing tool
+schemas, `mcp_tool_search` / `mcp_tool_invoke`, exposure settings, proxy
+authorization, live registry rebuilds, or catalog projections consumed by TUI,
+Headless, Gateway, and child agents. The goal is same-turn discovery without
+injecting every external schema into every model request.
+
+### 2. Signatures
+
+```ts
+type McpExposureMode = "direct" | "auto" | "deferred";
+
+interface McpToolSearchQuery {
+  query: string;
+  source?: string;
+  capability?: ToolCapability;
+  risk?: ToolRisk;
+  limit?: number; // 1..5
+}
+
+interface McpToolSearchResponse {
+  catalogRevision: string;
+  results: McpToolSearchResult[];
+  resultsTruncated: boolean;
+}
+
+interface McpToolRefPayload {
+  v: 1;
+  sourceId: `mcp:${string}`;
+  protocolName: string;
+  catalogRevision: string;
+  toolRevision: string;
+}
+
+class SessionToolController {
+  getAssembly(): ToolAssembly;
+  getSnapshot(): ToolCatalogSnapshot;
+  resolveDescriptor(name: string): Readonly<ToolDescriptor> | undefined;
+  bindHarness(harness: AgentHarness, activeAllowlist?: readonly string[]): () => void;
+  subscribe(listener: (snapshot: ToolCatalogSnapshot) => void): () => void;
+  settled(): Promise<void>;
+  close(): void;
+}
+```
+
+### 3. Contracts
+
+- `mcp_tool_search` and `mcp_tool_invoke` are fixed builtin-source descriptors.
+  Search declares `state.tools`, defaults to allow, and never calls an MCP
+  server. Invoke is only a transport: before whole-tool or intent evaluation,
+  `PermissionGate` resolves it to the current real MCP descriptor, real input,
+  and `{sourceId, protocolName, toolRevision}` identity.
+- Every real MCP descriptor declares an `external.invoke` capability and intent,
+  even when conservative filesystem/network/shell capabilities are inferred.
+  A rule allowing only `filesystem.read` therefore cannot silently authorize an
+  external call.
+- Search normalization is Unicode NFKC + lowercase + letter/number tokens.
+  Ranking is exact, name/title prefix, full name-token coverage, body-token
+  coverage, then bounded edit distance. Ties sort by `sourceId` and protocol
+  name. The index is immutable per committed projection revision.
+- Search and invoke use the same visibility predicate: source-disabled,
+  tool-disabled, whole-denied, and child-source-filtered entries cannot be
+  searched or invoked through a hand-built ref.
+- Search input ceilings are 2 KiB UTF-8 for query and 512 bytes for source.
+  Results are at most 5; each schema preview is at most 6 KiB, title/description
+  fields are at most 512 bytes, and the complete canonical response is at most
+  44 KiB so the default 50 KiB runtime budget retains valid JSON. Truncation
+  affects only the model preview; invocation validates against the complete
+  host-owned schema.
+- Tool refs use strict canonical `mcp:v1:<base64url-json>` encoding, are at most
+  4 KiB, and are non-authoritative. Resolution must match the current source,
+  protocol name, source catalog revision, tool revision, visibility, and input
+  validator before a server call.
+- `tools.mcpExposure` defaults to `auto`; `tools.mcpDirectSchemaBytes` defaults
+  to 32 KiB. `auto` keeps all eligible tools direct only within the canonical
+  provider-schema budget; otherwise only global pinned tools remain direct and
+  proxies become active. `deferred` exposes no real schema; `direct` exposes all
+  eligible real tools. Project settings may move only
+  `direct -> auto -> deferred`, lower the byte budget, and never add pins.
+- `SessionToolController` owns one live registry, stable descriptor resolver,
+  cached search index, active names, grant revocation, harness bindings, and
+  serializable snapshot. On a catalog diff it serially revokes changed/removed
+  grants, swaps projection truth, calls `setTools`, then publishes the snapshot.
+  A `setTools` failure marks `projectionHealth="degraded"`, keeps committed
+  catalog truth, records a bounded diagnostic, and retries.
+- Builtins/internal proxies remain one sorted contiguous prefix; real MCP
+  descriptors remain a sorted suffix. `ToolEventDecoder.setCatalog()` affects
+  future calls only; an in-flight call retains the descriptor captured at start.
+
+### 4. Validation & Error Matrix
+
+| Condition | Behavior / code |
+| --- | --- |
+| malformed, non-canonical, oversized, or unsupported ref | `PERMISSION_INTENT_INVALID` |
+| removed/changed tool or mismatched source/tool revision | retryable `MCP_TOOL_STALE`; no server call |
+| ref resolves to a currently hidden tool | retryable `MCP_TOOL_STALE`; no server call |
+| proxy arguments fail current full input schema | `MCP_INPUT_SCHEMA_INVALID`; no server call |
+| search query/source exceeds bound or contains controls | `PERMISSION_INTENT_INVALID` |
+| search schema/response exceeds preview ceiling | visible truncation; valid bounded response |
+| project broadens mode/budget or supplies pins | ignore value + diagnostic |
+| real descriptor whole/source/capability deny | deny before grants and execution |
+| catalog changes a granted tool | revoke matching source/tool grant revision |
+| live harness `setTools` fails | committed catalog retained; projection degraded + retry |
+| stale direct tool captured by an earlier turn | `MCP_TOOL_STALE`; new contract is not executed |
+
+### 5. Good / Base / Bad Cases
+
+- Good: a 10,000-tool catalog activates only the two compact proxies, exact
+  search returns a bounded current ref/schema, and invoke authorizes the real
+  source/tool before calling the server.
+- Base: a small catalog below 32 KiB remains direct with the previous external
+  naming, ordering, default-ask, and execution behavior.
+- Bad: search filters a disabled tool but invoke accepts a manually assembled
+  matching ref; or five schema previews exceed the runtime budget and leave the
+  model an invalid half-JSON response.
+
+### 6. Tests Required
+
+- Tool-ref codec: canonical round trip, malformed/oversized/unknown version,
+  forged revision, stale source/tool/schema, and no-call assertions.
+- Search: normalization/ranking/tie golden tests, every filter, limit 1..5,
+  input bounds, per-schema truncation, complete response byte ceiling, and
+  deterministic output for the same revision.
+- Exposure/settings: direct/auto/deferred, exact canonical byte accounting,
+  pins, project tightening/provenance/diagnostics, disabled/whole-denied empty
+  search, and 10,000-tool provider-schema bound.
+- Permission: true proxy subject, unconditional `external.invoke`, source/tool/
+  capability deny-first combinations, real approval source/input, revision-bound
+  grants, and changed/removed revocation.
+- Live integration: list-changed registry/active/resolver/snapshot atomicity,
+  stale direct call, in-flight metadata capture, degraded/retry recovery, stable
+  builtin prefix, TUI/Headless/Gateway updates, and child source/active allowlists.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```ts
+const entry = decodeRef(input.toolRef);
+return manager.callTool(entry.serverName, entry.name, input.arguments);
+```
+
+This treats a model-provided ref as authority and bypasses current visibility,
+schema, descriptor policy, and revision-bound grants.
+
+#### Correct
+
+```ts
+resolvePermissionSubject: (input) => {
+  const entry = resolveAndValidate(
+    getSnapshot(),
+    input.toolRef,
+    input.arguments,
+    isVisible,
+  );
+  return {
+    descriptor: entry.descriptor,
+    input: input.arguments,
+    identity: {
+      sourceId: entry.sourceId,
+      toolName: entry.protocolTool.name,
+      revision: entry.toolRevision,
+    },
+  };
+}
+```
+
+The ref selects a candidate only; current host truth and PermissionGate remain
+the authority.
 
 ## Scenario: Maintain a dynamic MCP tool catalog
 

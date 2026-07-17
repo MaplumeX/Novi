@@ -23,14 +23,14 @@
 
 ## Acceptance Criteria
 
-- [ ] 10,000-tool fake catalog 在 auto/deferred 下 provider tool schema bytes 有固定上限，模型仍能同 turn search + invoke 任意允许工具。
-- [ ] 相同 query/revision 的搜索排序固定，filters、limit、超大 schema truncation 可测试。
-- [ ] forged/oversized/malformed/stale toolRef 返回稳定、可重试或 fail-closed 错误，不执行 server call。
-- [ ] 仅允许 `filesystem.read` 时 MCP read tool 仍因 `external.invoke` 询问/拒绝；source allow、source deny、tool deny、capability deny 组合符合 deny-first。
-- [ ] approval 展示真实工具/source/input；session grant 不跨 tool/source/revision，catalog change 后准确撤销。
-- [ ] listChanged 后 setTools/projection 原子更新；builtin 顺序稳定，current-turn stale direct call fail closed，in-flight 已授权调用可完成。
-- [ ] TUI、print/json、Gateway、child agent 的 catalog/调用行为一致，无 MCP 与小 catalog direct 回归通过。
-- [ ] permission/settings/registry/bootstrap/surface tests、typecheck、lint、build 通过。
+- [x] 10,000-tool fake catalog 在 auto/deferred 下 provider tool schema bytes 有固定上限，模型仍能同 turn search + invoke 任意允许工具。
+- [x] 相同 query/revision 的搜索排序固定，filters、limit、超大 schema truncation 可测试。
+- [x] forged/oversized/malformed/stale toolRef 返回稳定、可重试或 fail-closed 错误，不执行 server call。
+- [x] 仅允许 `filesystem.read` 时 MCP read tool 仍因 `external.invoke` 询问/拒绝；source allow、source deny、tool deny、capability deny 组合符合 deny-first。
+- [x] approval 展示真实工具/source/input；session grant 不跨 tool/source/revision，catalog change 后准确撤销。
+- [x] listChanged 后 setTools/projection 原子更新；builtin 顺序稳定，current-turn stale direct call fail closed，in-flight 已授权调用可完成。
+- [x] TUI、print/json、Gateway、child agent 的 catalog/调用行为一致，无 MCP 与小 catalog direct 回归通过。
+- [x] permission/settings/registry/bootstrap/surface tests、typecheck、lint、build 通过。
 
 ## Notes
 

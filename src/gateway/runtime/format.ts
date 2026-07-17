@@ -28,10 +28,13 @@ export function formatGatewayStatus(snapshot: GatewayStatusView): string {
   const scheduler = snapshot.scheduler
     ? `scheduler: ${snapshot.scheduler.enabled} enabled, ${snapshot.scheduler.queuedOrRunning} active, ${snapshot.scheduler.pendingDelivery} pending delivery\n`
     : "scheduler: unavailable\n";
+  const agentRuns = snapshot.agentRuns
+    ? `agents: ${snapshot.agentRuns.running} running, ${snapshot.agentRuns.queued} queued, ${snapshot.agentRuns.interrupted} interrupted, ${snapshot.agentRuns.pendingCompletion} pending completion\n`
+    : "";
   const reasons = snapshot.degradedReasons.length
     ? `reasons: ${snapshot.degradedReasons.join(", ")}\n`
     : "";
-  return `state: ${snapshot.state}\nlive: yes\nready: ${snapshot.health.ready ? "yes" : "no"}\npid: ${snapshot.pid}\nuptimeSince: ${snapshot.startedAt}\nchannels: ${snapshot.channels.length}\n${channels}${channels ? "\n" : ""}activeSessions: ${snapshot.sessions.activeSessions}\n${messages}${scheduler}${reasons}`;
+  return `state: ${snapshot.state}\nlive: yes\nready: ${snapshot.health.ready ? "yes" : "no"}\npid: ${snapshot.pid}\nuptimeSince: ${snapshot.startedAt}\nchannels: ${snapshot.channels.length}\n${channels}${channels ? "\n" : ""}activeSessions: ${snapshot.sessions.activeSessions}\n${messages}${scheduler}${agentRuns}${reasons}`;
 }
 
 export function gatewayStatusExitCode(state: GatewayRuntimeState | "stopped"): number {

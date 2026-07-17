@@ -8,6 +8,7 @@ import type { MessageError } from "../messages/types.js";
 import type { ScheduledJob, ScheduledRun } from "./types.js";
 import { JobStore } from "./store.js";
 import { boundedJobError } from "./errors.js";
+import { deliveryFailureTransition } from "../../runs/delivery.js";
 
 export class DeliveryService {
   private readonly channels = new Map<string, ChannelAdapter>();
@@ -141,21 +142,22 @@ export class DeliveryService {
     return this.store.updateRun(job.id, run.id, (current) => {
       const exhausted =
         !error.retryable || current.delivery.attempt >= current.delivery.maxAttempts;
+      const failure = deliveryFailureTransition({
+        error,
+        exhausted,
+        now: this.now(),
+        retryDelayMs: deliveryRetryDelayMs(
+          current.delivery.attempt,
+          error.retryAfterMs,
+          this.random,
+        ),
+      });
       return {
         ...current,
         delivery: {
           ...current.delivery,
-          status: exhausted ? "delivery_failed" : "pending",
+          ...failure,
           ...(messageIds.length === 0 ? {} : { messageIds }),
-          ...(exhausted
-            ? {}
-            : {
-                nextAttemptAt: new Date(
-                  this.now().getTime() +
-                    deliveryRetryDelayMs(current.delivery.attempt, error.retryAfterMs, this.random),
-                ).toISOString(),
-              }),
-          error,
         },
       };
     });

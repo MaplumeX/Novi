@@ -19,6 +19,10 @@ export interface GatewayMetricSnapshot {
     oldestPendingAgeMs: number;
     readyChannels: number;
     failedChannels: number;
+    agentQueued?: number;
+    agentRunning?: number;
+    agentInterrupted?: number;
+    agentPendingCompletion?: number;
   };
 }
 

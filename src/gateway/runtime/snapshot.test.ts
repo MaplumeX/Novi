@@ -5,6 +5,7 @@ import {
   type GatewayMessageRuntime,
   type GatewayRuntimeComponents,
 } from "./snapshot.js";
+import type { AgentRunRuntimeStats } from "../../agents/runtime.js";
 
 const EMPTY_MESSAGES: GatewayMessageRuntime = {
   version: 1,
@@ -42,7 +43,10 @@ function components(): GatewayRuntimeComponents {
   };
 }
 
-function monitor(current: GatewayRuntimeComponents): GatewayRuntimeMonitor {
+function monitor(
+  current: GatewayRuntimeComponents,
+  agentRunStats?: () => Promise<AgentRunRuntimeStats>,
+): GatewayRuntimeMonitor {
   return new GatewayRuntimeMonitor({
     components: () => current,
     schedulerStats: async () => ({
@@ -78,6 +82,7 @@ function monitor(current: GatewayRuntimeComponents): GatewayRuntimeMonitor {
         failedChannels: value.channels.filter((channel) => channel.state === "failed").length,
       },
     }),
+    ...(agentRunStats ? { agentRunStats } : {}),
   });
 }
 
@@ -161,5 +166,26 @@ describe("GatewayRuntimeMonitor", () => {
     expect(failure.code).toBe("CHANNEL_FAILURE");
     expect(failure.message).not.toContain("super-secret");
     expect(failure.message.length).toBeLessThanOrEqual(240);
+  });
+
+  it("includes bounded child-agent aggregates without result bodies", async () => {
+    const runtime = monitor(components(), async () => ({
+      total: 4,
+      queued: 1,
+      running: 2,
+      interrupted: 1,
+      pendingCompletion: 1,
+      deliveryFailed: 0,
+      usage: {
+        inputTokens: 10,
+        outputTokens: 5,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        cost: 0.01,
+      },
+    }));
+    const snapshot = await runtime.snapshot();
+    expect(snapshot.agentRuns).toMatchObject({ running: 2, queued: 1, pendingCompletion: 1 });
+    expect(JSON.stringify(snapshot)).not.toContain("child result body");
   });
 });

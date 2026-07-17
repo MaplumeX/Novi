@@ -60,6 +60,23 @@ describe("JobStore", () => {
     expect(await readFile(path.join(root, "store.json"), "utf8")).toBe("{broken");
   });
 
+  it("round-trips the version 1 run shape and preserves an unsupported version", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "novi-jobs-"));
+    roots.push(root);
+    const store = await JobStore.open(root, "2026-01-01");
+    const original = run();
+    await store.createRun(original);
+    expect(await store.getRun(original.jobId, original.id)).toEqual(original);
+
+    const runPath = path.join(root, "runs", original.jobId, `${original.id}.json`);
+    const unsupported = `${JSON.stringify({ ...original, version: 2 }, null, 2)}\n`;
+    await writeFile(runPath, unsupported, "utf8");
+    await expect(store.getRun(original.jobId, original.id)).rejects.toThrow(
+      "unsupported run version: 2",
+    );
+    expect(await readFile(runPath, "utf8")).toBe(unsupported);
+  });
+
   it("allows only one scheduler owner", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "novi-jobs-"));
     roots.push(root);

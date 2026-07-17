@@ -3,6 +3,7 @@ import { redactAndBoundError } from "../messages/errors.js";
 import type { MessageStoreSnapshot } from "../messages/store.js";
 import type { SchedulerStats } from "../jobs/scheduler.js";
 import type { GatewayMetricSnapshot } from "./metrics.js";
+import type { AgentRunRuntimeStats } from "../../agents/runtime.js";
 
 export type GatewayRuntimeState = "starting" | "ready" | "degraded" | "unhealthy" | "stopping";
 export type GatewayChannelState = "starting" | "ready" | "failed" | "stopped";
@@ -53,6 +54,7 @@ export interface GatewayRuntimeSnapshot {
   channels: GatewayChannelRuntime[];
   sessions: GatewayRuntimeComponents["sessions"];
   messages?: GatewayMessageRuntime;
+  agentRuns?: AgentRunRuntimeStats;
   scheduler?: SchedulerStats;
   workers: GatewayRuntimeComponents["workers"];
   metrics: GatewayMetricSnapshot;
@@ -67,7 +69,11 @@ export interface GatewayRuntimeMonitorOptions {
   pid?: number;
   cwd: string;
   configDigest: string;
-  metrics: (components: GatewayRuntimeComponents) => GatewayMetricSnapshot;
+  metrics: (
+    components: GatewayRuntimeComponents,
+    agentRuns?: AgentRunRuntimeStats,
+  ) => GatewayMetricSnapshot;
+  agentRunStats?: () => Promise<AgentRunRuntimeStats>;
   degradationReasons?: () => string[];
 }
 
@@ -96,15 +102,22 @@ export class GatewayRuntimeMonitor {
     const components = this.#options.components();
     let scheduler: SchedulerStats | undefined;
     let schedulerFailure = false;
+    let agentRuns: AgentRunRuntimeStats | undefined;
+    let agentRunsFailure = false;
     try {
       scheduler = await this.#options.schedulerStats();
     } catch {
       schedulerFailure = true;
     }
+    try {
+      agentRuns = await this.#options.agentRunStats?.();
+    } catch {
+      agentRunsFailure = true;
+    }
 
     const degradedReasons = [
       ...new Set([
-        ...collectReasons(components, schedulerFailure),
+        ...collectReasons(components, schedulerFailure, agentRunsFailure),
         ...(this.#options.degradationReasons?.() ?? []),
       ]),
     ].sort();
@@ -125,8 +138,9 @@ export class GatewayRuntimeMonitor {
         ? {}
         : { messages: structuredClone(components.messages) }),
       ...(scheduler === undefined ? {} : { scheduler: { ...scheduler } }),
+      ...(agentRuns === undefined ? {} : { agentRuns: structuredClone(agentRuns) }),
       workers: structuredClone(components.workers),
-      metrics: this.#options.metrics(components),
+      metrics: this.#options.metrics(components, agentRuns),
       degradedReasons,
     };
   }
@@ -155,7 +169,11 @@ function evaluateState(
   return degradedReasons.length > 0 ? "degraded" : "ready";
 }
 
-function collectReasons(components: GatewayRuntimeComponents, schedulerFailure: boolean): string[] {
+function collectReasons(
+  components: GatewayRuntimeComponents,
+  schedulerFailure: boolean,
+  agentRunsFailure: boolean,
+): string[] {
   const reasons = new Set<string>();
   for (const channel of components.channels) {
     if (channel.state !== "ready") reasons.add(`channel:${channel.id}:${channel.state}`);
@@ -163,6 +181,7 @@ function collectReasons(components: GatewayRuntimeComponents, schedulerFailure: 
   if (components.workers.inbox.state === "failed") reasons.add("worker:inbox:failed");
   if (components.workers.outbox.state === "failed") reasons.add("worker:outbox:failed");
   if (schedulerFailure) reasons.add("scheduler:unavailable");
+  if (agentRunsFailure) reasons.add("agents:unavailable");
   for (const reason of components.messages?.degradedReasons ?? [])
     reasons.add(`messages:${reason}`);
   return [...reasons].sort();

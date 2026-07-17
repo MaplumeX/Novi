@@ -9,6 +9,7 @@ import {
   createSessionLane,
   enqueueMessage,
   enqueueSystemOperation,
+  discardQueuedEntries,
   type SessionLane,
 } from "./session-lane.js";
 import type { GatewayMetrics } from "../runtime/metrics.js";
@@ -109,12 +110,16 @@ export class GatewaySessionManager {
     const operation = (async () => {
       if (previous) await previous.catch(() => {});
       const lane = this.lanes.get(route.key);
-      if (lane) lane.queue.length = 0;
+      if (lane)
+        discardQueuedEntries(lane, new Error("session generation reset before queued operation"));
       try {
         await this.agent.resetSession(route);
       } finally {
         if (lane) {
-          lane.queue.length = 0;
+          discardQueuedEntries(
+            lane,
+            new Error("session generation reset before queued operation"),
+          );
           lane.status = "idle";
           lane.lastActivity = Date.now();
         }

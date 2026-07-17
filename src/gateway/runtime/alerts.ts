@@ -223,6 +223,13 @@ function runtimeFaults(
       minimumAgeMs: 0,
     });
   }
+  if (snapshot.agentRuns?.deliveryFailed) {
+    faults.push({
+      key: "agents:completion_delivery_failed",
+      summary: "child-agent completion delivery failed",
+      minimumAgeMs: 0,
+    });
+  }
   return faults;
 }
 

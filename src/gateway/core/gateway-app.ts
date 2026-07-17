@@ -33,6 +33,7 @@ import {
 } from "../runtime/snapshot.js";
 import type { GatewayLogger } from "../runtime/logger.js";
 import type { GatewayMetrics } from "../runtime/metrics.js";
+import type { AgentRunRuntimeStats } from "../../agents/runtime.js";
 
 /** Constructor options for {@link GatewayApp}. */
 export interface GatewayAppOptions {
@@ -52,6 +53,7 @@ export interface GatewayAppOptions {
   deliveryExecutor?: ChannelDeliveryExecutor;
   logger?: GatewayLogger;
   metrics?: GatewayMetrics;
+  agentRunStats?: () => Promise<AgentRunRuntimeStats>;
 }
 
 /**
@@ -287,11 +289,15 @@ export class GatewayApp {
         ? `${gatewayEnv.model.provider}/${gatewayEnv.model.id}`
         : "unavailable";
       const scheduled = await this.options.schedulerStats?.().catch(() => undefined);
+      const agentRuns = await this.options.agentRunStats?.().catch(() => undefined);
       await channel.send(
         target,
         `channel: ${channel.id}\nsession: ${route.key}\nmodel: ${model}\nauthorized: yes\nqueue: ${stats.queuedMessages}\nactiveSessions: ${stats.activeSessions}` +
           (scheduled
             ? `\njobs: enabled=${scheduled.enabled} paused=${scheduled.paused}\nbackground: ${scheduled.queuedOrRunning}\npendingDelivery: ${scheduled.pendingDelivery}`
+            : "") +
+          (agentRuns
+            ? `\nagents: queued=${agentRuns.queued} running=${agentRuns.running} interrupted=${agentRuns.interrupted}\nagentPendingCompletion: ${agentRuns.pendingCompletion}`
             : ""),
       );
       return;
@@ -451,6 +457,22 @@ export class GatewayApp {
     );
     if (!channel || !this.deliverySink) throw new Error("operations alert channel is unavailable");
     await this.deliverySink.enqueueSystem(channel, target, sourceId, text, "alert", true);
+  }
+
+  async enqueueAgentCompletion(
+    channel: ChannelAdapter,
+    route: ReturnType<typeof sessionRoute>,
+    sourceId: string,
+    text: string,
+  ): Promise<void> {
+    if (!this.deliverySink) throw new Error("durable agent completion delivery is unavailable");
+    await this.deliverySink.enqueueSystem(
+      channel,
+      route.locator,
+      sourceId,
+      text,
+      "final",
+    );
   }
 
   async validateOperationTarget(

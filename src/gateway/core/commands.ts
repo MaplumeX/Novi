@@ -5,6 +5,9 @@ import type { GatewayEnv } from "../../bootstrap.js";
 import type { GatewaySessionManager } from "./session-manager.js";
 import type { JobService } from "../jobs/service.js";
 import { formatJob, formatRun } from "../jobs/format.js";
+import type { AgentRunRuntime } from "../../agents/runtime.js";
+import type { AgentRunOwner } from "../../agents/manager.js";
+import { summarizeAgentRun } from "../../agents/format.js";
 
 /** A registered slash command handler. */
 export interface CommandHandler {
@@ -55,6 +58,8 @@ export class CommandRegistry {
 export interface CommandRegistryOptions {
   jobService?: JobService;
   onJobsMutated?: () => void;
+  agentRuntime?: () => AgentRunRuntime | undefined;
+  resolveAgentOwner?: (route: GatewaySessionRoute) => AgentRunOwner | undefined;
 }
 
 export function createCommandRegistry(options: CommandRegistryOptions = {}): CommandRegistry {
@@ -154,6 +159,83 @@ export function createCommandRegistry(options: CommandRegistryOptions = {}): Com
           await ctx.channel.send(
             ctx.target,
             `Jobs error: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      },
+    });
+  }
+
+  if (options.agentRuntime && options.resolveAgentOwner) {
+    registry.register("agents", {
+      description: "Inspect and manage child-agent runs.",
+      async run(ctx) {
+        const runtime = options.agentRuntime?.();
+        const owner = options.resolveAgentOwner?.(ctx.route);
+        if (!runtime || !owner) {
+          await ctx.channel.send(ctx.target, "No agent runs.");
+          return;
+        }
+        const [action = "list", runId] = ctx.arg.split(/\s+/, 2);
+        try {
+          if (action === "list") {
+            const runs = (await runtime.manager.list(owner)).slice(-20);
+            await ctx.channel.send(
+              ctx.target,
+              runs.length
+                ? runs.map((run) => JSON.stringify(summarizeAgentRun(run))).join("\n")
+                : "No agent runs.",
+            );
+            return;
+          }
+          if (action === "stop-all" || (action === "cancel" && runId === "all")) {
+            const runs = await runtime.manager.cancelAll(owner);
+            await ctx.channel.send(
+              ctx.target,
+              `Cancellation requested for ${runs.length} agent run(s).`,
+            );
+            return;
+          }
+          if (!runId) {
+            await ctx.channel.send(
+              ctx.target,
+              "Usage: /agents list|info|log|cancel|retry|stop-all [run-id]",
+            );
+            return;
+          }
+          if (action === "cancel") {
+            const run = await runtime.manager.cancel(owner, runId);
+            await ctx.channel.send(ctx.target, JSON.stringify(summarizeAgentRun(run)));
+            return;
+          }
+          if (action === "retry") {
+            const run = await runtime.manager.retry(owner, runId);
+            await ctx.channel.send(ctx.target, `Retried as ${run.id}.`);
+            return;
+          }
+          if (action === "info" || action === "log") {
+            const run = await runtime.manager.get(owner, runId);
+            if (!run) {
+              await ctx.channel.send(ctx.target, `Agent run not found: ${runId}`);
+              return;
+            }
+            await ctx.channel.send(
+              ctx.target,
+              [
+                JSON.stringify(summarizeAgentRun(run)),
+                ...(run.result !== undefined ? [`Result:\n${run.result}`] : []),
+                ...(run.error ? [`Error ${run.error.code}: ${run.error.message}`] : []),
+              ].join("\n"),
+            );
+            return;
+          }
+          await ctx.channel.send(
+            ctx.target,
+            "Usage: /agents list|info|log|cancel|retry|stop-all [run-id]",
+          );
+        } catch (error) {
+          await ctx.channel.send(
+            ctx.target,
+            `Agents error: ${error instanceof Error ? error.message : String(error)}`,
           );
         }
       },

@@ -2,6 +2,9 @@ import type { GatewayLogger } from "./logger.js";
 import { controlMethodError, type ControlMethodHandler } from "./control-server.js";
 import type { GatewayMessageService } from "../messages/service.js";
 import type { InboxRecord, OutboxRecord } from "../messages/types.js";
+import type { AgentRunRuntime } from "../../agents/runtime.js";
+import type { AgentRun } from "../../agents/types.js";
+import { summarizeAgentRun, type AgentRunSummary } from "../../agents/format.js";
 
 export interface MessageRecordSummary {
   kind: "inbox" | "outbox";
@@ -12,6 +15,12 @@ export interface MessageRecordSummary {
   updatedAt: string;
   errorCode?: string;
   possibleDuplicate?: boolean;
+}
+
+export interface AgentOperatorSummary extends AgentRunSummary {
+  parentSessionId: string;
+  generation: string;
+  surface: AgentRun["parent"]["surface"];
 }
 
 export function createMessageControlMethods(
@@ -40,6 +49,53 @@ export function createMessageControlMethods(
       const record = await operatorMutation(() => service.dismiss(id));
       logger?.info("gateway.operator.message_dismiss", { recordId: id });
       return { record: messageRecordSummary(record) };
+    },
+  };
+}
+
+export function createAgentControlMethods(
+  runtime: AgentRunRuntime,
+  logger?: GatewayLogger,
+): Record<string, ControlMethodHandler> {
+  return {
+    "agents.list": async (params) => {
+      const limit = readLimit(params);
+      const runs = (await runtime.manager.listAll()).slice(-limit).reverse();
+      return { runs: runs.map(agentOperatorSummary), stats: await runtime.getStats() };
+    },
+    "agents.get": async (params) => {
+      const run = await findAgentRun(runtime, readAgentId(params));
+      return { run: agentOperatorSummary(run) };
+    },
+    "agents.cancel": async (params) => {
+      const id = readAgentId(params);
+      const current = await findAgentRun(runtime, id);
+      const run = await operatorAgentMutation(() =>
+        runtime.manager.cancel(
+          {
+            parentSessionId: current.parent.session.id,
+            generation: current.parent.generation,
+          },
+          id,
+        ),
+      );
+      logger?.info("gateway.operator.agent_cancel", { agentRunId: id });
+      return { run: agentOperatorSummary(run) };
+    },
+    "agents.retry": async (params) => {
+      const id = readAgentId(params);
+      const current = await findAgentRun(runtime, id);
+      const run = await operatorAgentMutation(() =>
+        runtime.manager.retry(
+          {
+            parentSessionId: current.parent.session.id,
+            generation: current.parent.generation,
+          },
+          id,
+        ),
+      );
+      logger?.info("gateway.operator.agent_retry", { agentRunId: id });
+      return { run: agentOperatorSummary(run) };
     },
   };
 }
@@ -93,6 +149,32 @@ function readLimit(params: unknown): number {
   return Math.min(50, params.limit as number);
 }
 
+function readAgentId(params: unknown): string {
+  if (
+    !isObject(params) ||
+    typeof params.id !== "string" ||
+    !/^[A-Za-z0-9_-]{1,128}$/.test(params.id)
+  ) {
+    throw controlMethodError("INVALID_PARAMS", "agent run id is invalid");
+  }
+  return params.id;
+}
+
+function agentOperatorSummary(run: AgentRun): AgentOperatorSummary {
+  return {
+    ...summarizeAgentRun(run),
+    parentSessionId: run.parent.session.id,
+    generation: run.parent.generation,
+    surface: run.parent.surface,
+  };
+}
+
+async function findAgentRun(runtime: AgentRunRuntime, id: string): Promise<AgentRun> {
+  const run = (await runtime.manager.listAll()).find((candidate) => candidate.id === id);
+  if (!run) throw controlMethodError("NOT_FOUND", "agent run was not found");
+  return run;
+}
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -102,5 +184,13 @@ async function operatorMutation<T>(operation: () => Promise<T>): Promise<T> {
     return await operation();
   } catch {
     throw controlMethodError("OPERATION_REJECTED", "message operation was rejected");
+  }
+}
+
+async function operatorAgentMutation<T>(operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch {
+    throw controlMethodError("OPERATION_REJECTED", "agent run operation was rejected");
   }
 }

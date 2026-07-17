@@ -1,16 +1,69 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { sessionKeyForLocator } from "../core/routing.js";
 import { GatewayMessageService } from "../messages/service.js";
 import { GatewayMessageStore } from "../messages/store.js";
 import { createInboxRecord } from "../messages/types.js";
-import { createMessageControlMethods } from "./operator-methods.js";
+import { createAgentControlMethods, createMessageControlMethods } from "./operator-methods.js";
+import type { AgentRunRuntime } from "../../agents/runtime.js";
+import type { AgentRun } from "../../agents/types.js";
 
 const roots: string[] = [];
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+});
+
+describe("agent control methods", () => {
+  it("lists bounded summaries and mutates by the persisted owner", async () => {
+    const run = {
+      id: "run_1",
+      task: "secret task body",
+      result: "secret result body",
+      profile: "explorer",
+      status: "succeeded",
+      depth: 1,
+      attempt: 1,
+      createdAt: "2026-07-17T00:00:00.000Z",
+      parent: {
+        surface: "gateway",
+        generation: "parent_1",
+        session: { id: "parent_1" },
+      },
+      completion: { status: "delivered" },
+    } as AgentRun;
+    const manager = {
+      listAll: vi.fn().mockResolvedValue([run]),
+      cancel: vi.fn().mockResolvedValue(run),
+      retry: vi.fn().mockResolvedValue({ ...run, id: "run_2", status: "queued" }),
+    };
+    const runtime = {
+      manager,
+      getStats: vi.fn().mockResolvedValue({ total: 1, queued: 0, running: 0 }),
+    } as unknown as AgentRunRuntime;
+    const methods = createAgentControlMethods(runtime);
+
+    const listed = await methods["agents.list"]!(undefined, {
+      version: 1,
+      id: "list",
+      method: "agents.list",
+    });
+    expect(listed).toMatchObject({
+      runs: [{ id: "run_1", parentSessionId: "parent_1", surface: "gateway" }],
+    });
+    expect(JSON.stringify(listed)).not.toContain("secret task body");
+    expect(JSON.stringify(listed)).not.toContain("secret result body");
+
+    await methods["agents.cancel"]!(
+      { id: "run_1" },
+      { version: 1, id: "cancel", method: "agents.cancel" },
+    );
+    expect(manager.cancel).toHaveBeenCalledWith(
+      { parentSessionId: "parent_1", generation: "parent_1" },
+      "run_1",
+    );
+  });
 });
 
 describe("message control methods", () => {

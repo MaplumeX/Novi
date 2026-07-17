@@ -27,6 +27,11 @@ import type { McpRuntimeHandle } from "../../tools/assembly.js";
 import type { JobService } from "../jobs/service.js";
 import type { GatewayLogger } from "../runtime/logger.js";
 import { createJobsToolDescriptor } from "../jobs/tool.js";
+import type { AgentRunRuntime } from "../../agents/runtime.js";
+import type { AgentRun } from "../../agents/types.js";
+import type { AgentRunOwner } from "../../agents/manager.js";
+import { AgentCompletionError, type AgentCompletionPayload } from "../../agents/completion.js";
+import { INTERNAL_AGENT_COMPLETION_WAKE_PREFIX } from "../../agents/local-completion.js";
 
 /** Cached harness + canonical metadata for one route generation. */
 interface SessionEntry {
@@ -36,7 +41,13 @@ interface SessionEntry {
   session: Session<JsonlSessionMetadata>;
   metadata: JsonlSessionMetadata;
   toolCatalog: ToolCatalogSnapshot;
+  resolveToolDescriptor: CreatedSession["resolveToolDescriptor"];
   mcp?: McpRuntimeHandle;
+}
+
+export interface GatewayAgentCompletionResult {
+  parentEntryId: string;
+  text: string;
 }
 
 type HarnessFactory = (
@@ -59,6 +70,7 @@ export class NoviAgentAdapter implements AgentProtocolAdapter {
     private readonly jobService?: JobService,
     private readonly onJobsMutated: () => void = () => undefined,
     private readonly logger?: GatewayLogger,
+    private readonly getAgentRuntime: () => AgentRunRuntime | undefined = () => undefined,
   ) {}
 
   /** Get or initialize one route. Concurrent first messages share the promise. */
@@ -186,12 +198,76 @@ export class NoviAgentAdapter implements AgentProtocolAdapter {
     );
   }
 
+  /** Resolve the durable owner key used by Gateway operator commands. */
+  agentOwner(route: GatewaySessionRoute): AgentRunOwner | undefined {
+    const metadata = this.sessions.get(route.key)?.metadata ?? this.store.getBinding(route)?.session;
+    return metadata
+      ? { parentSessionId: metadata.id, generation: metadata.id }
+      : undefined;
+  }
+
+  /** Persist and synthesize one child-agent completion inside the parent route lane. */
+  async runAgentCompletion(
+    route: GatewaySessionRoute,
+    run: AgentRun,
+    payload: AgentCompletionPayload,
+    callbacks?: AgentProtocolTurnCallbacks,
+  ): Promise<GatewayAgentCompletionResult> {
+    const entry = await this.getOrCreateHarness(route);
+    if (
+      entry.metadata.id !== run.parent.session.id ||
+      this.parentGeneration(entry) !== payload.parentGeneration
+    ) {
+      throw new AgentCompletionError(
+        "PARENT_GENERATION_MISMATCH",
+        "parent session generation changed before agent completion",
+        false,
+      );
+    }
+
+    const existing = (await entry.session.getEntries()).find(
+      (item) =>
+        item.type === "custom_message" &&
+        item.customType === "novi.agent-completion" &&
+        isCompletionDetails(item.details, payload.idempotencyKey),
+    );
+    const parentEntryId =
+      existing?.id ??
+      (await entry.session.appendCustomMessageEntry(
+        "novi.agent-completion",
+        payload.content,
+        false,
+        { runId: run.id, idempotencyKey: payload.idempotencyKey },
+      ));
+
+    let finalText = "";
+    const guarded = this.guardCallbacks(entry, callbacks ?? {}, (text) => {
+      finalText = text;
+    });
+    const unsubscribe = createEventBridge(entry.harness, guarded, entry.toolCatalog);
+    try {
+      await entry.harness.prompt(`${INTERNAL_AGENT_COMPLETION_WAKE_PREFIX}${run.id}.`);
+    } finally {
+      unsubscribe();
+    }
+    return { parentEntryId, text: finalText };
+  }
+
   /** Force-create a new session and atomically rotate the durable binding. */
   async resetSession(route: GatewaySessionRoute): Promise<void> {
     await this.closing.get(route.key)?.catch(() => {});
     await this.pending.get(route.key)?.catch(() => {});
 
     const oldEntry = this.sessions.get(route.key);
+    const oldMetadata = oldEntry?.metadata ?? this.store.getBinding(route)?.session;
+    if (oldMetadata) {
+      await this.getAgentRuntime()
+        ?.manager.cancelAll({
+          parentSessionId: oldMetadata.id,
+          generation: oldMetadata.id,
+        })
+        .catch(() => undefined);
+    }
     const generation = this.generation(route.key) + 1;
     this.generations.set(route.key, generation);
     this.sessions.delete(route.key);
@@ -305,17 +381,42 @@ export class NoviAgentAdapter implements AgentProtocolAdapter {
       session: created.session,
       metadata: created.metadata,
       toolCatalog: created.toolCatalog,
+      resolveToolDescriptor: created.resolveToolDescriptor,
       mcp: created.mcp,
     };
   }
 
   private harnessOptions(route: GatewaySessionRoute): HarnessSessionOptions | undefined {
-    if (!this.jobService) return undefined;
+    if (!this.jobService && !this.getAgentRuntime()) return undefined;
     return {
-      additionalToolDescriptors: [
-        createJobsToolDescriptor(this.jobService, route, this.onJobsMutated),
-      ],
+      additionalToolDescriptors: ({ metadata, harness, session }) => {
+        const descriptors = this.jobService
+          ? [createJobsToolDescriptor(this.jobService, route, this.onJobsMutated)]
+          : [];
+        const runtime = this.getAgentRuntime();
+        if (runtime) {
+          descriptors.push(
+            ...runtime.createToolDescriptors({
+              parent: {
+                surface: "gateway",
+                session: metadata,
+                generation: metadata.id,
+                route,
+              },
+              harness,
+              session,
+              resolveToolDescriptor: (name) =>
+                this.sessions.get(route.key)?.resolveToolDescriptor(name),
+            }),
+          );
+        }
+        return descriptors;
+      },
     };
+  }
+
+  private parentGeneration(entry: Pick<SessionEntry, "metadata">): string {
+    return entry.metadata.id;
   }
 
   private async cleanupUnbound(created: CreatedSession): Promise<void> {
@@ -355,4 +456,13 @@ function assertSameMetadata(
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function isCompletionDetails(value: unknown, idempotencyKey: string): boolean {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "idempotencyKey" in value &&
+    value.idempotencyKey === idempotencyKey
+  );
 }

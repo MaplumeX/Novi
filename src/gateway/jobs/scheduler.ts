@@ -7,12 +7,14 @@ import type { AutomationAgentRunner } from "./agent-runner.js";
 import type { DeliveryService } from "./delivery.js";
 import type { HeartbeatService } from "./heartbeat.js";
 import { sessionKeyForLocator } from "../core/routing.js";
+import type { UsageSummary } from "../../usage.js";
 
 export interface SchedulerStats {
   enabled: number;
   paused: number;
   queuedOrRunning: number;
   pendingDelivery: number;
+  automationUsage?: { day: string; usage: UsageSummary };
 }
 
 /** Durable timer coordinator. Store state, never in-memory timers, is authoritative. */
@@ -90,6 +92,10 @@ export class GatewayScheduler {
       ).length,
       pendingDelivery: runs.filter((run) => ["pending", "sending"].includes(run.delivery.status))
         .length,
+      automationUsage: {
+        day: this.store.snapshot().budget.day,
+        usage: { ...this.store.snapshot().budget.usage },
+      },
     };
   }
 

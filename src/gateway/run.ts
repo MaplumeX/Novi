@@ -43,21 +43,35 @@ import { formatGatewayMigrationResult } from "./migrations/format.js";
 import { runGatewayService } from "./service/manager.js";
 import type { GatewayServiceAction } from "./service/types.js";
 import {
+  createAgentControlMethods,
   createMessageControlMethods,
   formatMessageSummaries,
   type MessageRecordSummary,
 } from "./runtime/operator-methods.js";
+import { createAgentRunRuntime, type AgentRunRuntime } from "../agents/runtime.js";
+import { GatewayAgentCompletionSink } from "./agent/completion-sink.js";
+import { RunConcurrencyLimiter } from "../runs/concurrency.js";
 
 /** Options for `runGateway`, mirroring the relevant CLI flags. */
 export interface RunGatewayOptions extends BootstrapOptions {
   /** Explicit `--config <path>` for gateway.json (optional). */
   configPath?: string;
   action?:
-    "run" | "status" | "probe" | "health" | "messages" | "migrate" | "rollback-state" | "service";
+    | "run"
+    | "status"
+    | "probe"
+    | "health"
+    | "messages"
+    | "agents"
+    | "migrate"
+    | "rollback-state"
+    | "service";
   json?: boolean;
   healthCheck?: "live" | "ready";
   messageAction?: "list" | "retry" | "retry-delivery" | "dismiss";
   messageId?: string;
+  agentAction?: "list" | "get" | "cancel" | "retry";
+  agentRunId?: string;
   dryRun?: boolean;
   recover?: boolean;
   backupId?: string;
@@ -115,7 +129,12 @@ export async function runGateway(options: RunGatewayOptions): Promise<void> {
 
   // Runtime diagnostics use only the private control socket: no config,
   // provider, model, channel, or harness is constructed.
-  if (options.action === "status" || options.action === "health" || options.action === "messages") {
+  if (
+    options.action === "status" ||
+    options.action === "health" ||
+    options.action === "messages" ||
+    options.action === "agents"
+  ) {
     await runRuntimeDiagnostic(options);
     return;
   }
@@ -251,8 +270,11 @@ export async function runGateway(options: RunGatewayOptions): Promise<void> {
     localDayKey(new Date(), config.automation.timezone),
   );
   const jobService = new JobService(jobStore, sessionStore, config, gatewayEnv.models);
+  const providerLimiter = new RunConcurrencyLimiter(config.automation.maxConcurrentLlmRuns);
   const schedulerRef: { current?: GatewayScheduler } = {};
   const wakeScheduler = () => schedulerRef.current?.kick();
+  let agentRuns: AgentRunRuntime | undefined;
+  let agentCompletionSink: GatewayAgentCompletionSink | undefined;
   const agent = new NoviAgentAdapter(
     gatewayEnv,
     sessionStore,
@@ -260,6 +282,7 @@ export async function runGateway(options: RunGatewayOptions): Promise<void> {
     jobService,
     wakeScheduler,
     logger,
+    () => agentRuns,
   );
   const sessionManager = new GatewaySessionManager({
     agent,
@@ -268,8 +291,27 @@ export async function runGateway(options: RunGatewayOptions): Promise<void> {
     queueMode: config.queue.mode,
     metrics,
   });
-  const commands = createCommandRegistry({ jobService, onJobsMutated: wakeScheduler });
-  const runner = new AutomationAgentRunner(gatewayEnv, jobStore, config);
+  if (gatewayEnv.resolvedSettings.subagents?.enabled !== false) {
+    agentCompletionSink = new GatewayAgentCompletionSink(sessionManager, agent, channels);
+    agentRuns = await createAgentRunRuntime(gatewayEnv, {
+      completionSink: agentCompletionSink,
+      initialize: false,
+      limiter: providerLimiter,
+    });
+  }
+  const commands = createCommandRegistry({
+    jobService,
+    onJobsMutated: wakeScheduler,
+    agentRuntime: () => agentRuns,
+    resolveAgentOwner: (route) => agent.agentOwner(route),
+  });
+  const runner = new AutomationAgentRunner(
+    gatewayEnv,
+    jobStore,
+    config,
+    undefined,
+    providerLimiter,
+  );
   const deliveryExecutor = new ChannelDeliveryExecutor(
     new DeliveryRateLimiter(config.delivery.rateLimit),
   );
@@ -301,6 +343,12 @@ export async function runGateway(options: RunGatewayOptions): Promise<void> {
     deliveryExecutor,
     logger,
     metrics,
+    agentRunStats: agentRuns ? () => agentRuns.getStats() : undefined,
+  });
+  agentCompletionSink?.setFinalDelivery(async (channel, run, payload, text) => {
+    const route = run.parent.route;
+    if (!route) throw new Error("gateway parent route is unavailable");
+    await app.enqueueAgentCompletion(channel, route, payload.idempotencyKey, text);
   });
   const operator = app.messageOperator();
   if (!operator) throw new Error("Gateway message operator is unavailable");
@@ -322,13 +370,22 @@ export async function runGateway(options: RunGatewayOptions): Promise<void> {
     instanceId,
     cwd,
     configDigest: gatewayConfigDigest(config),
-    metrics: (components) =>
+    agentRunStats: agentRuns ? () => agentRuns.getStats() : undefined,
+    metrics: (components, agentStats) =>
       metrics.snapshot({
         queueDepth:
           components.sessions.queuedMessages + (components.messages?.nonTerminalRecords ?? 0),
         oldestPendingAgeMs: components.messages?.oldestPendingAgeMs ?? 0,
         readyChannels: components.channels.filter((channel) => channel.state === "ready").length,
         failedChannels: components.channels.filter((channel) => channel.state === "failed").length,
+        ...(agentStats
+          ? {
+              agentQueued: agentStats.queued,
+              agentRunning: agentStats.running,
+              agentInterrupted: agentStats.interrupted,
+              agentPendingCompletion: agentStats.pendingCompletion,
+            }
+          : {}),
       }),
     degradationReasons: () => alertManager.getDegradedReasons(),
   });
@@ -345,6 +402,7 @@ export async function runGateway(options: RunGatewayOptions): Promise<void> {
         return { ok: snapshot.health.ready, state: snapshot.state };
       },
       ...createMessageControlMethods(operator, logger),
+      ...(agentRuns ? createAgentControlMethods(agentRuns, logger) : {}),
     },
   });
   let alertTimer: ReturnType<typeof setInterval> | undefined;
@@ -353,6 +411,7 @@ export async function runGateway(options: RunGatewayOptions): Promise<void> {
     await scheduler.prepare();
     await control.start();
     await app.start();
+    await agentRuns?.initialize();
     await scheduler.start();
     runtime.markRunning();
     logger.info("gateway.runtime.ready");
@@ -365,7 +424,7 @@ export async function runGateway(options: RunGatewayOptions): Promise<void> {
     alertTimer = setInterval(observeAlerts, 30_000);
     alertTimer.unref();
   } catch (error) {
-    await stopGatewayRuntime(scheduler, app, control).catch(() => undefined);
+    await stopGatewayRuntime(scheduler, app, control, agentRuns).catch(() => undefined);
     throw error;
   }
 
@@ -396,7 +455,7 @@ export async function runGateway(options: RunGatewayOptions): Promise<void> {
     runtime.markStopping();
     if (alertTimer) clearInterval(alertTimer);
     logger.info("gateway.runtime.stopping");
-    void stopGatewayRuntime(scheduler, app, control)
+    void stopGatewayRuntime(scheduler, app, control, agentRuns)
       .catch((e) => logger.error("gateway.runtime.stop_failed", e))
       .finally(() => {
         process.off("SIGHUP", reload);
@@ -465,9 +524,15 @@ async function stopGatewayRuntime(
   scheduler: GatewayScheduler,
   app: GatewayApp,
   control: GatewayControlServer,
+  agentRuns?: AgentRunRuntime,
 ): Promise<void> {
   let failure: unknown;
-  for (const stop of [() => scheduler.stop(), () => app.stop(), () => control.stop()]) {
+  for (const stop of [
+    () => scheduler.stop(),
+    () => agentRuns?.stop() ?? Promise.resolve(),
+    () => app.stop(),
+    () => control.stop(),
+  ]) {
     try {
       await stop();
     } catch (error) {
@@ -479,6 +544,32 @@ async function stopGatewayRuntime(
 
 async function runRuntimeDiagnostic(options: RunGatewayOptions): Promise<void> {
   const paths = resolveGatewayRuntimePaths();
+  if (options.action === "agents") {
+    const action = options.agentAction ?? "list";
+    const response = await requestGatewayControl(
+      { socketPath: paths.socketPath },
+      {
+        id: `agents-${process.pid}`,
+        method: `agents.${action}`,
+        params: action === "list" ? { limit: 20 } : { id: options.agentRunId },
+      },
+    ).catch(() => undefined);
+    if (!response?.ok) {
+      process.stderr.write(`Novi: ${response ? response.error.message : "Gateway is stopped"}\n`);
+      process.exitCode = 1;
+      return;
+    }
+    const result = asObject(response.result);
+    if (options.json) process.stdout.write(`${JSON.stringify({ version: 1, action, ...result })}\n`);
+    else {
+      const runs = (action === "list" ? result.runs : [result.run]) as Array<Record<string, unknown>>;
+      process.stdout.write(
+        runs.length > 0 ? `${runs.map((run) => JSON.stringify(run)).join("\n")}\n` : "No agent runs.\n",
+      );
+    }
+    process.exitCode = 0;
+    return;
+  }
   if (options.action === "messages") {
     const action = options.messageAction ?? "list";
     const method = action === "retry-delivery" ? "messages.retryDelivery" : `messages.${action}`;

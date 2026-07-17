@@ -1,6 +1,6 @@
-import { redactAndBoundError } from "../messages/errors.js";
+import { toBoundedError } from "../../runs/errors.js";
 
 /** Redact common credential shapes and bound persisted unattended-job errors. */
 export function boundedJobError(error: unknown): string {
-  return redactAndBoundError(error, 500);
+  return toBoundedError(error, { maxBytes: 500 }).message;
 }

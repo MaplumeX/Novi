@@ -66,6 +66,14 @@ export function createSessionLane(route: GatewaySessionRoute): SessionLane {
   };
 }
 
+/** Drop queued user work and reject queued system operations during generation reset. */
+export function discardQueuedEntries(lane: SessionLane, reason: Error): void {
+  const queued = lane.queue.splice(0);
+  for (const entry of queued) {
+    if (entry.kind === "system-operation") entry.reject(reason);
+  }
+}
+
 /**
  * Enqueue a message and process it according to the queue mode.
  *

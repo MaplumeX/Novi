@@ -4,7 +4,9 @@ import type { ChannelAdapter, ChannelMessage } from "./types.js";
 import type { QueueMode } from "../config.js";
 import {
   createSessionLane as createRouteLane,
+  discardQueuedEntries,
   enqueueMessage,
+  enqueueSystemOperation,
   type QueuedMessage,
 } from "./session-lane.js";
 
@@ -80,6 +82,19 @@ function makeMsg(text: string): ChannelMessage {
 function makeEntry(channel: ChannelAdapter, msg: ChannelMessage, mode: QueueMode) {
   return { channel, msg, mode };
 }
+
+describe("system operation reset", () => {
+  it("rejects a queued completion operation instead of leaving its promise hanging", async () => {
+    const lane = createSessionLane("tg:123");
+    lane.status = "running";
+    const operation = vi.fn().mockResolvedValue(undefined);
+    const pending = enqueueSystemOperation(lane, operation);
+    expect(lane.queue).toHaveLength(1);
+    discardQueuedEntries(lane, new Error("generation reset"));
+    await expect(pending).rejects.toThrow("generation reset");
+    expect(operation).not.toHaveBeenCalled();
+  });
+});
 
 describe("enqueueMessage (idle state)", () => {
   it("starts a turn immediately when idle, then returns to idle", async () => {

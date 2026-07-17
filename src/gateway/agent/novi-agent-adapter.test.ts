@@ -7,11 +7,20 @@ import type {
   AgentHarnessEvent,
   JsonlSessionMetadata,
 } from "@earendil-works/pi-agent-core/node";
-import type { CreatedSession, GatewayEnv, HarnessSessionTarget } from "../../bootstrap.js";
+import type {
+  CreatedSession,
+  GatewayEnv,
+  HarnessSessionOptions,
+  HarnessSessionTarget,
+} from "../../bootstrap.js";
 import { sessionKeyForLocator } from "../core/routing.js";
 import { GatewaySessionStore } from "../core/session-store.js";
 import type { GatewaySessionRoute } from "../core/types.js";
 import { NoviAgentAdapter } from "./novi-agent-adapter.js";
+import type { AgentRun } from "../../agents/types.js";
+import type { AgentCompletionPayload } from "../../agents/completion.js";
+import { INTERNAL_AGENT_COMPLETION_WAKE_PREFIX } from "../../agents/local-completion.js";
+import type { AgentRunRuntime } from "../../agents/runtime.js";
 
 const paths: string[] = [];
 
@@ -265,5 +274,127 @@ describe("NoviAgentAdapter", () => {
     const adapter = new NoviAgentAdapter(env, sessionStore, factory);
     await adapter.runTurn({ route: route(), text: "plain text" });
     expect(harness.prompt).toHaveBeenCalledWith("plain text", undefined);
+  });
+
+  it("deduplicates persisted completion entries while allowing synthesis retry", async () => {
+    const sessionStore = await store();
+    const harness = new FakeHarness();
+    harness.prompt.mockImplementation(async (text: string) => {
+      if (!text.startsWith(INTERNAL_AGENT_COMPLETION_WAKE_PREFIX)) return;
+      harness.emit({
+        type: "message_end",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "parent summary" }],
+          usage: {
+            input: 1,
+            output: 1,
+            cacheRead: 0,
+            cacheWrite: 0,
+            cost: { total: 0 },
+          },
+        },
+      } as unknown as AgentHarnessEvent);
+      harness.emit({ type: "agent_end", messages: [] } as unknown as AgentHarnessEvent);
+    });
+    const entries: Array<Record<string, unknown>> = [];
+    const session = {
+      getMetadata: vi.fn().mockResolvedValue(metadata("parent")),
+      getEntries: vi.fn(async () => entries),
+      appendCustomMessageEntry: vi.fn(
+        async (customType: string, text: string, display: boolean, details: unknown) => {
+          void text;
+          void display;
+          entries.push({ id: "entry_1", type: "custom_message", customType, details });
+          return "entry_1";
+        },
+      ),
+    };
+    const factory = vi.fn(async () => ({
+      ...created(metadata("parent"), harness),
+      session,
+      resolveToolDescriptor: () => undefined,
+    }));
+    const adapter = new NoviAgentAdapter(
+      env,
+      sessionStore,
+      factory as unknown as ConstructorParameters<typeof NoviAgentAdapter>[2],
+    );
+    await adapter.runTurn({ route: route(), text: "initialize" });
+    const run = {
+      id: "run_1",
+      parent: { session: metadata("parent"), generation: "parent" },
+    } as AgentRun;
+    const payload: AgentCompletionPayload = {
+      runId: run.id,
+      idempotencyKey: "agent-run:run_1:terminal",
+      parentGeneration: "parent",
+      content: "persisted child report",
+    };
+
+    await expect(adapter.runAgentCompletion(route(), run, payload)).resolves.toEqual({
+      parentEntryId: "entry_1",
+      text: "parent summary",
+    });
+    await adapter.runAgentCompletion(route(), run, payload);
+    expect(session.appendCustomMessageEntry).toHaveBeenCalledTimes(1);
+    expect(harness.prompt).toHaveBeenCalledTimes(3);
+  });
+
+  it("binds route-scoped agent tools and cancels the old owner on reset", async () => {
+    const sessionStore = await store();
+    const createToolDescriptors = vi.fn().mockReturnValue([]);
+    const cancelAll = vi.fn().mockResolvedValue([]);
+    const runtime = {
+      createToolDescriptors,
+      manager: { cancelAll },
+    } as unknown as AgentRunRuntime;
+    let count = 0;
+    const factory = vi.fn(
+      async (
+        _env: GatewayEnv,
+        _target: HarnessSessionTarget,
+        options: HarnessSessionOptions = {},
+      ) => {
+        void _env;
+        void _target;
+        const result = created(metadata(count++ === 0 ? "old_parent" : "new_parent"));
+        if (typeof options.additionalToolDescriptors === "function") {
+          options.additionalToolDescriptors({
+            metadata: result.metadata,
+            harness: result.harness,
+            session: result.session,
+          });
+        }
+        return result;
+      },
+    );
+    const adapter = new NoviAgentAdapter(
+      env,
+      sessionStore,
+      factory,
+      undefined,
+      undefined,
+      undefined,
+      () => runtime,
+    );
+
+    await adapter.runTurn({ route: route(), text: "initialize" });
+    expect(createToolDescriptors).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parent: expect.objectContaining({
+          surface: "gateway",
+          generation: "old_parent",
+          route: route(),
+        }),
+      }),
+    );
+    await adapter.abort(route());
+    expect(cancelAll).not.toHaveBeenCalled();
+    await adapter.resetSession(route());
+    expect(cancelAll).toHaveBeenCalledWith({
+      parentSessionId: "old_parent",
+      generation: "old_parent",
+    });
   });
 });

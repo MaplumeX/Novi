@@ -91,6 +91,7 @@ if (values.help) {
       "  --list-models [s] List configured models (optional search filter), then exit",
       "  --gateway         Multi-channel gateway mode (IM bot server; no TUI)",
       "  --config <path>   Path to gateway.json (gateway mode; default ~/.novi/gateway.json)",
+      "  gateway agents list|get|cancel|retry [run-id]  Operate durable child runs",
       "  --json            Machine-readable gateway diagnostics/migration/service output",
       "  --kind <kind>     Gateway health check: live|ready",
       "  --dry-run         Inspect a gateway migration/rollback without writing",
@@ -120,12 +121,20 @@ const gatewayAction = [
   "probe",
   "health",
   "messages",
+  "agents",
   "migrate",
   "rollback-state",
   "service",
 ].includes(positionals[0] ?? "")
   ? (positionals[0] as
-      "status" | "probe" | "health" | "messages" | "migrate" | "rollback-state" | "service")
+      | "status"
+      | "probe"
+      | "health"
+      | "messages"
+      | "agents"
+      | "migrate"
+      | "rollback-state"
+      | "service")
   : "run";
 const requestedHealthKind = values.kind ?? positionals[1];
 const gatewayHealthCheck =
@@ -137,6 +146,11 @@ const gatewayMessageAction =
   gatewayAction === "messages" &&
   ["list", "retry", "retry-delivery", "dismiss"].includes(requestedMessageAction)
     ? (requestedMessageAction as "list" | "retry" | "retry-delivery" | "dismiss")
+    : undefined;
+const requestedAgentAction = positionals[1] ?? "list";
+const gatewayAgentAction =
+  gatewayAction === "agents" && ["list", "get", "cancel", "retry"].includes(requestedAgentAction)
+    ? (requestedAgentAction as "list" | "get" | "cancel" | "retry")
     : undefined;
 const requestedServiceAction = positionals[1];
 const gatewayServiceAction =
@@ -170,6 +184,17 @@ if (values.gateway && gatewayAction === "health" && gatewayHealthCheck === undef
 if (values.gateway && gatewayAction === "messages" && gatewayMessageAction === undefined) {
   fail("gateway messages requires: list, retry, retry-delivery, or dismiss");
 }
+if (values.gateway && gatewayAction === "agents" && gatewayAgentAction === undefined) {
+  fail("gateway agents requires: list, get, cancel, or retry");
+}
+if (
+  values.gateway &&
+  gatewayAction === "agents" &&
+  gatewayAgentAction !== "list" &&
+  !positionals[2]
+) {
+  fail(`gateway agents ${gatewayAgentAction} requires an agent run id`);
+}
 if (
   values.gateway &&
   gatewayAction === "messages" &&
@@ -181,7 +206,7 @@ if (
 if (
   values.json &&
   (!values.gateway ||
-    !["status", "health", "messages", "migrate", "rollback-state", "service"].includes(
+    !["status", "health", "messages", "agents", "migrate", "rollback-state", "service"].includes(
       gatewayAction,
     ))
 ) {
@@ -425,6 +450,8 @@ async function main(): Promise<void> {
         healthCheck: gatewayHealthCheck,
         messageAction: gatewayMessageAction,
         messageId: positionals[2],
+        agentAction: gatewayAgentAction,
+        agentRunId: positionals[2],
         dryRun: values["dry-run"],
         recover: values.recover,
         backupId: gatewayAction === "rollback-state" ? positionals[1] : undefined,

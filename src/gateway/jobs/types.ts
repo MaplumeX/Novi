@@ -40,12 +40,7 @@ export type ExecutionStatus =
 export type DeliveryStatus =
   "not_required" | "pending" | "sending" | "delivered" | "suppressed" | "delivery_failed";
 
-export interface BoundedError {
-  code: string;
-  message: string;
-  retryable: boolean;
-  retryAfterMs?: number;
-}
+export type BoundedError = import("../../runs/errors.js").BoundedError;
 
 export interface ScheduledRun {
   version: 1;

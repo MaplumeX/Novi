@@ -64,14 +64,14 @@
 
 ## Acceptance Criteria
 
-- [ ] AC1: 使用包含大量工具的 fake MCP server 时，每轮 provider payload 仅包含固定上限的 MCP schema，但模型仍可发现并调用目录中的任意允许工具。
-- [ ] AC2: 分页 `tools/list` 被完整、确定性地聚合；`tools/list_changed` 后新增/修改/删除正确投影到 catalog、权限 lookup 和模型可用能力。
-- [ ] AC3: catalog 刷新失败不影响 builtin 或其他健康 MCP source，并产生稳定 diagnostics。
-- [ ] AC4: MCP text/image/audio/resource/structured results 经过 runtime 后保持可消费语义、预算限制和 JSON-safe 公共事件。
-- [ ] AC5: input/output schema、tool error、protocol error、timeout、abort 和 progress 均有自动化测试。
-- [ ] AC6: 未信任 annotations 或启发式映射不能绕过 MCP 工具默认 `ask`、`external.invoke` 或显式 source/tool 权限；仅允许 `filesystem.read` 等 capability 时，第三方 MCP 调用仍会被询问或拒绝。
-- [ ] AC7: TUI、Headless JSON、Gateway 和 child agent 的工具目录/调用行为通过集成测试；无 MCP 配置路径保持回归等价。
-- [ ] AC8: 最终范围内的 MCP capability 有清晰支持矩阵、运维诊断和兼容说明；typecheck、lint、test、build 全部通过。
+- [x] AC1: 使用包含大量工具的 fake MCP server 时，每轮 provider payload 仅包含固定上限的 MCP schema，但模型仍可发现并调用目录中的任意允许工具。
+- [x] AC2: 分页 `tools/list` 被完整、确定性地聚合；`tools/list_changed` 后新增/修改/删除正确投影到 catalog、权限 lookup 和模型可用能力。
+- [x] AC3: catalog 刷新失败不影响 builtin 或其他健康 MCP source，并产生稳定 diagnostics。
+- [x] AC4: MCP text/image/audio/resource/structured results 经过 runtime 后保持可消费语义、预算限制和 JSON-safe 公共事件。
+- [x] AC5: input/output schema、tool error、protocol error、timeout、abort 和 progress 均有自动化测试。
+- [x] AC6: 未信任 annotations 或启发式映射不能绕过 MCP 工具默认 `ask`、`external.invoke` 或显式 source/tool 权限；仅允许 `filesystem.read` 等 capability 时，第三方 MCP 调用仍会被询问或拒绝。
+- [x] AC7: TUI、Headless JSON、Gateway 和 child agent 的工具目录/调用行为通过集成测试；无 MCP 配置路径保持回归等价。
+- [x] AC8: 最终范围内的 MCP capability 有清晰支持矩阵、运维诊断和兼容说明；typecheck、lint、test、build 全部通过。
 
 ## Out of Scope
 

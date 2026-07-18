@@ -112,7 +112,7 @@ describe("createToolAssembly", () => {
       source: { kind: "external", id: "mcp:demo" },
       defaultPermission: "ask",
       optional: true,
-      streaming: "none",
+      streaming: "delta",
     });
     expect(descriptor?.capabilities.length).toBeGreaterThan(0);
     expect(
@@ -126,6 +126,9 @@ describe("createToolAssembly", () => {
     const envelope = toolEnvelope(result);
     expect(envelope.status).toBe("success");
     expect(envelope.preview).toContain("from-mcp");
+    expect(envelope.data).toMatchObject({
+      mcp: { source: "mcp:demo", tool: "echo", content: [{ type: "text" }] },
+    });
   });
 
   it("does not drop builtin tools when an MCP server fails", async () => {
@@ -286,9 +289,11 @@ describe("createToolAssembly", () => {
     };
     const oldRef = response.results[0]!.toolRef;
     const invoke = assembly.tools.find((tool) => tool.name === "mcp_tool_invoke")!;
-    await expect(
-      invoke.execute("invoke", { toolRef: oldRef, arguments: { q: "ok" } }),
-    ).resolves.toBeDefined();
+    const invoked = await invoke.execute("invoke", { toolRef: oldRef, arguments: { q: "ok" } });
+    expect(toolEnvelope(invoked)).toMatchObject({
+      status: "success",
+      data: { mcp: { source: "mcp:demo", tool: "echo" } },
+    });
 
     const oldEntry = assembly.mcp!.manager.getCatalogSnapshot().tools[0]!;
     store.grant({

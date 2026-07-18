@@ -249,9 +249,10 @@ function errorFrom(
   if (!found) return undefined;
   return {
     ...found,
-    retryable: /(?:TIMEOUT|RATE_LIMIT|NETWORK|ARTIFACT_WRITE_FAILED|MCP_TOOL_STALE)/.test(
-      found.code,
-    ),
+    retryable:
+      /(?:TIMEOUT|RATE_LIMIT|NETWORK|ARTIFACT_WRITE_FAILED|MCP_TOOL_STALE|MCP_TRANSPORT_ERROR)/.test(
+        found.code,
+      ),
   };
 }
 
@@ -286,6 +287,7 @@ function publicDetails(details: Record<string, unknown>): JsonValue | undefined 
         "eventSequence",
         "streaming",
         "delta",
+        "artifacts",
       ].includes(key) &&
       !isSecretKey(key)
     ) {
@@ -352,6 +354,20 @@ export function createToolResultEnvelope(options: {
       });
     }
   }
+  if (Array.isArray(details.artifacts)) {
+    for (const value of details.artifacts.slice(0, 100)) {
+      const artifact = asRecord(value);
+      if (
+        artifact.kind === "document" &&
+        typeof artifact.path === "string" &&
+        typeof artifact.bytes === "number" &&
+        Number.isFinite(artifact.bytes) &&
+        artifact.bytes >= 0
+      ) {
+        artifacts.push({ kind: "document", path: artifact.path, bytes: artifact.bytes });
+      }
+    }
+  }
   const data = publicDetails(details);
   const envelope: ToolResultEnvelope = {
     version: 1,
@@ -416,6 +432,7 @@ export function isToolResultEnvelope(value: unknown): value is ToolResultEnvelop
 export class ToolEventDecoder {
   private readonly descriptors = new Map<string, SerializableToolDescriptor>();
   private readonly calls = new Map<string, DecoderCall>();
+  private readonly completedCalls = new Set<string>();
 
   constructor(catalog?: ToolCatalogSnapshot) {
     this.setCatalog(catalog);
@@ -430,12 +447,14 @@ export class ToolEventDecoder {
   decode(event: AgentHarnessEvent, at: number = Date.now()): NoviToolEvent | undefined {
     switch (event.type) {
       case "tool_execution_start": {
+        this.completedCalls.delete(event.toolCallId);
         const tool = this.resolveTool(event.toolName);
         const input = sanitizeJson(event.args);
         this.calls.set(event.toolCallId, { tool, input, startedAt: at, nextSequence: 1 });
         return { type: "tool.start", toolCallId: event.toolCallId, tool, input, at };
       }
       case "tool_execution_update": {
+        if (this.completedCalls.has(event.toolCallId)) return undefined;
         const call = this.getOrCreate(event.toolCallId, event.toolName, event.args, at);
         const details = asRecord(asRecord(event.partialResult).details);
         const supplied = details.sequence ?? details.eventSequence;
@@ -453,6 +472,7 @@ export class ToolEventDecoder {
         };
       }
       case "tool_execution_end": {
+        if (this.completedCalls.has(event.toolCallId)) return undefined;
         const call = this.getOrCreate(event.toolCallId, event.toolName, undefined, at);
         const persistedEnvelope = asRecord(asRecord(event.result).details).envelope;
         const result = isToolResultEnvelope(persistedEnvelope)
@@ -465,6 +485,11 @@ export class ToolEventDecoder {
               input: call.input,
             });
         this.calls.delete(event.toolCallId);
+        this.completedCalls.add(event.toolCallId);
+        if (this.completedCalls.size > MAX_JSON_ITEMS) {
+          const oldest = this.completedCalls.values().next().value;
+          if (oldest !== undefined) this.completedCalls.delete(oldest);
+        }
         return { type: "tool.end", toolCallId: event.toolCallId, result, at };
       }
       default:

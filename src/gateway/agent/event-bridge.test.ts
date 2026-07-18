@@ -113,6 +113,36 @@ describe("createEventBridge", () => {
     unsub();
   });
 
+  it("forwards the same persisted MCP envelope to gateway callbacks", () => {
+    const { harness, emit } = makeHarnessMock();
+    const onToolEvent = vi.fn();
+    const unsub = createEventBridge(harness as never, { onToolEvent });
+    const envelope = {
+      version: 1 as const,
+      status: "success" as const,
+      data: { mcp: { source: "mcp:demo", tool: "speak", revision: "rev-1" } },
+      preview: "stored privately",
+      metrics: { startedAt: 1, durationMs: 2, outputBytes: 16, outputLines: 1 },
+      truncation: { truncated: false, reasons: [], shownBytes: 16, shownLines: 1 },
+      artifacts: [{ kind: "document" as const, path: "/private/content.bin", bytes: 3 }],
+    };
+    emit({
+      type: "tool_execution_end",
+      toolCallId: "mcp-call",
+      toolName: "mcp_demo_speak",
+      result: { content: [{ type: "text", text: "stored privately" }], details: { envelope } },
+      isError: false,
+    } as AgentHarnessEvent);
+
+    expect(onToolEvent).toHaveBeenCalledWith({
+      type: "tool.end",
+      toolCallId: "mcp-call",
+      result: envelope,
+      at: expect.any(Number),
+    });
+    unsub();
+  });
+
   it("decodes structured permission failures for gateway callbacks", () => {
     const { harness, emit } = makeHarnessMock();
     const onToolEvent = vi.fn();
@@ -268,12 +298,7 @@ describe("createEventBridge", () => {
       }),
     };
     const initial = catalog("Old label");
-    const unsub = createEventBridge(
-      harness as never,
-      { onToolEvent },
-      initial,
-      liveCatalog,
-    );
+    const unsub = createEventBridge(harness as never, { onToolEvent }, initial, liveCatalog);
     publishCatalog?.(catalog("New label"));
     emit({
       type: "tool_execution_start",

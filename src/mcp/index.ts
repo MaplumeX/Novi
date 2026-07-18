@@ -48,6 +48,7 @@ export {
   DEFAULT_MCP_CONNECT_TIMEOUT_MS,
   DEFAULT_MCP_REFRESH_DEBOUNCE_MS,
   McpClientManager,
+  type McpCallToolOptions,
   type McpClientManagerOptions,
   type McpServerConnectionStatus,
   type McpServerRuntimeState,
@@ -89,6 +90,14 @@ export {
   type AdaptMcpToolsOptions,
   type CreateMcpToolDescriptorOptions,
 } from "./tool-adapter.js";
+
+export {
+  executeMappedMcpTool,
+  mapMcpToolResult,
+  McpProgressReporter,
+  type ExecuteMappedMcpToolOptions,
+  type MapMcpToolResultOptions,
+} from "./result-mapper.js";
 
 export {
   MAX_MCP_TOOL_REF_BYTES,

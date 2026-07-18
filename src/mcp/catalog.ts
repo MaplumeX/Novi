@@ -8,6 +8,9 @@ import { Ajv } from "ajv";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import type { ToolDescriptor } from "../tools/contracts.js";
 import { buildMcpToolName } from "./tool-adapter.js";
+import { canonicalStringify } from "./canonical-json.js";
+
+export { canonicalStringify } from "./canonical-json.js";
 
 export const MAX_MCP_LIST_PAGES = 100;
 export const MAX_MCP_CATALOG_TOOLS = 10_000;
@@ -215,10 +218,6 @@ export function diffMcpCatalog(
   };
 }
 
-export function canonicalStringify(value: unknown): string {
-  return JSON.stringify(toCanonicalValue(value));
-}
-
 export function digestCanonical(value: unknown): string {
   return createHash("sha256").update(canonicalStringify(value), "utf8").digest("hex");
 }
@@ -346,25 +345,6 @@ function deepFreeze<T>(value: T): T {
   if (value === null || typeof value !== "object" || Object.isFrozen(value)) return value;
   for (const nested of Object.values(value as Record<string, unknown>)) deepFreeze(nested);
   return Object.freeze(value);
-}
-
-function toCanonicalValue(value: unknown): unknown {
-  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
-  if (typeof value === "number") {
-    if (!Number.isFinite(value))
-      throw new Error("MCP catalog metadata contains a non-finite number");
-    return value;
-  }
-  if (Array.isArray(value)) return value.map((item) => toCanonicalValue(item));
-  if (typeof value === "object") {
-    const out: Record<string, unknown> = {};
-    for (const key of Object.keys(value as Record<string, unknown>).sort(compareText)) {
-      const nested = (value as Record<string, unknown>)[key];
-      if (nested !== undefined) out[key] = toCanonicalValue(nested);
-    }
-    return out;
-  }
-  throw new Error(`MCP catalog metadata contains unsupported ${typeof value}`);
 }
 
 function compareProtocolTools(a: Tool, b: Tool): number {

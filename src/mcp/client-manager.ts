@@ -3,9 +3,11 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import {
+  ErrorCode,
   ListToolsResultSchema,
   ToolListChangedNotificationSchema,
   type CallToolResult,
+  type Progress,
   type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
 import {
@@ -23,6 +25,7 @@ import {
 import { resolveServerConfigPlaceholders } from "./config.js";
 import { createMcpToolDescriptor, sanitizeNamePart } from "./tool-adapter.js";
 import { createMcpTransport } from "./transport.js";
+import { redactMcpSecrets } from "./safe-text.js";
 import type { McpPlan, McpPlanEntry, McpServerConfig } from "./types.js";
 import { isHttpServerConfig, isStdioServerConfig } from "./types.js";
 
@@ -65,6 +68,12 @@ export interface McpClientManagerOptions {
   clientInfo?: { name: string; version: string };
   /** Injectable clock for deterministic catalog snapshots. */
   now?: () => number;
+}
+
+export interface McpCallToolOptions {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  onProgress?: (progress: Progress) => void;
 }
 
 interface LiveConnection {
@@ -216,43 +225,43 @@ export class McpClientManager {
     serverName: string,
     toolName: string,
     args: Record<string, unknown>,
-    signal?: AbortSignal,
+    signalOrOptions?: AbortSignal | McpCallToolOptions,
   ): Promise<CallToolResult> {
+    const options = isAbortSignal(signalOrOptions)
+      ? { signal: signalOrOptions }
+      : (signalOrOptions ?? {});
+    const signal = options.signal;
     const connection = this.connections.get(serverName);
     if (!connection) {
-      throw new Error(
-        `NOVI_ERROR:TOOL_EXECUTION_FAILED:MCP server "${serverName}" is not connected`,
-      );
+      throw new Error(`NOVI_ERROR:MCP_TRANSPORT_ERROR:MCP server "${serverName}" is not connected`);
     }
     if (signal?.aborted) throw new Error("NOVI_ERROR:TOOL_ABORTED:MCP tool call aborted");
 
     try {
+      const timeout = options.timeoutMs ?? this.callTimeoutMs;
       const result = await connection.client.callTool(
         { name: toolName, arguments: args },
         undefined,
-        { signal, timeout: this.callTimeoutMs },
+        {
+          signal,
+          timeout,
+          resetTimeoutOnProgress: false,
+          maxTotalTimeout: timeout,
+          ...(options.onProgress ? { onprogress: options.onProgress } : {}),
+        },
       );
-      if (result && typeof result === "object" && "content" in result) {
+      if (result && typeof result === "object" && Array.isArray(result.content)) {
         return result as CallToolResult;
       }
-      if (result && typeof result === "object" && "toolResult" in result) {
-        const legacy = (result as { toolResult: unknown }).toolResult;
-        return {
-          content: [{ type: "text", text: stringifyPreview(legacy) }],
-          isError: false,
-        };
-      }
-      return {
-        content: [{ type: "text", text: stringifyPreview(result) }],
-        isError: false,
-      };
+      throw new Error("NOVI_ERROR:MCP_PROTOCOL_ERROR:MCP tools/call returned an invalid result");
     } catch (error) {
       if (signal?.aborted) throw new Error("NOVI_ERROR:TOOL_ABORTED:MCP tool call aborted");
       const message = safeErrorMessage(error);
       if (message.startsWith("NOVI_ERROR:")) {
         throw error instanceof Error ? error : new Error(message);
       }
-      throw new Error(`NOVI_ERROR:TOOL_EXECUTION_FAILED:MCP ${serverName}/${toolName}: ${message}`);
+      const code = mcpCallErrorCode(error, message);
+      throw new Error(`NOVI_ERROR:${code}:MCP ${serverName}/${toolName}: ${message}`);
     }
   }
 
@@ -703,20 +712,41 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, message: string):
 
 function safeErrorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
-  return message
-    .replace(/(authorization:\s*bearer\s+)[^\s]+/gi, "$1[redacted]")
-    .replace(/((?:api[_-]?key|token|secret)\s*[:=]\s*)[^\s]+/gi, "$1[redacted]")
+  return redactMcpSecrets(message)
     .replace(/[\r\n]+/g, " ")
     .slice(0, 500);
 }
 
-function stringifyPreview(value: unknown): string {
-  if (typeof value === "string") return value.slice(0, 2000);
-  try {
-    return JSON.stringify(value).slice(0, 2000);
-  } catch {
-    return String(value).slice(0, 2000);
+function isAbortSignal(value: unknown): value is AbortSignal {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    "aborted" in value &&
+    typeof (value as AbortSignal).addEventListener === "function"
+  );
+}
+
+function mcpCallErrorCode(error: unknown, message: string): string {
+  const numericCode =
+    error !== null &&
+    typeof error === "object" &&
+    typeof (error as { code?: unknown }).code === "number"
+      ? (error as { code: number }).code
+      : undefined;
+  if (numericCode === ErrorCode.RequestTimeout) return "TOOL_TIMEOUT";
+  if (numericCode === ErrorCode.ConnectionClosed) return "MCP_TRANSPORT_ERROR";
+  if (/structured content|output schema/i.test(message)) return "MCP_OUTPUT_SCHEMA_INVALID";
+  if (
+    numericCode === ErrorCode.ParseError ||
+    numericCode === ErrorCode.InvalidRequest ||
+    numericCode === ErrorCode.InvalidParams ||
+    numericCode === ErrorCode.MethodNotFound ||
+    numericCode === ErrorCode.InternalError ||
+    /\b(?:json-?rpc|protocol|validation|parse|invalid result)\b/i.test(message)
+  ) {
+    return "MCP_PROTOCOL_ERROR";
   }
+  return "MCP_TRANSPORT_ERROR";
 }
 
 function allocatePublicServerAliases(serverNames: readonly string[]): Map<string, string> {

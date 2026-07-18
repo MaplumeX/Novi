@@ -70,6 +70,19 @@ function releasePending(holder: { release?: () => void }): void {
   holder.release?.();
 }
 
+interface FakeToolExtra {
+  _meta?: { progressToken?: string | number };
+  sendNotification(notification: {
+    method: "notifications/progress";
+    params: {
+      progressToken: string | number;
+      progress: number;
+      total?: number;
+      message?: string;
+    };
+  }): Promise<void>;
+}
+
 /** In-process fake MCP server connected via InMemoryTransport. */
 async function createFakeTransport(options: {
   tools?: Array<{
@@ -77,6 +90,7 @@ async function createFakeTransport(options: {
     description?: string;
     handler: (
       args: Record<string, unknown>,
+      extra: FakeToolExtra,
     ) => Promise<{ content: Array<{ type: "text"; text: string }> }>;
     schema?: Record<string, z.ZodType>;
   }>;
@@ -100,7 +114,7 @@ async function createFakeTransport(options: {
         description: tool.description ?? tool.name,
         inputSchema: tool.schema ?? { value: z.string().optional() },
       },
-      async (args) => tool.handler(args as Record<string, unknown>),
+      async (args, extra) => tool.handler(args as Record<string, unknown>, extra),
     );
   }
 
@@ -324,7 +338,7 @@ describe("McpClientManager", () => {
       source: { kind: "external", id: "mcp:demo" },
       defaultPermission: "ask",
       optional: true,
-      streaming: "none",
+      streaming: "delta",
     });
 
     const tool = adapted[0].descriptor.factory({
@@ -612,8 +626,52 @@ describe("McpClientManager", () => {
     pending.release = undefined;
     const timedOut = manager.callTool("slow", "slow", {});
     await waitForCondition(() => started, "timed tool start");
-    await expect(timedOut).rejects.toThrow(/NOVI_ERROR:TOOL_EXECUTION_FAILED/);
+    await expect(timedOut).rejects.toThrow(/NOVI_ERROR:TOOL_TIMEOUT/);
     releasePending(pending);
+  });
+
+  it("forwards progress without allowing it to extend the total call timeout", async () => {
+    const seen: number[] = [];
+    const manager = track(
+      new McpClientManager({
+        callTimeoutMs: 40,
+        createTransport: async () =>
+          createFakeTransport({
+            tools: [
+              {
+                name: "progressing",
+                handler: async (_args, extra) => {
+                  const token = extra._meta?.progressToken;
+                  if (token !== undefined) {
+                    await extra.sendNotification({
+                      method: "notifications/progress",
+                      params: { progressToken: token, progress: 1, total: 3, message: "one" },
+                    });
+                    await new Promise((resolve) => setTimeout(resolve, 15));
+                    await extra.sendNotification({
+                      method: "notifications/progress",
+                      params: { progressToken: token, progress: 2, total: 3, message: "two" },
+                    });
+                  }
+                  await new Promise((resolve) => setTimeout(resolve, 60));
+                  return { content: [{ type: "text", text: "late" }] };
+                },
+              },
+            ],
+          }),
+      }),
+    );
+    await manager.connectPlan(planWith([{ name: "progress", config: { command: "fake" } }]));
+
+    await expect(
+      manager.callTool(
+        "progress",
+        "progressing",
+        {},
+        { onProgress: (item) => seen.push(item.progress) },
+      ),
+    ).rejects.toThrow(/NOVI_ERROR:TOOL_TIMEOUT/);
+    expect(seen).toEqual([1, 2]);
   });
 
   it("does not resurrect a catalog when close aborts an in-flight refresh", async () => {

@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { chmod, lstat, mkdir, open, readFile, readdir, rename, rm, stat } from "node:fs/promises";
+import { chmod, lstat, mkdir, open, readFile, readdir, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import type { ToolExecutionBudget } from "./budget.js";
 
@@ -34,6 +34,22 @@ export interface ArtifactMetadata {
   completedAt: number;
   bytes: number;
   complete: boolean;
+  /** Defaults to text for version-1 metadata written before binary artifacts existed. */
+  contentKind?: "text" | "binary";
+  mimeType?: string;
+  outputFile?: string;
+}
+
+export interface BinaryArtifact {
+  path: string;
+  metadata: ArtifactMetadata;
+}
+
+export interface ArtifactWriterOptions {
+  contentKind?: "text" | "binary";
+  mimeType?: string;
+  outputFile?: string;
+  directorySuffix?: string;
 }
 
 interface CompletedArtifact {
@@ -59,6 +75,7 @@ export class ArtifactWriter {
   private handle: Awaited<ReturnType<typeof open>> | undefined;
   private bytes = 0;
   private closed = false;
+  private completed = false;
 
   constructor(
     private readonly store: ArtifactStore,
@@ -66,9 +83,14 @@ export class ArtifactWriter {
     readonly toolCallId: string,
     readonly tool: string,
     private readonly createdAt: number,
+    private readonly options: ArtifactWriterOptions = {},
   ) {
-    this.artifactPath = path.join(dir, "output.log");
-    this.tempPath = path.join(dir, `.output.${process.pid}.${randomBytes(4).toString("hex")}.tmp`);
+    const outputFile = safeOutputFile(options.outputFile ?? "output.log");
+    this.artifactPath = path.join(dir, outputFile);
+    this.tempPath = path.join(
+      dir,
+      `.${outputFile}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`,
+    );
   }
 
   async open(): Promise<void> {
@@ -83,18 +105,21 @@ export class ArtifactWriter {
         bytes: 0,
       });
     } catch (error) {
+      await rm(this.dir, { recursive: true, force: true }).catch(() => undefined);
       throw artifactFailure("ARTIFACT_WRITE_FAILED", "failed to create output artifact", error);
     }
   }
 
-  async append(text: string): Promise<void> {
+  async append(chunk: string | Uint8Array): Promise<void> {
     if (this.closed || !this.handle) {
       throw artifactFailure("ARTIFACT_WRITE_FAILED", "artifact writer is not open");
     }
-    const chunkBytes = Buffer.byteLength(text, "utf8");
+    const chunkBytes =
+      typeof chunk === "string" ? Buffer.byteLength(chunk, "utf8") : chunk.byteLength;
     await this.store.ensureQuota(this.bytes + chunkBytes, this.dir);
     try {
-      await this.handle.write(text, undefined, "utf8");
+      if (typeof chunk === "string") await this.handle.write(chunk, undefined, "utf8");
+      else await this.handle.write(chunk);
       this.bytes += chunkBytes;
       activeBytes.set(this.dir, {
         root: this.store.root,
@@ -125,11 +150,15 @@ export class ArtifactWriter {
         completedAt: Date.now(),
         bytes: this.bytes,
         complete: true,
+        contentKind: this.options.contentKind ?? "text",
+        ...(this.options.mimeType ? { mimeType: this.options.mimeType } : {}),
+        outputFile: path.basename(this.artifactPath),
       };
       const metadataPath = path.join(this.dir, "metadata.json");
       const tempMetadata = `${metadataPath}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
       await openWriteClose(tempMetadata, JSON.stringify(metadata, null, 2) + "\n");
       await rename(tempMetadata, metadataPath);
+      this.completed = true;
       activeDirs.delete(this.dir);
       activeBytes.delete(this.dir);
       return metadata;
@@ -143,7 +172,7 @@ export class ArtifactWriter {
   }
 
   async abort(): Promise<void> {
-    if (this.closed) return;
+    if (this.completed) return;
     this.closed = true;
     activeDirs.delete(this.dir);
     activeBytes.delete(this.dir);
@@ -167,7 +196,11 @@ export class ArtifactStore {
     readonly enabled: boolean,
   ) {}
 
-  async createWriter(toolCallId: string, tool: string): Promise<ArtifactWriter | undefined> {
+  async createWriter(
+    toolCallId: string,
+    tool: string,
+    options: ArtifactWriterOptions = {},
+  ): Promise<ArtifactWriter | undefined> {
     if (!this.enabled) return undefined;
     const completed = await cleanupArtifacts(this.root, this.budget);
     this.globalBytes = completed.reduce((sum, entry) => sum + entry.bytes, 0);
@@ -175,10 +208,40 @@ export class ArtifactStore {
       .filter((entry) => entry.sessionId === safeSegment(this.sessionId))
       .reduce((sum, entry) => sum + entry.bytes, 0);
     await this.ensureQuota(0);
-    const dir = path.join(this.root, safeSegment(this.sessionId), safeSegment(toolCallId));
-    const writer = new ArtifactWriter(this, dir, toolCallId, tool, Date.now());
+    const suffix = options.directorySuffix ? `-${safeSegment(options.directorySuffix)}` : "";
+    const dir = path.join(
+      this.root,
+      safeSegment(this.sessionId),
+      `${safeSegment(toolCallId)}${suffix}`,
+    );
+    const writer = new ArtifactWriter(this, dir, toolCallId, tool, Date.now(), options);
     await writer.open();
     return writer;
+  }
+
+  /** Persist one bounded binary MCP result through the same quota/cleanup lifecycle. */
+  async persistBinary(
+    toolCallId: string,
+    tool: string,
+    index: number,
+    bytes: Uint8Array,
+    mimeType: string,
+  ): Promise<BinaryArtifact | undefined> {
+    const writer = await this.createWriter(toolCallId, tool, {
+      contentKind: "binary",
+      mimeType,
+      outputFile: "content.bin",
+      directorySuffix: `binary-${index}`,
+    });
+    if (!writer) return undefined;
+    try {
+      await writer.append(bytes);
+      const metadata = await writer.complete();
+      return { path: writer.artifactPath, metadata };
+    } catch (error) {
+      await writer.abort();
+      throw error;
+    }
   }
 
   async ensureQuota(pendingWriterBytes: number, writerDir?: string): Promise<void> {
@@ -299,7 +362,9 @@ async function scanCompleted(root: string): Promise<CompletedArtifact[]> {
         const metadata = JSON.parse(
           await readFile(path.join(dir, "metadata.json"), "utf8"),
         ) as ArtifactMetadata;
-        const output = await stat(path.join(dir, "output.log"));
+        const output = await lstat(
+          path.join(dir, safeOutputFile(metadata.outputFile ?? "output.log")),
+        );
         if (
           metadata.version === 1 &&
           metadata.complete === true &&
@@ -319,4 +384,12 @@ async function scanCompleted(root: string): Promise<CompletedArtifact[]> {
     }
   }
   return out;
+}
+
+function safeOutputFile(value: string): string {
+  const base = path
+    .basename(value)
+    .replace(/[^A-Za-z0-9._-]/g, "_")
+    .slice(0, 160);
+  return base || "output.log";
 }

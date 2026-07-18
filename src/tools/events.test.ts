@@ -127,6 +127,29 @@ describe("ToolEventDecoder and reduceToolCallState", () => {
       resultText: "done",
     });
   });
+
+  it("drops progress and duplicate terminal events after completion", () => {
+    const decoder = new ToolEventDecoder();
+    const end = {
+      type: "tool_execution_end",
+      toolCallId: "race",
+      toolName: "slow",
+      result: { content: [{ type: "text", text: "done" }] },
+      isError: false,
+    };
+    expect(decoder.decode(event(end))).toMatchObject({ type: "tool.end", toolCallId: "race" });
+    expect(
+      decoder.decode(
+        event({
+          type: "tool_execution_update",
+          toolCallId: "race",
+          toolName: "slow",
+          partialResult: { content: [{ type: "text", text: "late" }], details: { sequence: 1 } },
+        }),
+      ),
+    ).toBeUndefined();
+    expect(decoder.decode(event(end))).toBeUndefined();
+  });
 });
 
 describe("ToolResultEnvelope", () => {
@@ -180,6 +203,49 @@ describe("ToolResultEnvelope", () => {
     expect(envelope.error).toMatchObject({ code: "MCP_TOOL_STALE", retryable: true });
   });
 
+  it("keeps MCP metadata and binary artifacts in the shared JSON-safe envelope", () => {
+    const envelope = createToolResultEnvelope({
+      result: {
+        content: [{ type: "text", text: "audio stored privately" }],
+        details: {
+          mcp: {
+            source: "mcp:demo",
+            tool: "speak",
+            revision: "rev-1",
+            content: [{ index: 0, type: "audio", modelFacing: false, bytes: 3 }],
+          },
+          artifacts: [{ kind: "document", path: "/private/content.bin", bytes: 3 }],
+        },
+      },
+      isError: false,
+      startedAt: 1,
+      at: 2,
+      input: {},
+    });
+
+    expect(envelope).toMatchObject({
+      status: "success",
+      data: { mcp: { source: "mcp:demo", tool: "speak" } },
+      artifacts: [{ kind: "document", path: "/private/content.bin", bytes: 3 }],
+    });
+    expect((envelope.data as Record<string, unknown>).artifacts).toBeUndefined();
+    expect(() => assertJsonSafe(envelope)).not.toThrow();
+  });
+
+  it("marks MCP transport errors retryable but protocol/output errors terminal", () => {
+    const make = (code: string) =>
+      createToolResultEnvelope({
+        result: { content: [{ type: "text", text: `NOVI_ERROR:${code}:failed` }], details: {} },
+        isError: true,
+        startedAt: 1,
+        at: 2,
+        input: {},
+      });
+    expect(make("MCP_TRANSPORT_ERROR").error?.retryable).toBe(true);
+    expect(make("MCP_PROTOCOL_ERROR").error?.retryable).toBe(false);
+    expect(make("MCP_OUTPUT_SCHEMA_INVALID").error?.retryable).toBe(false);
+  });
+
   it("rejects unsafe public JSON and redacts unsafe decoder inputs", () => {
     const cyclic: Record<string, unknown> = {};
     cyclic.self = cyclic;
@@ -218,7 +284,13 @@ describe("ToolResultEnvelope", () => {
 
   it("reconstructs persisted results through the same envelope path", () => {
     const envelope = createToolResultEnvelope({
-      result: { content: [{ type: "text", text: "hello" }], details: { durationMs: 4 } },
+      result: {
+        content: [{ type: "text", text: "hello" }],
+        details: {
+          durationMs: 4,
+          mcp: { source: "mcp:demo", tool: "read", revision: "rev-1" },
+        },
+      },
       isError: false,
       startedAt: 4,
       at: 8,
@@ -241,7 +313,11 @@ describe("ToolResultEnvelope", () => {
       args: { path: "a.ts" },
       status: "done",
       resultText: "hello",
-      result: { version: 1, status: "success" },
+      result: {
+        version: 1,
+        status: "success",
+        data: { mcp: { source: "mcp:demo", tool: "read", revision: "rev-1" } },
+      },
     });
     expect(view.result).toEqual(envelope);
   });

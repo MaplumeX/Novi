@@ -7,7 +7,7 @@ import type { ResolvedPermissions } from "../permissions/types.js";
 import type { ToolCapability, ToolDescriptor, ToolRisk } from "../tools/contracts.js";
 import type { McpCatalogSnapshot, McpCatalogToolEntry } from "./catalog.js";
 import type { McpClientManager } from "./client-manager.js";
-import { mcpResultToPreview } from "./tool-adapter.js";
+import { executeMappedMcpTool } from "./result-mapper.js";
 import {
   MAX_MCP_SEARCH_QUERY_BYTES,
   MAX_MCP_SEARCH_SOURCE_BYTES,
@@ -128,37 +128,26 @@ export function createMcpProxyDescriptors(
     risk: "execute",
     defaultPermission: "ask",
     defaultEnabled: true,
-    streaming: "none",
+    streaming: "delta",
     modes: ALL_MODES,
-    factory: () => ({
+    factory: ({ runtime }) => ({
       name: "mcp_tool_invoke",
       label: "Invoke MCP Tool",
       description: "Invoke one MCP tool returned by mcp_tool_search.",
       parameters: InvokeParameters,
-      execute: async (_callId, rawParams, signal) => {
+      execute: async (toolCallId, rawParams, signal, onUpdate) => {
         const params = invokeInput(rawParams);
         const entry = resolveAndValidate(getSnapshot(), params.toolRef, params.arguments, visible);
-        const result = await manager.callTool(
-          entry.serverName,
-          entry.protocolTool.name,
-          params.arguments,
+        return await executeMappedMcpTool({
+          manager,
+          entry,
+          toolCallId,
+          publicToolName: "mcp_tool_invoke",
+          arguments: params.arguments,
+          runtime,
           signal,
-        );
-        const preview = mcpResultToPreview(result);
-        if (result.isError) {
-          throw new Error(
-            `NOVI_ERROR:TOOL_EXECUTION_FAILED:MCP ${entry.sourceId}/${entry.protocolTool.name}: ${preview}`,
-          );
-        }
-        return {
-          content: [{ type: "text", text: preview }],
-          details: {
-            content: result.content ?? [],
-            ...(result.structuredContent !== undefined
-              ? { structuredContent: result.structuredContent }
-              : {}),
-          },
-        };
+          onUpdate,
+        });
       },
     }),
     resolvePermissionIntents: () => [

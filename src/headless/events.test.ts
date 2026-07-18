@@ -305,6 +305,33 @@ describe("projectEvent", () => {
     ).toBeUndefined();
   });
 
+  it("forwards a persisted MCP envelope without inventing a surface payload", () => {
+    const envelope = {
+      version: 1 as const,
+      status: "success" as const,
+      data: { mcp: { source: "mcp:demo", tool: "speak", revision: "rev-1" } },
+      preview: "stored privately",
+      metrics: { startedAt: 1, durationMs: 2, outputBytes: 16, outputLines: 1 },
+      truncation: { truncated: false, reasons: [], shownBytes: 16, shownLines: 1 },
+      artifacts: [{ kind: "document" as const, path: "/private/content.bin", bytes: 3 }],
+    };
+    const projected = projectEvent({
+      type: "tool_execution_end",
+      toolCallId: "mcp-call",
+      toolName: "mcp_demo_speak",
+      result: { content: [{ type: "text", text: "stored privately" }], details: { envelope } },
+      isError: false,
+    } as AgentHarnessEvent);
+
+    expect(projected).toEqual({
+      type: "tool.end",
+      toolCallId: "mcp-call",
+      result: envelope,
+      at: expect.any(Number),
+    });
+    expect(JSON.stringify(projected)).not.toContain("toolName");
+  });
+
   it("projects session_compact from compactionEntry", () => {
     const event = {
       type: "session_compact",

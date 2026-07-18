@@ -1,7 +1,7 @@
 /** Adapt MCP tools into Novi ToolDescriptor / AgentTool factories. */
 
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core/node";
-import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
+import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import * as Type from "typebox";
 import type {
   ToolCapability,
@@ -10,6 +10,9 @@ import type {
   ToolRisk,
 } from "../tools/contracts.js";
 import type { McpClientManager } from "./client-manager.js";
+import { executeMappedMcpTool } from "./result-mapper.js";
+
+export { mcpResultToPreview } from "./result-mapper.js";
 
 const ALL_MODES = ["tui", "print", "json", "gateway"] as const;
 
@@ -94,10 +97,10 @@ export function createMcpToolDescriptor(options: CreateMcpToolDescriptorOptions)
     risk,
     defaultPermission: "ask",
     defaultEnabled: true,
-    streaming: "none",
+    streaming: "delta",
     modes: ALL_MODES,
     optional: true,
-    factory: () =>
+    factory: ({ runtime }) =>
       createMcpAgentTool({
         name,
         label,
@@ -107,6 +110,7 @@ export function createMcpToolDescriptor(options: CreateMcpToolDescriptorOptions)
         serverName,
         mcpToolName,
         expectedToolRevision: toolRevision,
+        runtime,
       }),
     resolvePermissionIntents: (input) =>
       resolveMcpPermissionIntents({
@@ -287,6 +291,7 @@ function createMcpAgentTool(args: {
   serverName: string;
   mcpToolName: string;
   expectedToolRevision?: string;
+  runtime?: import("../tools/runtime/runtime.js").ToolExecutionRuntime;
 }): AgentTool {
   const {
     name,
@@ -297,6 +302,7 @@ function createMcpAgentTool(args: {
     serverName,
     mcpToolName,
     expectedToolRevision,
+    runtime,
   } = args;
   return {
     name,
@@ -304,9 +310,10 @@ function createMcpAgentTool(args: {
     description,
     parameters,
     execute: async (
-      _toolCallId,
+      toolCallId,
       params,
       signal,
+      onUpdate,
     ): Promise<AgentToolResult<Record<string, unknown>>> => {
       const argsRecord = inputRecord(params);
       const entry = resolveCurrentEntry(
@@ -316,19 +323,16 @@ function createMcpAgentTool(args: {
         expectedToolRevision,
       );
       assertValidMcpInput(entry, argsRecord);
-      const result = await manager.callTool(serverName, mcpToolName, argsRecord, signal);
-      if (result.isError) {
-        const preview = mcpResultToPreview(result);
-        throw new Error(
-          `NOVI_ERROR:TOOL_EXECUTION_FAILED:MCP ${serverName}/${mcpToolName}: ${preview}`,
-        );
-      }
-      const preview = mcpResultToPreview(result);
-      const data = mcpResultToData(result);
-      return {
-        content: [{ type: "text", text: preview }],
-        details: data,
-      };
+      return await executeMappedMcpTool({
+        manager,
+        entry,
+        toolCallId,
+        publicToolName: name,
+        arguments: argsRecord,
+        runtime,
+        signal,
+        onUpdate,
+      });
     },
   };
 }
@@ -389,42 +393,6 @@ export function mcpInputSchemaToTypeBox(
     required,
     additionalProperties: inputSchema.additionalProperties ?? true,
   });
-}
-
-export function mcpResultToPreview(result: CallToolResult): string {
-  const parts: string[] = [];
-  for (const item of result.content ?? []) {
-    if (!item || typeof item !== "object") continue;
-    const rec = item as { type?: string; text?: string; mimeType?: string; uri?: string };
-    if (rec.type === "text" && typeof rec.text === "string") {
-      parts.push(rec.text);
-    } else if (rec.type === "image") {
-      parts.push(`[image ${rec.mimeType ?? "binary"}]`);
-    } else if (rec.type === "audio") {
-      parts.push(`[audio ${rec.mimeType ?? "binary"}]`);
-    } else if (rec.type === "resource" || rec.type === "resource_link") {
-      parts.push(`[resource ${rec.uri ?? ""}]`.trim());
-    }
-  }
-  if (parts.length === 0 && result.structuredContent) {
-    try {
-      parts.push(JSON.stringify(result.structuredContent));
-    } catch {
-      parts.push(String(result.structuredContent));
-    }
-  }
-  const text = parts.join("\n").trim();
-  return text || "(empty MCP tool result)";
-}
-
-function mcpResultToData(result: CallToolResult): Record<string, unknown> {
-  const data: Record<string, unknown> = {
-    content: result.content ?? [],
-  };
-  if (result.structuredContent !== undefined) {
-    data.structuredContent = result.structuredContent;
-  }
-  return data;
 }
 
 function propertyNames(inputSchema: Tool["inputSchema"] | undefined): string[] {

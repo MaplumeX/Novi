@@ -214,6 +214,16 @@ export class DeltaLimiter {
     this.closed = true;
   }
 
+  /** Close immediately at a terminal boundary; queued deltas count as dropped. */
+  close(): number {
+    if (this.closed) return 0;
+    const dropped = Buffer.byteLength(this.pending, "utf8");
+    this.droppedBytes += dropped;
+    this.pending = "";
+    this.closed = true;
+    return dropped;
+  }
+
   metrics(): Pick<ToolOutputMetrics, "partialUpdates" | "partialDroppedBytes"> {
     return { partialUpdates: this.emitted, partialDroppedBytes: this.droppedBytes };
   }

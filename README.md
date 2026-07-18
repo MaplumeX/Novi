@@ -122,6 +122,29 @@ Headless/Gateway paths never prompt for MCP approval; pending project servers
 appear only as diagnostics. Operators approve via TUI (preferred) or by writing
 the approval store.
 
+Novi uses a Tools-first MCP profile. Small catalogs are exposed directly;
+larger catalogs use the bounded `mcp_tool_search` → opaque `toolRef` →
+`mcp_tool_invoke` flow. `tools/list` pagination and `notifications/tools/list_changed`
+refresh a versioned catalog atomically. A failed refresh keeps the last-known-good
+revision and reports the source as `degraded`; stale references fail with
+`MCP_TOOL_STALE` and should be searched again.
+
+| MCP capability                                                          | Status      | Novi behavior                                                                                                                |
+| ----------------------------------------------------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Initialize, stdio/Streamable HTTP, paginated `tools/list`, list-changed | Supported   | Client capabilities remain `{}`; catalog refresh is bounded and atomic.                                                      |
+| `tools/call` text, supported image MIME, `structuredContent`            | Supported   | Native model content; current catalog `outputSchema` is validated again at the result boundary.                              |
+| Resource links and embedded text resources                              | Supported   | URI/MIME/annotations are preserved; Novi does not implicitly issue `resources/read`.                                         |
+| Progress and cancellation                                               | Supported   | Strictly increasing bounded true deltas; progress never extends the hard total timeout.                                      |
+| Audio, embedded binary, oversized/unsupported images                    | Degraded    | Stored as private quota-bound artifacts when enabled, otherwise returned as an explicit degradation; base64 is never public. |
+| Resources/Prompts APIs, Sampling, Elicitation, Tasks, OAuth discovery   | Unsupported | Not advertised and no server-initiated handler is installed. Static configured HTTP headers are supported.                   |
+
+MCP failures use distinct stable codes: `MCP_TOOL_ERROR`,
+`MCP_INPUT_SCHEMA_INVALID`, `MCP_OUTPUT_SCHEMA_INVALID`,
+`MCP_PROTOCOL_ERROR`, `MCP_TRANSPORT_ERROR`, `MCP_TOOL_STALE`, plus the
+shared `TOOL_TIMEOUT` and `TOOL_ABORTED`. Transport, timeout, and stale-reference
+failures are retryable; protocol/output failures are not retried with the same
+payload.
+
 ## Tool permissions and workspace boundary
 
 Known tools use their validated descriptor default, then apply permission
@@ -195,7 +218,8 @@ novi --tool-budget modelBytes=65536 --tool-budget timeoutMs=300000
 Large output is represented by a bounded model-visible preview and structured
 resource metrics. When artifacts are enabled, overflow is written
 incrementally with mode `0600` under
-`~/.novi/artifacts/<sessionId>/<toolCallId>/`; per-session/global quotas and
+`~/.novi/artifacts/<sessionId>/<toolCallId>*/`; directories use `0700`, and
+text or binary files use `0600`. Per-session/global quotas and
 age cleanup apply. Global settings may disable artifacts and project settings
 may additionally disable or tighten them, but a project cannot force-enable
 or raise a ceiling. Permission denials are resolved before tool execution and
@@ -224,6 +248,8 @@ original metrics and optional `full-output` artifact without embedding a
 second full copy. Inputs and structured data are bounded and omit credential,
 environment, cookie, and stack fields. `edit_file` accepts only the canonical
 `{"path":"...","edits":[{"oldText":"...","newText":"..."}]}` shape.
+MCP calls use this same event union and envelope in TUI, print/JSON, Gateway,
+and persisted replay; there is no MCP-specific public event payload.
 
 ## Web tools
 

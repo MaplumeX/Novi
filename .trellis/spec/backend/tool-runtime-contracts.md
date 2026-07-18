@@ -546,6 +546,161 @@ const next = buildMcpServerCatalogSnapshot(tools); // compile before commit
 if (connection.generation === generation) commit(next);
 ```
 
+## Scenario: Preserve the MCP tool-result lifecycle
+
+### 1. Scope / Trigger
+
+Use this contract when changing MCP `tools/call`, result content mapping,
+progress/cancellation, binary artifact storage, stable tool errors, or any
+TUI/Headless/Gateway/replay projection of an MCP call. Raw MCP result objects
+must stop at `src/mcp/result-mapper.ts`; consumers use the normal Novi runtime
+and event contracts.
+
+### 2. Signatures
+
+```ts
+interface McpCallToolOptions {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  onProgress?: (progress: Progress) => void;
+}
+
+function executeMappedMcpTool(
+  options: ExecuteMappedMcpToolOptions,
+): Promise<AgentToolResult<Record<string, unknown>>>;
+
+function mapMcpToolResult(
+  options: MapMcpToolResultOptions,
+): Promise<AgentToolResult<Record<string, unknown>>>;
+
+class McpProgressReporter {
+  update(progress: Progress): void;
+  finish(): void;
+  getDiagnostics(): readonly string[];
+}
+
+class ArtifactStore {
+  persistBinary(
+    toolCallId: string,
+    tool: string,
+    index: number,
+    bytes: Uint8Array,
+    mimeType: string,
+  ): Promise<{ path: string; metadata: ArtifactMetadata } | undefined>;
+}
+```
+
+### 3. Contracts
+
+- `McpClientManager.callTool` passes the runtime signal and fixed timeout to
+  the SDK with `resetTimeoutOnProgress: false` and
+  `maxTotalTimeout: timeout`. Progress cannot extend the total call deadline.
+- `executeMappedMcpTool` is the shared direct/proxy path. It closes progress
+  immediately at result/error, checks abort before mapping, and produces one
+  terminal `AgentToolResult` through `mapMcpToolResult`.
+- Text blocks remain text, supported bounded images remain native image
+  content, resource links preserve bounded name/URI/MIME/annotations without
+  fetching, and embedded text resources include their URI/MIME header.
+- The current committed catalog entry owns input and output validators. When
+  `outputSchema` exists, a non-error result must contain valid
+  `structuredContent`. Canonical key-sorted JSON is model-facing once; if an
+  identical text block already exists it is not duplicated. Envelope data
+  keeps either the bounded structure or a `{ truncated, bytes, reason }`
+  summary, never the raw MCP content array.
+- Image/audio/blob base64 is strictly decoded under `memoryBytes`. Audio,
+  embedded blobs, and non-native/oversized images use `persistBinary`; quota,
+  active-writer, mode (`0700` directory / `0600` file), cleanup, and disabled
+  behavior remain owned by `ArtifactStore`. Base64 never enters public
+  details/events. Disabled or invalid binary content yields an explicit
+  bounded degradation.
+- Progress accepts only finite, strictly increasing `progress`; invalid totals
+  are omitted and diagnosed. Messages are sanitized, bounded, rate-limited,
+  and emitted as true deltas with continuous runtime sequences. Pending
+  rate-limited progress is dropped at the terminal boundary so it cannot delay
+  completion; late progress and duplicate terminal events are ignored.
+- MCP metadata is bounded under `envelope.data.mcp`; binary paths appear in
+  normal `envelope.artifacts` as `document`. TUI, print/JSON, Gateway, and
+  persisted replay use `ToolResultEnvelope`/`NoviToolEvent` unchanged. No MCP
+  event variant is permitted.
+- Client initialization capabilities remain `{}`. Resources/Prompts,
+  Sampling, Elicitation, Tasks, and OAuth discovery are not advertised by this
+  Tools-first integration.
+
+### 4. Validation & Error Matrix
+
+| Condition | Stable behavior / code | Retryable |
+| --- | --- | --- |
+| MCP result has `isError: true` | `MCP_TOOL_ERROR` with bounded/redacted text | no |
+| current input validator rejects arguments | `MCP_INPUT_SCHEMA_INVALID` | no, change input |
+| required structured output is absent/invalid | `MCP_OUTPUT_SCHEMA_INVALID` | no |
+| malformed JSON-RPC/result envelope | `MCP_PROTOCOL_ERROR` | no |
+| disconnect/send/connection failure | `MCP_TRANSPORT_ERROR` | yes |
+| catalog/tool revision changed | `MCP_TOOL_STALE`; search again | yes |
+| SDK/runtime deadline expires | `TOOL_TIMEOUT` | yes |
+| caller abort wins the race | `TOOL_ABORTED`, cancelled envelope | no |
+| invalid MIME/base64 or binary over memory | successful explicit degradation, no payload | no |
+| binary artifact disabled | successful explicit degradation, no path | no |
+| binary quota/write failure | `ARTIFACT_QUOTA_EXCEEDED` / `ARTIFACT_WRITE_FAILED` | quota no / write yes |
+| regressive/invalid/late progress | drop and add bounded diagnostic | n/a |
+
+### 5. Good / Base / Bad Cases
+
+- Good: a tool returns text, a small PNG, structured output, a resource link,
+  and audio. The model receives bounded native text/image plus canonical JSON;
+  audio becomes one private artifact; every surface sees the same JSON-safe
+  final envelope without base64.
+- Base: a one-line text result produces the same success envelope as a builtin
+  non-streaming tool, with MCP source/tool/revision only in bounded data.
+- Bad: an adapter copies `result.content` into details, trusts the SDK's
+  dependency-owned output-validator cache, resets timeouts on progress,
+  publishes base64, fetches a resource link implicitly, or defines an
+  `mcp.tool.end` event.
+
+### 6. Tests Required
+
+- Golden mapper tests: multiple text, native image, structured de-duplication,
+  resource link, embedded text, audio, and embedded blob; assert model content,
+  `data.mcp`, artifacts, and absence of base64.
+- Validation/error tests: missing/invalid output schema, tool error,
+  protocol/transport/stale/timeout/abort codes, redaction, and retryability.
+- Binary tests: invalid MIME/base64, memory overflow, disabled store,
+  session/global quota, write failure, file/directory modes, active
+  reservations, age cleanup, output-file symlink non-following.
+- Progress/race tests: continuous sequences, non-cumulative deltas,
+  rate/size bounds, regressive/invalid totals, progress that does not extend
+  SDK timeout, late update, and duplicate terminal drop.
+- Surface tests: direct and deferred invoke, TUI reducer, Headless JSON,
+  Gateway callback, and persisted replay reuse an equivalent envelope.
+- Run MCP/runtime/event/surface focused tests plus typecheck, lint, full test,
+  build, and `git diff --check`.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```ts
+const result = await client.callTool(params, undefined, {
+  signal,
+  resetTimeoutOnProgress: true,
+});
+return { content: [{ type: "text", text: preview(result) }], details: result };
+```
+
+#### Correct
+
+```ts
+return executeMappedMcpTool({
+  manager,
+  entry: currentCatalogEntry,
+  toolCallId,
+  publicToolName,
+  arguments: input,
+  runtime,
+  signal,
+  onUpdate,
+});
+```
+
 ## Scenario: Govern tool resources and overflow
 
 ### 1. Scope / Trigger

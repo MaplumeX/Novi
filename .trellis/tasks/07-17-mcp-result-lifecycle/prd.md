@@ -21,14 +21,14 @@
 
 ## Acceptance Criteria
 
-- [ ] text、multiple text、image、structured、resource link、embedded text、audio、embedded binary 的 golden tests 保留预期 model/envelope/artifact 语义。
-- [ ] invalid base64/MIME、artifact disabled/quota/write failure、oversized content 均有显式有界结果，无 payload 泄漏。
-- [ ] valid outputSchema 通过；缺失/invalid structuredContent 返回 `MCP_OUTPUT_SCHEMA_INVALID`，server tool error 与 protocol error 分类不同。
-- [ ] progress 单调且 runtime sequence 连续、rate/size bounded、非累计；倒退/迟到通知不污染 UI。
-- [ ] abort、runtime timeout、SDK timeout、response/abort race 产生唯一 terminal cancelled/error event。
-- [ ] TUI、Headless JSON、Gateway 与 replay 的同一调用 envelope 等价且 JSON-safe。
-- [ ] 支持矩阵和配置/诊断文档准确列出 supported/degraded/unsupported 能力。
-- [ ] runtime/artifact/event/surface tests、typecheck、lint、完整 test、build 通过。
+- [x] text、multiple text、image、structured、resource link、embedded text、audio、embedded binary 的 golden tests 保留预期 model/envelope/artifact 语义。
+- [x] invalid base64/MIME、artifact disabled/quota/write failure、oversized content 均有显式有界结果，无 payload 泄漏。
+- [x] valid outputSchema 通过；缺失/invalid structuredContent 返回 `MCP_OUTPUT_SCHEMA_INVALID`，server tool error 与 protocol error 分类不同。
+- [x] progress 单调且 runtime sequence 连续、rate/size bounded、非累计；倒退/迟到通知不污染 UI。
+- [x] abort、runtime timeout、SDK timeout、response/abort race 产生唯一 terminal cancelled/error event。
+- [x] TUI、Headless JSON、Gateway 与 replay 的同一调用 envelope 等价且 JSON-safe。
+- [x] 支持矩阵和配置/诊断文档准确列出 supported/degraded/unsupported 能力。
+- [x] runtime/artifact/event/surface tests、typecheck、lint、完整 test、build 通过。
 
 ## Notes
 

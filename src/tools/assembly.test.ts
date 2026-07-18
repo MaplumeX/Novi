@@ -15,6 +15,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { McpPlan } from "../mcp/types.js";
+import type { McpOAuthCoordinator } from "../mcp/oauth/coordinator.js";
 import { encodeMcpToolRef } from "../mcp/tool-ref.js";
 import { createToolAssembly, createMcpToolDescriptors } from "./assembly.js";
 import { createBuiltinToolAssembly } from "./index.js";
@@ -136,6 +137,40 @@ describe("createToolAssembly", () => {
     expect(envelope.data).toMatchObject({
       mcp: { source: "mcp:demo", tool: "echo", content: [{ type: "text" }] },
     });
+  });
+
+  it("owns one cancellable OAuth login flow per server on the runtime handle", async () => {
+    const { env } = await setupEnv();
+    const login = vi.fn(
+      async (_target: unknown, options: { signal?: AbortSignal }): Promise<void> =>
+        await new Promise((_, reject) => {
+          options.signal?.addEventListener("abort", () => reject(options.signal?.reason), {
+            once: true,
+          });
+        }),
+    );
+    const oauthCoordinator = {
+      credential: vi.fn().mockResolvedValue({ generation: 0 }),
+      login,
+    } as unknown as McpOAuthCoordinator;
+    const assembly = await createToolAssembly(env, "sess", {
+      mcpPlan: connectablePlan("demo", { url: "https://example.test/mcp" }),
+      mcp: {
+        oauthCoordinator,
+        createTransport: async () => fakeTransport([{ name: "echo", text: "ready" }]),
+      },
+    });
+    cleanups.push(async () => assembly.mcp?.close());
+
+    const running = assembly.mcp!.oauth.login("demo", { onAuthorizationUrl: vi.fn() });
+    await vi.waitFor(() => expect(assembly.mcp!.oauth.isLoginActive("demo")).toBe(true));
+    await expect(
+      assembly.mcp!.oauth.login("demo", { onAuthorizationUrl: vi.fn() }),
+    ).rejects.toThrow(/MCP_AUTH_IN_PROGRESS/);
+    expect(assembly.mcp!.oauth.cancel("demo")).toBe(true);
+    await expect(running).rejects.toThrow("OAuth login cancelled by user");
+    expect(assembly.mcp!.oauth.isLoginActive("demo")).toBe(false);
+    expect(assembly.mcp!.oauth.cancel("demo")).toBe(false);
   });
 
   it("does not drop builtin tools when an MCP server fails", async () => {
@@ -420,55 +455,58 @@ describe("createToolAssembly", () => {
       if (request.params.cursor === "page-2") return { tools: tools.slice(20) };
       throw new Error(`unexpected cursor ${request.params.cursor}`);
     });
-    server.setRequestHandler(CallToolRequestSchema, async (request, extra): Promise<CallToolResult> => {
-      if (request.params.name === "inspect") {
-        return {
-          content: [
-            { type: "text", text: "inspection complete" },
-            { type: "image", data: imageData, mimeType: "image/png" },
-            {
-              type: "resource_link",
-              name: "manual",
-              uri: "docs://manual",
-              mimeType: "text/markdown",
-            },
-            {
-              type: "resource",
-              resource: { uri: "memory://note", mimeType: "text/plain", text: "embedded" },
-            },
-            { type: "audio", data: audioData, mimeType: "audio/wav" },
-            {
-              type: "resource",
-              resource: {
-                uri: "memory://payload",
-                mimeType: "application/octet-stream",
-                blob: blobData,
+    server.setRequestHandler(
+      CallToolRequestSchema,
+      async (request, extra): Promise<CallToolResult> => {
+        if (request.params.name === "inspect") {
+          return {
+            content: [
+              { type: "text", text: "inspection complete" },
+              { type: "image", data: imageData, mimeType: "image/png" },
+              {
+                type: "resource_link",
+                name: "manual",
+                uri: "docs://manual",
+                mimeType: "text/markdown",
               },
-            },
-          ],
-          structuredContent: { ok: true },
-        };
-      }
-      if (request.params.name === "progressing") {
-        const progressToken = extra._meta?.progressToken;
-        if (progressToken !== undefined) {
-          await extra.sendNotification({
-            method: "notifications/progress",
-            params: { progressToken, progress: 1, total: 1, message: "integrated progress" },
-          });
+              {
+                type: "resource",
+                resource: { uri: "memory://note", mimeType: "text/plain", text: "embedded" },
+              },
+              { type: "audio", data: audioData, mimeType: "audio/wav" },
+              {
+                type: "resource",
+                resource: {
+                  uri: "memory://payload",
+                  mimeType: "application/octet-stream",
+                  blob: blobData,
+                },
+              },
+            ],
+            structuredContent: { ok: true },
+          };
         }
-        return { content: [{ type: "text", text: "progress complete" }] };
-      }
-      if (request.params.name === "blocking") {
-        blockingStarted = true;
-        await new Promise<void>((resolve) => {
-          if (extra.signal.aborted) resolve();
-          else extra.signal.addEventListener("abort", () => resolve(), { once: true });
-        });
-        return { content: [{ type: "text", text: "late response" }] };
-      }
-      return { content: [{ type: "text", text: request.params.name }] };
-    });
+        if (request.params.name === "progressing") {
+          const progressToken = extra._meta?.progressToken;
+          if (progressToken !== undefined) {
+            await extra.sendNotification({
+              method: "notifications/progress",
+              params: { progressToken, progress: 1, total: 1, message: "integrated progress" },
+            });
+          }
+          return { content: [{ type: "text", text: "progress complete" }] };
+        }
+        if (request.params.name === "blocking") {
+          blockingStarted = true;
+          await new Promise<void>((resolve) => {
+            if (extra.signal.aborted) resolve();
+            else extra.signal.addEventListener("abort", () => resolve(), { once: true });
+          });
+          return { content: [{ type: "text", text: "late response" }] };
+        }
+        return { content: [{ type: "text", text: request.params.name }] };
+      },
+    );
 
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     await server.connect(serverTransport);
@@ -503,7 +541,11 @@ describe("createToolAssembly", () => {
     const inspectRef = await searchRef("inspect");
     const inspected = await invoke.execute("inspect", { toolRef: inspectRef, arguments: {} });
     const inspectEnvelope = toolEnvelope(inspected);
-    expect(inspected.content).toContainEqual({ type: "image", data: imageData, mimeType: "image/png" });
+    expect(inspected.content).toContainEqual({
+      type: "image",
+      data: imageData,
+      mimeType: "image/png",
+    });
     expect(inspectEnvelope).toMatchObject({
       status: "success",
       data: {

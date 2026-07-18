@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -11,6 +11,8 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod/v4";
 import { McpClientManager } from "./client-manager.js";
+import type { McpOAuthCoordinator } from "./oauth/coordinator.js";
+import type { McpOAuthChallengeRecorder } from "./transport.js";
 import { adaptMcpTools, buildMcpToolName } from "./tool-adapter.js";
 import type { McpPlan, McpServerConfig } from "./types.js";
 
@@ -142,6 +144,14 @@ function planWith(
   };
 }
 
+function fakeOAuthCoordinator(overrides: Record<string, unknown>): McpOAuthCoordinator {
+  return {
+    credential: vi.fn().mockResolvedValue({ generation: 0 }),
+    recover: vi.fn().mockRejectedValue(new Error("unexpected OAuth recovery")),
+    ...overrides,
+  } as unknown as McpOAuthCoordinator;
+}
+
 describe("McpClientManager", () => {
   it("lists and calls tools over a fake transport (stdio-like)", async () => {
     const manager = track(
@@ -194,6 +204,143 @@ describe("McpClientManager", () => {
     expect(manager.getServerStates()[0].status).toBe("connected");
     const result = await manager.callTool("remote", "ping", {});
     expect(result.content[0]).toMatchObject({ type: "text", text: "pong" });
+  });
+
+  it("recovers one HTTP Bearer connect challenge and rebuilds the transport once", async () => {
+    let attempt = 0;
+    const recover = vi.fn().mockResolvedValue({ accessToken: "fresh-token", generation: 1 });
+    const credential = vi
+      .fn()
+      .mockResolvedValueOnce({ generation: 0 })
+      .mockResolvedValueOnce({ accessToken: "fresh-token", generation: 1 });
+    const manager = track(
+      new McpClientManager({
+        oauthCoordinator: fakeOAuthCoordinator({ credential, recover }),
+        createTransport: async (_config, options) => {
+          attempt += 1;
+          if (attempt === 1) {
+            options.challengeRecorder?.record(
+              new Response(null, {
+                status: 401,
+                headers: {
+                  "www-authenticate":
+                    'Bearer resource_metadata="https://example.test/.well-known/oauth-protected-resource"',
+                },
+              }),
+            );
+            return createFakeTransport({ failConnect: true });
+          }
+          expect(options.oauthCredential).toEqual({
+            accessToken: "fresh-token",
+            generation: 1,
+          });
+          return createFakeTransport({
+            tools: [
+              {
+                name: "ready",
+                handler: async () => ({ content: [{ type: "text", text: "ready" }] }),
+              },
+            ],
+          });
+        },
+      }),
+    );
+
+    await manager.connectPlan(
+      planWith([{ name: "remote", config: { url: "https://example.test/mcp" } }]),
+    );
+
+    expect(attempt).toBe(2);
+    expect(recover).toHaveBeenCalledOnce();
+    expect(credential).not.toHaveBeenCalled();
+    expect(manager.getServerStates()[0]?.status).toBe("connected");
+  });
+
+  it("does not restart auth recovery after the single connect retry is exhausted", async () => {
+    let attempt = 0;
+    const recover = vi.fn().mockResolvedValue({ accessToken: "fresh-token", generation: 1 });
+    const manager = track(
+      new McpClientManager({
+        oauthCoordinator: fakeOAuthCoordinator({
+          credential: vi
+            .fn()
+            .mockResolvedValueOnce({ generation: 0 })
+            .mockResolvedValueOnce({ accessToken: "fresh-token", generation: 1 }),
+          recover,
+        }),
+        createTransport: async (_config, options) => {
+          attempt += 1;
+          options.challengeRecorder?.record(
+            new Response(null, {
+              status: 401,
+              headers: { "www-authenticate": "Bearer error=invalid_token" },
+            }),
+          );
+          return createFakeTransport({ failConnect: true });
+        },
+      }),
+    );
+
+    await manager.connectPlan(
+      planWith([{ name: "remote", config: { url: "https://example.test/mcp" } }]),
+    );
+
+    expect(attempt).toBe(2);
+    expect(recover).toHaveBeenCalledOnce();
+    expect(manager.getServerStates()[0]?.status).toBe("unavailable");
+  });
+
+  it("reconnects and retries one runtime tool call after a consumed Bearer challenge", async () => {
+    let currentRecorder: McpOAuthChallengeRecorder | undefined;
+    let transportBuilds = 0;
+    let toolCalls = 0;
+    const recover = vi.fn().mockResolvedValue({ accessToken: "fresh-token", generation: 1 });
+    const credential = vi
+      .fn()
+      .mockResolvedValueOnce({ generation: 0 })
+      .mockResolvedValueOnce({ accessToken: "fresh-token", generation: 1 });
+    const manager = track(
+      new McpClientManager({
+        oauthCoordinator: fakeOAuthCoordinator({ credential, recover }),
+        createTransport: async (_config, options) => {
+          transportBuilds += 1;
+          currentRecorder = options.challengeRecorder;
+          return { start: async () => {}, send: async () => {}, close: async () => {} };
+        },
+        createClient: () =>
+          ({
+            connect: async () => {},
+            close: async () => {},
+            getServerCapabilities: () => ({}),
+            setNotificationHandler: () => {},
+            request: async () => ({ tools: [rawTool("secured")] }),
+            callTool: async () => {
+              toolCalls += 1;
+              if (toolCalls === 1) {
+                currentRecorder?.record(
+                  new Response(null, {
+                    status: 401,
+                    headers: { "www-authenticate": "Bearer error=invalid_token" },
+                  }),
+                );
+                throw new Error("HTTP 401");
+              }
+              return { content: [{ type: "text", text: "authorized" }] };
+            },
+          }) as unknown as Client,
+      }),
+    );
+
+    await manager.connectPlan(
+      planWith([{ name: "remote", config: { url: "https://example.test/mcp" } }]),
+    );
+    await expect(manager.callTool("remote", "secured", {})).resolves.toMatchObject({
+      content: [{ type: "text", text: "authorized" }],
+    });
+
+    expect(recover).toHaveBeenCalledOnce();
+    expect(toolCalls).toBe(2);
+    expect(transportBuilds).toBe(2);
   });
 
   it("fail-soft: one broken server does not block another", async () => {

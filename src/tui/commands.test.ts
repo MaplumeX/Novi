@@ -841,6 +841,90 @@ describe("/mcp command", () => {
     const text = String((ctx.print as ReturnType<typeof vi.fn>).mock.calls[0]![0]);
     expect(text.toLowerCase()).toContain("mcp");
   });
+
+  it("/mcp status uses the runtime OAuth controller without exposing tokens", async () => {
+    const { ctx } = makeCtx({});
+    const status = vi.fn().mockResolvedValue({
+      state: "authorized",
+      grantType: "authorization_code",
+      registrationMode: "dcr",
+      issuer: "https://auth.example",
+      resource: "https://mcp.example/mcp",
+      grantedScopes: ["tools.read"],
+      pendingScopes: [],
+      tokens: { access_token: "secret-token" },
+    });
+    (ctx.handle as unknown as { mcp: { oauth: { status: typeof status } } }).mcp = {
+      oauth: { status },
+    };
+
+    await runCommand("/mcp status demo", ctx);
+
+    expect(status).toHaveBeenCalledWith("demo");
+    const output = String((ctx.print as ReturnType<typeof vi.fn>).mock.calls[0]![0]);
+    expect(output).toContain("demo: authorized");
+    expect(output).toContain("resource=https://mcp.example/mcp");
+    expect(output).not.toContain("secret-token");
+  });
+
+  it("/mcp logout refreshes tools and warns after failed server revocation", async () => {
+    const { ctx } = makeCtx({});
+    const logout = vi.fn().mockResolvedValue({
+      revocationAttempted: true,
+      revocationFailed: true,
+    });
+    (ctx.handle as unknown as { mcp: { oauth: { logout: typeof logout } } }).mcp = {
+      oauth: { logout },
+    };
+
+    await runCommand("/mcp logout demo", ctx);
+
+    expect(logout).toHaveBeenCalledWith("demo");
+    expect(ctx.handle.refreshTools).toHaveBeenCalled();
+    expect(ctx.print).toHaveBeenCalledWith(expect.stringContaining("logged out locally"));
+    expect(ctx.print).toHaveBeenCalledWith(
+      expect.stringContaining("server-side token may still be valid"),
+    );
+  });
+
+  it("/mcp cancel aborts a login flow owned by the TUI command", async () => {
+    const { ctx } = makeCtx({});
+    let rejectLogin!: (error: Error) => void;
+    const login = vi.fn(
+      async (): Promise<void> =>
+        await new Promise((_, reject) => {
+          rejectLogin = reject;
+        }),
+    );
+    const cancel = vi.fn(() => {
+      rejectLogin(new Error("OAuth login cancelled by user"));
+      return true;
+    });
+    const isLoginActive = vi.fn().mockReturnValue(false);
+    (
+      ctx.handle as unknown as {
+        mcp: {
+          oauth: {
+            login: typeof login;
+            cancel: typeof cancel;
+            isLoginActive: typeof isLoginActive;
+          };
+        };
+      }
+    ).mcp = {
+      oauth: { login, cancel, isLoginActive },
+    };
+
+    await runCommand("/mcp login demo", ctx);
+    await runCommand("/mcp cancel demo", ctx);
+
+    expect(login).toHaveBeenCalledWith("demo", expect.objectContaining({ reauthorize: false }));
+    expect(cancel).toHaveBeenCalledWith("demo");
+    expect(ctx.print).toHaveBeenCalledWith('Cancelled MCP OAuth login for "demo".');
+    await vi.waitFor(() => {
+      expect(ctx.print).toHaveBeenCalledWith(expect.stringContaining("login failed"));
+    });
+  });
 });
 
 describe("/skills command", () => {

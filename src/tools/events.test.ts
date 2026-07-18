@@ -246,6 +246,28 @@ describe("ToolResultEnvelope", () => {
     expect(make("MCP_OUTPUT_SCHEMA_INVALID").error?.retryable).toBe(false);
   });
 
+  it("keeps every MCP auth error terminal to prevent model retry loops", () => {
+    const result = createToolResultEnvelope({
+      result: {
+        content: [
+          {
+            type: "text",
+            text: "NOVI_ERROR:MCP_AUTH_REQUIRED:run novi mcp login github",
+          },
+        ],
+        details: {},
+      },
+      isError: true,
+      startedAt: 1,
+      at: 2,
+      input: {},
+    });
+    expect(result.error).toMatchObject({
+      code: "MCP_AUTH_REQUIRED",
+      retryable: false,
+    });
+  });
+
   it("rejects unsafe public JSON and redacts unsafe decoder inputs", () => {
     const cyclic: Record<string, unknown> = {};
     cyclic.self = cyclic;

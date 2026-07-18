@@ -166,7 +166,9 @@ describe("loadMcpDeclarations", () => {
     const result = await loadMcpDeclarations(env, cwd);
     expect(result.servers.every((s) => s.invalid)).toBe(true);
     expect(result.servers.find((s) => s.name === "both")!.reason).toMatch(/both command and url/);
-    expect(result.servers.find((s) => s.name === "neither")!.reason).toMatch(/command \(stdio\) or url/);
+    expect(result.servers.find((s) => s.name === "neither")!.reason).toMatch(
+      /command \(stdio\) or url/,
+    );
     expect(result.servers.find((s) => s.name === "badUrl")!.reason).toMatch(/absolute http/);
   });
 });
@@ -180,6 +182,83 @@ describe("validateServerEntry", () => {
   it("rejects non-string args", () => {
     const decl = validateServerEntry("s", { command: "x", args: [1] }, "user");
     expect(decl.invalid).toBe(true);
+  });
+
+  it("accepts challenge-driven, disabled, pre-registered, CIMD, and client credentials OAuth", () => {
+    const entries = [
+      validateServerEntry("auto", { url: "https://example.com/mcp" }, "user"),
+      validateServerEntry("off", { url: "https://example.com/mcp", oauth: false }, "user"),
+      validateServerEntry(
+        "pre",
+        {
+          url: "https://example.com/mcp",
+          oauth: { clientId: "novi", clientSecret: "${NOVI_MCP_SECRET}" },
+        },
+        "user",
+      ),
+      validateServerEntry(
+        "cimd",
+        {
+          url: "https://example.com/mcp",
+          oauth: { clientMetadataUrl: "https://client.example/novi.json" },
+        },
+        "user",
+      ),
+      validateServerEntry(
+        "machine",
+        {
+          url: "https://example.com/mcp",
+          oauth: {
+            grantType: "client_credentials",
+            clientId: "service",
+            clientSecret: "${SERVICE_SECRET}",
+            tokenEndpointAuthMethod: "client_secret_post",
+            scopes: ["repo:read", "tools"],
+          },
+        },
+        "user",
+      ),
+    ];
+    expect(entries.every((entry) => !entry.invalid)).toBe(true);
+    expect(entries[4]!.config).toMatchObject({
+      oauth: { scopes: ["repo:read", "tools"] },
+    });
+  });
+
+  it.each([
+    [{ oauth: true }, /oauth must be false or an object/],
+    [{ oauth: { surprise: true } }, /unknown field/],
+    [{ oauth: { clientSecret: "plaintext" } }, /complete \$\{ENV_VAR\} placeholder/],
+    [{ oauth: { clientSecret: "${SECRET}" } }, /requires oauth.clientId/],
+    [{ oauth: { clientMetadataUrl: "http://client.example/meta" } }, /must be HTTPS/],
+    [
+      { oauth: { clientId: "x", clientMetadataUrl: "https://client.example/meta" } },
+      /cannot combine/,
+    ],
+    [
+      { oauth: { grantType: "client_credentials", clientId: "x" } },
+      /requires clientId and clientSecret/,
+    ],
+    [
+      {
+        oauth: {
+          grantType: "client_credentials",
+          clientId: "x",
+          clientSecret: "${SECRET}",
+          tokenEndpointAuthMethod: "none",
+        },
+      },
+      /does not support token auth method none/,
+    ],
+    [{ oauth: { scopes: ["read", "read"] } }, /must not contain duplicates/],
+  ])("rejects invalid OAuth config %#", (partial, expected) => {
+    const decl = validateServerEntry(
+      "remote",
+      { url: "https://example.com/mcp", ...partial },
+      "user",
+    );
+    expect(decl.invalid).toBe(true);
+    expect(decl.reason).toMatch(expected);
   });
 });
 
@@ -237,6 +316,21 @@ describe("computeServerFingerprint", () => {
     expect(fp).not.toContain("super-secret-token");
     expect(fp).toMatch(/^[a-f0-9]{64}$/);
   });
+
+  it("changes when OAuth identity changes and remains a digest", () => {
+    const a: McpHttpServerConfig = {
+      url: "https://example.com",
+      oauth: { clientId: "novi", clientSecret: "${SECRET_A}", scopes: ["read"] },
+    };
+    const b: McpHttpServerConfig = {
+      url: "https://example.com",
+      oauth: { clientId: "novi", clientSecret: "${SECRET_B}", scopes: ["read"] },
+    };
+    const fp = computeServerFingerprint("r", a);
+    expect(fp).not.toBe(computeServerFingerprint("r", b));
+    expect(fp).not.toContain("SECRET_A");
+    expect(fp).toMatch(/^[a-f0-9]{64}$/);
+  });
 });
 
 describe("resolveEnvPlaceholders", () => {
@@ -264,6 +358,24 @@ describe("resolveEnvPlaceholders", () => {
     expect(result.config).toEqual({
       url: "https://example.com/mcp",
       headers: { Authorization: "Bearer t" },
+    });
+  });
+
+  it("resolveServerConfigPlaceholders resolves OAuth client secrets", () => {
+    const result = resolveServerConfigPlaceholders(
+      {
+        url: "https://example.com/mcp",
+        oauth: { clientId: "novi", clientSecret: "${MCP_SECRET}" },
+      },
+      { MCP_SECRET: "secret-value" },
+    );
+    expect(result).toEqual({
+      ok: true,
+      config: {
+        url: "https://example.com/mcp",
+        oauth: { clientId: "novi", clientSecret: "secret-value" },
+      },
+      missing: [],
     });
   });
 });

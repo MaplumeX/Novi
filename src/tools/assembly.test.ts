@@ -1,7 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import {
+  CallToolRequestSchema,
+  ListToolsRequestSchema,
+  type CallToolResult,
+  type Tool,
+} from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod/v4";
 import { NodeExecutionEnv, type AgentHarness } from "@earendil-works/pi-agent-core/node";
 import { mkdtemp } from "node:fs/promises";
@@ -354,6 +361,217 @@ describe("createToolAssembly", () => {
     await assembly.mcp!.manager.refresh("demo", "list_changed");
     await assembly.mcp!.controller!.settled();
     await expect(oldDirectTool.execute("old", { q: "value" })).rejects.toThrow("MCP_TOOL_STALE");
+  });
+
+  it("integrates paginated deferred discovery, result fidelity, progress, abort, and LKG refresh", async () => {
+    const { env, cwd } = await setupEnv();
+    const imageData = Buffer.from([1, 2, 3]).toString("base64");
+    const audioData = Buffer.from([4, 5, 6]).toString("base64");
+    const blobData = Buffer.from([7, 8, 9]).toString("base64");
+    let catalogVersion = 1;
+    let failList = false;
+    let blockingStarted = false;
+
+    const protocolTools = (): Tool[] => {
+      const lifecycleTools: Tool[] = [
+        {
+          name: "inspect",
+          description: `Inspect every supported result shape v${catalogVersion}`,
+          inputSchema: { type: "object", additionalProperties: false },
+          outputSchema: {
+            type: "object",
+            properties: { ok: { type: "boolean" } },
+            required: ["ok"],
+            additionalProperties: false,
+          },
+        },
+        {
+          name: "progressing",
+          description: "Emit MCP progress before returning",
+          inputSchema: { type: "object", additionalProperties: false },
+        },
+        {
+          name: "blocking",
+          description: "Wait until the client cancels the MCP request",
+          inputSchema: { type: "object", additionalProperties: false },
+        },
+      ];
+      const filler = Array.from({ length: 40 }, (_, index): Tool => ({
+        name: `catalog_tool_${catalogVersion}_${index}`,
+        description: `Large catalog entry ${index} ${"schema".repeat(180)}`,
+        inputSchema: {
+          type: "object",
+          properties: { value: { type: "string", description: "Lookup value" } },
+        },
+      }));
+      return [...lifecycleTools, ...filler];
+    };
+
+    const server = new Server(
+      { name: "integrated-fake", version: "1.0.0" },
+      { capabilities: { tools: { listChanged: true } } },
+    );
+    server.setRequestHandler(ListToolsRequestSchema, async (request) => {
+      if (failList) throw new Error("temporary integrated refresh failure");
+      const tools = protocolTools();
+      if (request.params?.cursor === undefined) {
+        return { tools: tools.slice(0, 20), nextCursor: "page-2" };
+      }
+      if (request.params.cursor === "page-2") return { tools: tools.slice(20) };
+      throw new Error(`unexpected cursor ${request.params.cursor}`);
+    });
+    server.setRequestHandler(CallToolRequestSchema, async (request, extra): Promise<CallToolResult> => {
+      if (request.params.name === "inspect") {
+        return {
+          content: [
+            { type: "text", text: "inspection complete" },
+            { type: "image", data: imageData, mimeType: "image/png" },
+            {
+              type: "resource_link",
+              name: "manual",
+              uri: "docs://manual",
+              mimeType: "text/markdown",
+            },
+            {
+              type: "resource",
+              resource: { uri: "memory://note", mimeType: "text/plain", text: "embedded" },
+            },
+            { type: "audio", data: audioData, mimeType: "audio/wav" },
+            {
+              type: "resource",
+              resource: {
+                uri: "memory://payload",
+                mimeType: "application/octet-stream",
+                blob: blobData,
+              },
+            },
+          ],
+          structuredContent: { ok: true },
+        };
+      }
+      if (request.params.name === "progressing") {
+        const progressToken = extra._meta?.progressToken;
+        if (progressToken !== undefined) {
+          await extra.sendNotification({
+            method: "notifications/progress",
+            params: { progressToken, progress: 1, total: 1, message: "integrated progress" },
+          });
+        }
+        return { content: [{ type: "text", text: "progress complete" }] };
+      }
+      if (request.params.name === "blocking") {
+        blockingStarted = true;
+        await new Promise<void>((resolve) => {
+          if (extra.signal.aborted) resolve();
+          else extra.signal.addEventListener("abort", () => resolve(), { once: true });
+        });
+        return { content: [{ type: "text", text: "late response" }] };
+      }
+      return { content: [{ type: "text", text: request.params.name }] };
+    });
+
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverTransport);
+    cleanups.push(async () => server.close());
+    const assembly = await createToolAssembly(env, "integrated", {
+      mcpPlan: connectablePlan("integrated", { command: "fake" }),
+      exposure: { mcpExposure: "auto" },
+      artifactsEnabled: true,
+      artifactRoot: path.join(cwd, "artifacts"),
+      mcp: {
+        refreshDebounceMs: 0,
+        createTransport: async () => clientTransport,
+      },
+    });
+    cleanups.push(async () => assembly.mcp?.close());
+
+    expect(assembly.mcp!.manager.getCatalogSnapshot().tools).toHaveLength(43);
+    expect(assembly.activeToolNames).toContain("mcp_tool_search");
+    expect(assembly.activeToolNames).toContain("mcp_tool_invoke");
+    expect(assembly.activeToolNames.some((name) => name.startsWith("mcp_integrated_"))).toBe(false);
+
+    const search = assembly.tools.find((tool) => tool.name === "mcp_tool_search")!;
+    const invoke = assembly.tools.find((tool) => tool.name === "mcp_tool_invoke")!;
+    const searchRef = async (query: string): Promise<string> => {
+      const result = await search.execute(`search-${query}`, { query, limit: 1 });
+      const response = JSON.parse(toolEnvelope(result).preview) as {
+        results: Array<{ toolRef: string }>;
+      };
+      return response.results[0]!.toolRef;
+    };
+
+    const inspectRef = await searchRef("inspect");
+    const inspected = await invoke.execute("inspect", { toolRef: inspectRef, arguments: {} });
+    const inspectEnvelope = toolEnvelope(inspected);
+    expect(inspected.content).toContainEqual({ type: "image", data: imageData, mimeType: "image/png" });
+    expect(inspectEnvelope).toMatchObject({
+      status: "success",
+      data: {
+        mcp: {
+          source: "mcp:integrated",
+          tool: "inspect",
+          structuredContent: { ok: true },
+        },
+      },
+    });
+    expect(inspectEnvelope.artifacts).toHaveLength(2);
+    expect(JSON.stringify(inspectEnvelope)).not.toContain(audioData);
+    expect(JSON.stringify(inspectEnvelope)).not.toContain(blobData);
+
+    const progress: string[] = [];
+    await invoke.execute(
+      "progress",
+      { toolRef: await searchRef("progressing"), arguments: {} },
+      undefined,
+      (update) => {
+        progress.push(
+          update.content
+            .filter((part) => part.type === "text")
+            .map((part) => part.text)
+            .join(""),
+        );
+      },
+    );
+    expect(progress).toEqual(["integrated progress\n"]);
+
+    const abortController = new AbortController();
+    const aborted = invoke.execute(
+      "abort",
+      { toolRef: await searchRef("blocking"), arguments: {} },
+      abortController.signal,
+    );
+    await vi.waitFor(() => expect(blockingStarted).toBe(true));
+    abortController.abort();
+    await expect(aborted).rejects.toThrow(/NOVI_ERROR:TOOL_ABORTED/);
+
+    const firstRevision = assembly.mcp!.manager.getCatalogSnapshot().revision;
+    catalogVersion = 2;
+    await server.sendToolListChanged();
+    await vi.waitFor(() => {
+      expect(assembly.mcp!.manager.getCatalogSnapshot().revision).not.toBe(firstRevision);
+    });
+    await assembly.mcp!.controller!.settled();
+    await expect(invoke.execute("stale", { toolRef: inspectRef, arguments: {} })).rejects.toThrow(
+      "MCP_TOOL_STALE",
+    );
+
+    const healthyRevision = assembly.mcp!.manager.getCatalogSnapshot("integrated")!.revision;
+    failList = true;
+    await expect(assembly.mcp!.manager.refresh("integrated")).rejects.toThrow(
+      /temporary integrated refresh failure/,
+    );
+    expect(assembly.mcp!.manager.getCatalogSnapshot("integrated")).toMatchObject({
+      revision: healthyRevision,
+      health: "degraded",
+    });
+    expect(assembly.activeToolNames).toContain("mcp_tool_search");
+
+    failList = false;
+    await assembly.mcp!.manager.refresh("integrated");
+    expect(assembly.mcp!.manager.getCatalogSnapshot("integrated")).toMatchObject({
+      revision: healthyRevision,
+      health: "connected",
+    });
   });
 });
 

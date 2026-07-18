@@ -120,7 +120,22 @@ TUI 要 live 状态与 resume；Headless JSON 要稳定 JSONL；Gateway channel 
 
 MCP plan 有 connectable / pending / denied / invalid 等状态；preflight 可 `connectMcp: false` 只收集诊断而不 spawn。连接失败 fail-soft，不拆除 builtin。**Project trust 不等于 MCP approval**——这是配置层的独立决策，装配路径会尊重 plan 状态。
 
-Novi 当前采用 Tools-first 支持边界：支持 tools discovery/call/progress/cancellation；resource link 与 embedded text 只保留语义而不隐式读取；audio/blob 降级为私有制品。不支持 Resources/Prompts、Sampling、Elicitation、Tasks 与 OAuth discovery，client 初始化 capabilities 保持 `{}`，不会暗示存在 server-initiated handler。
+Novi 当前采用 Tools-first 支持边界：支持 tools discovery/call/progress/cancellation；resource link 与 embedded text 只保留语义而不隐式读取；audio/blob 降级为私有制品。Remote HTTP 支持 challenge-driven OAuth，但这只解决 transport 身份，不增加 MCP client capabilities；Resources/Prompts、Sampling、Elicitation 与 Tasks 仍不支持，client 初始化 capabilities 保持 `{}`，不会暗示存在 server-initiated handler。
+
+### Remote MCP OAuth：独立授权边界
+
+HTTP transport 的 OAuth 主链集中在 `src/mcp/oauth/**`，不会在 TUI、Gateway 或 tool adapter 中各保存一份 token：
+
+1. transport 先使用静态 headers 与已有 credential snapshot；只有 Bearer 401/403 才记录 challenge。
+2. manager 为一次 connect/tool operation 提供最多一次 auth recovery 与一次原操作重试。401 可 refresh 或执行配置的 `client_credentials`；403 只记录 pending scope 并返回 `MCP_AUTH_SCOPE_REQUIRED`。
+3. `McpOAuthCoordinator` 是 discovery、SDK provider、loopback callback、revocation 与 store 的唯一编排边界。模型路径不会调用交互式 login。
+4. TUI `/mcp login|reauthorize` 与独立 `novi mcp` CLI 才能创建 `127.0.0.1` callback 和打开浏览器；Gateway、Headless、child-agent 只消费已有 token或非交互 grant。
+
+授权状态存入 user-local、版本化的 `McpOAuthStore`。record 绑定 declaration origin、project root、server name 与 fingerprint，并在 record 内固定 resource/issuer；fingerprint 或 issuer/resource 变化不能沿用旧 token。目录/文件模式为 `0700/0600`，更新通过同目录临时文件、sync、rename 原子发布。进程内 keyed lane、per-binding 文件 lease 与 global write lock 防止并发 refresh 覆盖轮换后的 refresh token；损坏或未知版本 fail-closed，不会按空 store 覆盖。
+
+OAuth 网络只允许 HTTPS（随机端口的精确 `127.0.0.1` callback 是唯一 HTTP 例外），禁止 userinfo/fragment/downgrade，逐跳校验有限 redirect，限制响应大小，并要求 MCP resource 与 OAuth endpoint 使用相同的 public/private trust class。默认 Node fetch 连接到校验过的 DNS 地址，同时保留原 hostname 做 TLS 校验，避免解析后换址。metadata issuer 必须匹配发现的 authorization server，resource/issuer 已绑定后需要 `reset-auth` 才能改变。
+
+支持 authorization code + PKCE S256、refresh rotation、预注册 client、CIMD、DCR、`client_credentials`，以及 `client_secret_basic`、`client_secret_post`、public `none`。PRM 必须存在并声明 authorization server；交互登录前 metadata 必须显式声明 `code_challenge_methods_supported: ["S256"]`，不采用 SDK 的旧协议兼容回退。device flow、远程 callback relay、粘贴 code、JWT/private-key grant 和单声明多账户均不支持。`logout` 在 metadata 提供 revocation endpoint 时依次尽力撤销 refresh/access token，但无论服务端结果如何都会清理本地 token；`reset-auth` 进一步删除 discovery 与动态 registration。公共 status、diagnostic 和事件只暴露脱敏 issuer origin、resource path、scope、expiry 与稳定错误码，不暴露 token、code、verifier、client secret 或原始 OAuth response。
 
 ### 事件契约：NoviToolEvent 与 ToolResultEnvelope
 

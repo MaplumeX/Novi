@@ -94,10 +94,35 @@ Config files:
       "headers": {
         "Authorization": "Bearer ${DOCS_MCP_TOKEN}"
       }
+    },
+    "interactive-oauth": {
+      "url": "https://mcp.example.com/mcp",
+      "oauth": {
+        "clientId": "novi-native-client",
+        "tokenEndpointAuthMethod": "none",
+        "scopes": ["tools.read"]
+      }
+    },
+    "service-account": {
+      "url": "https://automation.example.com/mcp",
+      "oauth": {
+        "grantType": "client_credentials",
+        "clientId": "novi-ci",
+        "clientSecret": "${NOVI_MCP_CLIENT_SECRET}",
+        "tokenEndpointAuthMethod": "client_secret_post",
+        "scopes": ["tools.read"]
+      }
     }
   }
 }
 ```
+
+For authorization-code servers, omit `clientId` to use Dynamic Client
+Registration, or set an organization-hosted HTTPS `clientMetadataUrl` for
+Client ID Metadata Document registration when the authorization server
+supports it. Set `"oauth": false` to reject Bearer challenges without OAuth
+discovery. A persisted `clientSecret` must be one complete `${ENV_VAR}`
+placeholder; plaintext project secrets are rejected.
 
 Approvals are **not** project trust:
 
@@ -115,8 +140,38 @@ TUI management:
 /mcp approve <name>  # approve project server + hot-refresh tools
 /mcp deny <name>     # deny and drop tools (persists across restarts)
 /mcp reconnect       # explicit reconnect (no background auto-reconnect)
+/mcp status <name>
+/mcp login|reauthorize <name>
+/mcp cancel <name>
+/mcp logout|reset-auth <name>
 /tools               # shows builtin + external source labels
 ```
+
+The standalone operator commands run before model/provider onboarding, so they
+also work on a Gateway or Headless host that has no LLM credentials:
+
+```text
+novi mcp status [name] [--json]
+novi mcp login|reauthorize <name> [--no-open]
+novi mcp logout|reset-auth <name>
+```
+
+Interactive login uses PKCE S256 and a one-shot callback on a random
+`127.0.0.1` port. The authorization URL is always printed. `--no-open` is
+intended for SSH with explicit port forwarding; Novi does not implement device
+flow, pasted codes, or a remote callback relay. Only TUI and this standalone
+CLI start login. Print/JSON, Gateway, child agents, and model-triggered calls
+may refresh an existing authorization-code token or obtain configured
+`client_credentials`, but never open a browser or expand scopes.
+
+OAuth state is stored separately under `~/.novi/` with private directory/file
+modes (`0700`/`0600`), atomic updates, and per-server cross-process leases. It
+is bound to the server name, declaration origin/project root, and declaration
+fingerprint; changing the declaration does not reuse the old authorization.
+`logout` best-effort revokes refresh then access tokens and always clears local
+tokens while retaining discovery/registration. `reset-auth` additionally
+removes discovery and dynamic client state. A revocation failure is reported
+as a warning because the local logout still succeeds.
 
 Headless/Gateway paths never prompt for MCP approval; pending project servers
 appear only as diagnostics. Operators approve via TUI (preferred) or by writing
@@ -129,21 +184,32 @@ refresh a versioned catalog atomically. A failed refresh keeps the last-known-go
 revision and reports the source as `degraded`; stale references fail with
 `MCP_TOOL_STALE` and should be searched again.
 
-| MCP capability                                                          | Status      | Novi behavior                                                                                                                |
-| ----------------------------------------------------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| Initialize, stdio/Streamable HTTP, paginated `tools/list`, list-changed | Supported   | Client capabilities remain `{}`; catalog refresh is bounded and atomic.                                                      |
-| `tools/call` text, supported image MIME, `structuredContent`            | Supported   | Native model content; current catalog `outputSchema` is validated again at the result boundary.                              |
-| Resource links and embedded text resources                              | Supported   | URI/MIME/annotations are preserved; Novi does not implicitly issue `resources/read`.                                         |
-| Progress and cancellation                                               | Supported   | Strictly increasing bounded true deltas; progress never extends the hard total timeout.                                      |
-| Audio, embedded binary, oversized/unsupported images                    | Degraded    | Stored as private quota-bound artifacts when enabled, otherwise returned as an explicit degradation; base64 is never public. |
-| Resources/Prompts APIs, Sampling, Elicitation, Tasks, OAuth discovery   | Unsupported | Not advertised and no server-initiated handler is installed. Static configured HTTP headers are supported.                   |
+| MCP capability                                                          | Status      | Novi behavior                                                                                                                                                     |
+| ----------------------------------------------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Initialize, stdio/Streamable HTTP, paginated `tools/list`, list-changed | Supported   | Client capabilities remain `{}`; catalog refresh is bounded and atomic.                                                                                           |
+| Remote OAuth discovery, auth code + PKCE, refresh/rotation              | Supported   | Bearer-challenge driven; requires RFC 9728 PRM and advertised PKCE S256; pre-registered client, CIMD and DCR; interactive start is limited to TUI/standalone CLI. |
+| `client_credentials`; basic/post/public client auth                     | Supported   | Pre-registered non-interactive clients; secrets must come from environment placeholders.                                                                          |
+| OAuth revocation                                                        | Degraded    | Best-effort when metadata advertises an endpoint; local logout/reset is authoritative and always completes.                                                       |
+| `tools/call` text, supported image MIME, `structuredContent`            | Supported   | Native model content; current catalog `outputSchema` is validated again at the result boundary.                                                                   |
+| Resource links and embedded text resources                              | Supported   | URI/MIME/annotations are preserved; Novi does not implicitly issue `resources/read`.                                                                              |
+| Progress and cancellation                                               | Supported   | Strictly increasing bounded true deltas; progress never extends the hard total timeout.                                                                           |
+| Audio, embedded binary, oversized/unsupported images                    | Degraded    | Stored as private quota-bound artifacts when enabled, otherwise returned as an explicit degradation; base64 is never public.                                      |
+| Device flow, remote callback relay, JWT/private-key grants              | Unsupported | No fallback to weaker flows.                                                                                                                                      |
+| Resources/Prompts APIs, Sampling, Elicitation, Tasks                    | Unsupported | Not advertised and no server-initiated handler is installed.                                                                                                      |
 
 MCP failures use distinct stable codes: `MCP_TOOL_ERROR`,
 `MCP_INPUT_SCHEMA_INVALID`, `MCP_OUTPUT_SCHEMA_INVALID`,
 `MCP_PROTOCOL_ERROR`, `MCP_TRANSPORT_ERROR`, `MCP_TOOL_STALE`, plus the
 shared `TOOL_TIMEOUT` and `TOOL_ABORTED`. Transport, timeout, and stale-reference
 failures are retryable; protocol/output failures are not retried with the same
-payload.
+payload. OAuth failures use `MCP_AUTH_REQUIRED`,
+`MCP_AUTH_SCOPE_REQUIRED`, `MCP_AUTH_DISABLED`, `MCP_AUTH_IN_PROGRESS`,
+`MCP_AUTH_CONFIG_INVALID`, `MCP_AUTH_STORE_INVALID`,
+`MCP_AUTH_DISCOVERY_FAILED`, `MCP_AUTH_REGISTRATION_UNAVAILABLE`,
+`MCP_AUTH_ENDPOINT_UNSAFE`, `MCP_AUTH_CALLBACK_INVALID`,
+`MCP_AUTH_TIMEOUT`, or `MCP_AUTH_CANCELLED`. They are terminal for the current
+model operation and point operators to `novi mcp login|reauthorize`; raw OAuth
+responses and credentials are never projected into tool events.
 
 ## Tool permissions and workspace boundary
 

@@ -64,6 +64,16 @@ the thrown error or result details. Timeouts, cancellation, memory limits, and
 artifact failures use `TOOL_TIMEOUT`, `TOOL_ABORTED`, `TOOL_MEMORY_LIMIT`,
 `ARTIFACT_QUOTA_EXCEEDED`, and `ARTIFACT_WRITE_FAILED` respectively.
 
+Remote MCP OAuth uses the same envelope with `MCP_AUTH_*` codes. These errors
+are terminal for the current tool/model operation. The OAuth boundary must map
+SDK failures to fixed, actionable messages (`MCP_AUTH_REQUIRED`,
+`MCP_AUTH_SCOPE_REQUIRED`, `MCP_AUTH_DISCOVERY_FAILED`,
+`MCP_AUTH_REGISTRATION_UNAVAILABLE`, etc.); never append an OAuth response
+body, token, authorization code, verifier, client secret, or dependency error
+dump. Operator cancellation is `MCP_AUTH_CANCELLED`, callback expiry is
+`MCP_AUTH_TIMEOUT`, and revocation failure is a successful local logout plus a
+separate redacted warning outcome.
+
 For `edit_file`, an ambiguous match (0 or >1) throws rather than silently
 no-ops:
 
@@ -107,3 +117,6 @@ if (count > 1) throw new Error(`edit_file: oldText matches ${count} times, must 
   genuinely failed — throw so the harness marks `isError`.
 - Do not let resource loaders throw. Invalid skill/template files must produce
   diagnostics, not crash startup.
+- Do not surface a raw OAuth SDK/network error. Classify it at
+  `McpOAuthCoordinator`, preserve only the stable code and fixed guidance, and
+  keep the original response out of logs/events/session snapshots.

@@ -124,6 +124,7 @@ Settings schema:
 - `bash` is an exact command grant and is not an OS/filesystem sandbox.
 
 Cache-aware tool ordering:
+
 - Builtin descriptors are sorted alphabetically by `name` at the assembly
   boundary (`index.ts`) before registration. External (MCP) descriptors are
   sorted alphabetically by `name` at the merge boundary (`assembly.ts`).
@@ -178,9 +179,9 @@ maps the stable text into `ToolResultEnvelope.error`. Initial codes are
 | malformed/ambiguous permission rule                                     | add deny-all fail-closed rule + diagnostic             |
 | symlink target changes after approval                                   | `PERMISSION_INTENT_INVALID` before I/O                 |
 | builtin/external descriptor order not alphabetical                      | sort at assembly boundary; never interleave groups     |
-| MCP server connect/disconnect changes builtin order                    | impossible by construction (separate sorted groups)    |
-| malformed proxy subject or ref                                         | `PERMISSION_INTENT_INVALID`                             |
-| valid ref no longer matches current MCP contract/projection            | retryable `MCP_TOOL_STALE`                              |
+| MCP server connect/disconnect changes builtin order                     | impossible by construction (separate sorted groups)    |
+| malformed proxy subject or ref                                          | `PERMISSION_INTENT_INVALID`                            |
+| valid ref no longer matches current MCP contract/projection             | retryable `MCP_TOOL_STALE`                             |
 
 ### 5. Good / Base / Bad Cases
 
@@ -350,19 +351,19 @@ class SessionToolController {
 
 ### 4. Validation & Error Matrix
 
-| Condition | Behavior / code |
-| --- | --- |
-| malformed, non-canonical, oversized, or unsupported ref | `PERMISSION_INTENT_INVALID` |
-| removed/changed tool or mismatched source/tool revision | retryable `MCP_TOOL_STALE`; no server call |
-| ref resolves to a currently hidden tool | retryable `MCP_TOOL_STALE`; no server call |
-| proxy arguments fail current full input schema | `MCP_INPUT_SCHEMA_INVALID`; no server call |
-| search query/source exceeds bound or contains controls | `PERMISSION_INTENT_INVALID` |
-| search schema/response exceeds preview ceiling | visible truncation; valid bounded response |
-| project broadens mode/budget or supplies pins | ignore value + diagnostic |
-| real descriptor whole/source/capability deny | deny before grants and execution |
-| catalog changes a granted tool | revoke matching source/tool grant revision |
-| live harness `setTools` fails | committed catalog retained; projection degraded + retry |
-| stale direct tool captured by an earlier turn | `MCP_TOOL_STALE`; new contract is not executed |
+| Condition                                               | Behavior / code                                         |
+| ------------------------------------------------------- | ------------------------------------------------------- |
+| malformed, non-canonical, oversized, or unsupported ref | `PERMISSION_INTENT_INVALID`                             |
+| removed/changed tool or mismatched source/tool revision | retryable `MCP_TOOL_STALE`; no server call              |
+| ref resolves to a currently hidden tool                 | retryable `MCP_TOOL_STALE`; no server call              |
+| proxy arguments fail current full input schema          | `MCP_INPUT_SCHEMA_INVALID`; no server call              |
+| search query/source exceeds bound or contains controls  | `PERMISSION_INTENT_INVALID`                             |
+| search schema/response exceeds preview ceiling          | visible truncation; valid bounded response              |
+| project broadens mode/budget or supplies pins           | ignore value + diagnostic                               |
+| real descriptor whole/source/capability deny            | deny before grants and execution                        |
+| catalog changes a granted tool                          | revoke matching source/tool grant revision              |
+| live harness `setTools` fails                           | committed catalog retained; projection degraded + retry |
+| stale direct tool captured by an earlier turn           | `MCP_TOOL_STALE`; new contract is not executed          |
 
 ### 5. Good / Base / Bad Cases
 
@@ -408,12 +409,7 @@ schema, descriptor policy, and revision-bound grants.
 
 ```ts
 resolvePermissionSubject: (input) => {
-  const entry = resolveAndValidate(
-    getSnapshot(),
-    input.toolRef,
-    input.arguments,
-    isVisible,
-  );
+  const entry = resolveAndValidate(getSnapshot(), input.toolRef, input.arguments, isVisible);
   return {
     descriptor: entry.descriptor,
     input: input.arguments,
@@ -423,7 +419,7 @@ resolvePermissionSubject: (input) => {
       revision: entry.toolRevision,
     },
   };
-}
+};
 ```
 
 The ref selects a candidate only; current host truth and PermissionGate remain
@@ -465,7 +461,7 @@ class McpClientManager {
 ### 3. Contracts
 
 - Fetch every `tools/list` page through public `client.request(...,
-  ListToolsResultSchema)`. The SDK's automatic list-changed fetcher calls one
+ListToolsResultSchema)`. The SDK's automatic list-changed fetcher calls one
   `listTools()` page only, so Novi must not use it as the catalog owner.
 - A refresh builds a temporary complete snapshot, sorts by protocol identity,
   validates unique/bounded names, compiles schemas, and commits once. Cursor
@@ -495,17 +491,17 @@ class McpClientManager {
 
 ### 4. Validation & Error Matrix
 
-| Condition | Behavior / code |
-| --- | --- |
-| repeated cursor or duplicate protocol tool name | reject refresh / `MCP_CATALOG_REFRESH_FAILED` |
-| page, tool, metadata, or name ceiling exceeded | reject refresh / `MCP_CATALOG_LIMIT` |
-| unsupported schema dialect or compile failure | reject refresh / `MCP_CATALOG_REFRESH_FAILED` |
-| first catalog fetch fails | server `unavailable`; no partial snapshot |
-| later catalog fetch fails | keep LKG revision/tools; health `degraded` |
-| identical successful refresh | no content event; revision unchanged |
-| changed/added/removed tool contract | atomic new revision + exact diff |
-| close/reconnect races with refresh | generation mismatch/abort drops late result |
-| one server fails | other MCP servers and builtins remain available |
+| Condition                                       | Behavior / code                                 |
+| ----------------------------------------------- | ----------------------------------------------- |
+| repeated cursor or duplicate protocol tool name | reject refresh / `MCP_CATALOG_REFRESH_FAILED`   |
+| page, tool, metadata, or name ceiling exceeded  | reject refresh / `MCP_CATALOG_LIMIT`            |
+| unsupported schema dialect or compile failure   | reject refresh / `MCP_CATALOG_REFRESH_FAILED`   |
+| first catalog fetch fails                       | server `unavailable`; no partial snapshot       |
+| later catalog fetch fails                       | keep LKG revision/tools; health `degraded`      |
+| identical successful refresh                    | no content event; revision unchanged            |
+| changed/added/removed tool contract             | atomic new revision + exact diff                |
+| close/reconnect races with refresh              | generation mismatch/abort drops late result     |
+| one server fails                                | other MCP servers and builtins remain available |
 
 ### 5. Good / Base / Bad Cases
 
@@ -545,6 +541,187 @@ const tools = await fetchEveryToolsListPage(client, limits, signal);
 const next = buildMcpServerCatalogSnapshot(tools); // compile before commit
 if (connection.generation === generation) commit(next);
 ```
+
+## Scenario: Authenticate a remote HTTP MCP server
+
+### 1. Scope / Trigger
+
+Use this contract when changing HTTP MCP config, OAuth discovery/provider,
+credential persistence, auth retries, loopback login, `/mcp` commands, or any
+TUI/Headless/Gateway/child-agent projection of an auth failure. OAuth is a
+transport identity boundary; it never replaces project MCP approval or the
+normal `PermissionGate` for a discovered tool.
+
+### 2. Signatures
+
+```ts
+interface McpOAuthConfig {
+  grantType?: "authorization_code" | "client_credentials";
+  clientId?: string;
+  clientSecret?: string; // persisted config: exact ${ENV_VAR} only
+  clientMetadataUrl?: string;
+  scopes?: string[];
+  tokenEndpointAuthMethod?: "client_secret_basic" | "client_secret_post" | "none";
+}
+
+interface McpHttpServerConfig {
+  url: string;
+  headers?: Record<string, string>;
+  oauth?: false | McpOAuthConfig;
+}
+
+interface McpOAuthRuntimeController {
+  status(serverName: string): Promise<McpOAuthPublicStatus>;
+  login(serverName: string, options: McpOAuthLoginOptions): Promise<void>;
+  logout(serverName: string): Promise<McpOAuthLogoutResult>;
+  resetAuth(serverName: string): Promise<McpOAuthLogoutResult>;
+}
+
+async function runMcpCli(options: RunMcpCliOptions): Promise<void>;
+```
+
+Operator signatures are:
+
+```text
+novi mcp status [server] [--json]
+novi mcp login|reauthorize <server> [--no-open]
+novi mcp logout|reset-auth <server>
+/mcp status|login|reauthorize|cancel|logout|reset-auth <server>
+```
+
+### 3. Contracts
+
+- OAuth applies only to Streamable HTTP. `oauth: undefined` enables
+  challenge-driven OAuth; `oauth: false` makes a Bearer challenge terminal.
+  Static headers remain config-owned; runtime Bearer tokens are injected into
+  a fresh transport snapshot and are never written back to config.
+- `resolveMcpOAuthTarget` must resolve the current plan and environment before
+  discovery, callback creation, browser launch, or store mutation. Unknown,
+  invalid, stdio, pending, or denied entries fail first. A declaration binding
+  contains origin, project root (for project entries), server name, and
+  fingerprint; fingerprint changes never reuse authorization.
+- Authorization code uses SDK `auth()` with PKCE S256, random state, one exact
+  `127.0.0.1` random-port callback, and a stable fingerprint-derived callback
+  path. Only TUI and standalone CLI call `login`; model calls, print/JSON,
+  Gateway, and child agents only refresh existing tokens or execute configured
+  `client_credentials`.
+- SDK compatibility fallbacks are narrower than Novi's contract: PRM must be
+  present with at least one authorization server, authorization-server metadata
+  must be present, and interactive login must see advertised S256 support.
+  Missing PRM or a missing `code_challenge_methods_supported` is a discovery
+  failure, not a legacy fallback.
+- Registration priority is pre-registered `clientId`, then HTTPS non-root
+  `clientMetadataUrl` when CIMD is supported, then DCR. Supported client auth
+  methods are basic, post, and public `none`. Device flow, pasted code, remote
+  callback relay, JWT/private-key grants, and single-declaration multi-account
+  state are unsupported.
+- `McpOAuthStore` is a separate strict V1 user-local file. Directories/files
+  are `0700/0600`; writes use same-directory temp + sync + rename. Corrupt or
+  unknown versions fail closed without overwrite. Mutations require a
+  per-binding lease; file publication additionally takes the global write lock
+  in that order. Refresh/token exchange holds the binding lease, re-reads
+  generation, and commits rotation atomically.
+- Records retain the validated resource and issuer. Discovery cannot overwrite
+  either for an existing binding; the operator must `reset-auth`. OAuth network
+  requests are HTTPS-only, bounded, redirect-limited, DNS-pinned, and use the
+  same public/private trust class as the MCP resource. The loopback callback is
+  the only HTTP exception.
+- A connect or tool operation may consume one Bearer challenge, perform at
+  most one recovery, rebuild once, and retry the original operation once. 401
+  may refresh/fetch a token. 403 only unions pending scopes and returns
+  `MCP_AUTH_SCOPE_REQUIRED`; it never starts step-up authorization.
+- `McpRuntimeHandle.oauth` is the surface boundary. `McpOAuthPublicStatus`
+  contains only state, grant/registration mode, issuer origin, resource path,
+  scopes, generation, and optional expiry. TUI must not read manager/store
+  records or token fields.
+- Logout best-effort revokes refresh then access token when metadata advertises
+  a revocation endpoint, then always clears local tokens/timestamps/pending
+  scopes while retaining discovery/client information. `reset-auth` also
+  deletes discovery, issuer/resource, and stored registration. Revocation
+  failure returns a warning outcome, never token/raw response text.
+- `connectMcp: false` may resolve config/plan diagnostics and construct an idle
+  manager, but it must not inspect the OAuth store, perform DNS/network I/O,
+  refresh, create a listener, or open a browser.
+
+### 4. Validation & Error Matrix
+
+| Condition                                               | Stable behavior / code                           |
+| ------------------------------------------------------- | ------------------------------------------------ |
+| plaintext secret, invalid grant/method/scope/CIMD URL   | invalid plan before network                      |
+| OAuth disabled + Bearer challenge                       | `MCP_AUTH_DISABLED`                              |
+| authorization-code token absent/refresh invalid         | `MCP_AUTH_REQUIRED` + standalone CLI guidance    |
+| 403 insufficient scope                                  | `MCP_AUTH_SCOPE_REQUIRED`; pending union only    |
+| concurrent login for one binding                        | `MCP_AUTH_IN_PROGRESS`                           |
+| corrupt/version-mismatched store                        | `MCP_AUTH_STORE_INVALID`; preserve file          |
+| unsafe URL, redirect, DNS class, issuer/resource change | `MCP_AUTH_ENDPOINT_UNSAFE`                       |
+| discovery/metadata failure                              | `MCP_AUTH_DISCOVERY_FAILED`                      |
+| no usable pre-register/CIMD/DCR mode                    | `MCP_AUTH_REGISTRATION_UNAVAILABLE`              |
+| bad state/path/code or duplicate callback               | `MCP_AUTH_CALLBACK_INVALID`                      |
+| five-minute callback deadline                           | `MCP_AUTH_TIMEOUT`                               |
+| operator cancellation/SIGINT                            | `MCP_AUTH_CANCELLED`                             |
+| revocation endpoint fails                               | local success + `revocationFailed: true` warning |
+
+Every `MCP_AUTH_*` failure is terminal/non-retryable for the current model
+operation. SDK/raw OAuth response bodies are classified into fixed public
+messages; do not concatenate dependency error text into events or diagnostics.
+
+### 5. Good / Base / Bad Cases
+
+- Good: an approved project HTTP server returns Bearer 401; an existing refresh
+  token rotates under the binding lease, the transport rebuilds once, and the
+  original connect succeeds without browser activity.
+- Base: an anonymous HTTP or static-header server connects successfully and no
+  discovery or interactive side effect occurs; stdio credential behavior is
+  unchanged.
+- Bad: Gateway receives 401 and opens a callback; two processes overwrite a
+  rotated refresh token; a changed fingerprint reuses old tokens; or TUI
+  prints a raw store record containing `access_token`.
+
+### 6. Tests Required
+
+- Config: default/false/grants, clientId/CIMD/DCR combinations, three client
+  auth methods, exact secret placeholders, fingerprint/redaction, stdio/header
+  regressions, and approval-before-side-effect assertions.
+- Protocol: WWW-Authenticate and well-known discovery, RFC 8414/OIDC metadata,
+  issuer/resource mismatch, unsafe endpoint/redirect/DNS, bounded response,
+  PKCE/state/resource parameters, pre-register/CIMD/DCR, refresh rotation, and
+  registration failure mapping.
+- Callback: exact 127.0.0.1/path/state/code, random port, success, mismatch,
+  duplicate, timeout, cancellation, cleanup, browser failure, and `--no-open`.
+  PKCE verifier assertions must accept the RFC unreserved character set
+  `[A-Za-z0-9._~-]`; a verifier is not necessarily base64url, even though the
+  S256 challenge is.
+- Store/locks: modes, atomic V1, corrupt preservation, same-binding
+  serialization/generation re-read, different-binding merge, active-owner wait,
+  conservative stale recovery, and no secret in public errors.
+- Manager/surfaces: one recovery + one original retry, exhausted budget, 403
+  pending scope, public status only, logout/reset/revocation outcomes, TUI/CLI
+  commands, and zero browser/listener side effects in Headless/Gateway/child.
+- Regression and gates: MCP/assembly/permission/events/TUI/CLI/Headless/Gateway/
+  child tests, typecheck, lint, full test, build, and `git diff --check`.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```ts
+if (response.status === 401) {
+  openBrowser(await discover(response));
+  return callToolAgain(); // unbounded and model-triggered interaction
+}
+```
+
+#### Correct
+
+```ts
+const challenge = recorder.take();
+await coordinator.recover(target, challenge, observedGeneration);
+await reconnect(serverName);
+return invokeOnce(reconnected); // one recovery budget, no interactive login
+```
+
+Interactive authorization is an explicit operator command; passive recovery
+cannot expand scope or create a callback.
 
 ## Scenario: Preserve the MCP tool-result lifecycle
 
@@ -623,25 +800,25 @@ class ArtifactStore {
   persisted replay use `ToolResultEnvelope`/`NoviToolEvent` unchanged. No MCP
   event variant is permitted.
 - Client initialization capabilities remain `{}`. Resources/Prompts,
-  Sampling, Elicitation, Tasks, and OAuth discovery are not advertised by this
-  Tools-first integration.
+  Sampling, Elicitation, and Tasks are not advertised. OAuth is transport
+  authentication and does not add a server-initiated MCP capability.
 
 ### 4. Validation & Error Matrix
 
-| Condition | Stable behavior / code | Retryable |
-| --- | --- | --- |
-| MCP result has `isError: true` | `MCP_TOOL_ERROR` with bounded/redacted text | no |
-| current input validator rejects arguments | `MCP_INPUT_SCHEMA_INVALID` | no, change input |
-| required structured output is absent/invalid | `MCP_OUTPUT_SCHEMA_INVALID` | no |
-| malformed JSON-RPC/result envelope | `MCP_PROTOCOL_ERROR` | no |
-| disconnect/send/connection failure | `MCP_TRANSPORT_ERROR` | yes |
-| catalog/tool revision changed | `MCP_TOOL_STALE`; search again | yes |
-| SDK/runtime deadline expires | `TOOL_TIMEOUT` | yes |
-| caller abort wins the race | `TOOL_ABORTED`, cancelled envelope | no |
-| invalid MIME/base64 or binary over memory | successful explicit degradation, no payload | no |
-| binary artifact disabled | successful explicit degradation, no path | no |
-| binary quota/write failure | `ARTIFACT_QUOTA_EXCEEDED` / `ARTIFACT_WRITE_FAILED` | quota no / write yes |
-| regressive/invalid/late progress | drop and add bounded diagnostic | n/a |
+| Condition                                    | Stable behavior / code                              | Retryable            |
+| -------------------------------------------- | --------------------------------------------------- | -------------------- |
+| MCP result has `isError: true`               | `MCP_TOOL_ERROR` with bounded/redacted text         | no                   |
+| current input validator rejects arguments    | `MCP_INPUT_SCHEMA_INVALID`                          | no, change input     |
+| required structured output is absent/invalid | `MCP_OUTPUT_SCHEMA_INVALID`                         | no                   |
+| malformed JSON-RPC/result envelope           | `MCP_PROTOCOL_ERROR`                                | no                   |
+| disconnect/send/connection failure           | `MCP_TRANSPORT_ERROR`                               | yes                  |
+| catalog/tool revision changed                | `MCP_TOOL_STALE`; search again                      | yes                  |
+| SDK/runtime deadline expires                 | `TOOL_TIMEOUT`                                      | yes                  |
+| caller abort wins the race                   | `TOOL_ABORTED`, cancelled envelope                  | no                   |
+| invalid MIME/base64 or binary over memory    | successful explicit degradation, no payload         | no                   |
+| binary artifact disabled                     | successful explicit degradation, no path            | no                   |
+| binary quota/write failure                   | `ARTIFACT_QUOTA_EXCEEDED` / `ARTIFACT_WRITE_FAILED` | quota no / write yes |
+| regressive/invalid/late progress             | drop and add bounded diagnostic                     | n/a                  |
 
 ### 5. Good / Base / Bad Cases
 
@@ -744,10 +921,14 @@ class ToolExecutionRuntime {
 }
 
 class ReadResultCache {
-  get(key: { absPath: string; offset: number; limit: number | undefined },
-       stat: { mtimeMs: number; size: number }): { mtimeMs: number; size: number } | undefined;
-  set(key: { absPath: string; offset: number; limit: number | undefined },
-       stat: { mtimeMs: number; size: number }): void;
+  get(
+    key: { absPath: string; offset: number; limit: number | undefined },
+    stat: { mtimeMs: number; size: number },
+  ): { mtimeMs: number; size: number } | undefined;
+  set(
+    key: { absPath: string; offset: number; limit: number | undefined },
+    stat: { mtimeMs: number; size: number },
+  ): void;
   invalidateByPath(absPath: string): void;
   clear(): void;
 }
@@ -817,10 +998,10 @@ CLI values are repeatable: `--tool-budget <field>=<positive-safe-integer>`.
 | Bash non-zero exit                                           | `NOVI_ERROR:TOOL_EXIT_NONZERO` with bounded tail only               |
 | other thrown tool failure                                    | `NOVI_ERROR:TOOL_EXECUTION_FAILED` with bounded single-line message |
 | artifacts explicitly disabled                                | successful truncation without artifact path                         |
-| `read_file` cache hit (stat matches)                        | hint text returned, no file stream opened, `details.cache: "hit"`  |
-| `read_file` cache miss (no entry or stat mismatch)          | normal streaming read, stat stored, `details.cache: "miss"`        |
-| `edit_file`/`write_file` modifies a file                    | `readCache.invalidateByPath(abs)` clears all entries for that path  |
-| compaction fires (`session_before_compact`)                 | `readCache.clear()` resets all entries                              |
+| `read_file` cache hit (stat matches)                         | hint text returned, no file stream opened, `details.cache: "hit"`   |
+| `read_file` cache miss (no entry or stat mismatch)           | normal streaming read, stat stored, `details.cache: "miss"`         |
+| `edit_file`/`write_file` modifies a file                     | `readCache.invalidateByPath(abs)` clears all entries for that path  |
+| compaction fires (`session_before_compact`)                  | `readCache.clear()` resets all entries                              |
 
 ### 5. Good / Base / Bad Cases
 

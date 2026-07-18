@@ -69,15 +69,26 @@ src/
 │   ├── errors.ts           # NOVI_ERROR codec + shared result decoder
 │   ├── tui-approver.ts     # Queued TUI Approver (once/session/deny)
 │   └── index.ts            # Public barrel exports
-├── mcp/                   # MCP config/approval + client transport (bootstrap wiring later)
+├── mcp/                   # MCP config/approval, OAuth, transport, catalog, and runtime
 │   ├── types.ts            # Server config, plan entry, approval types
 │   ├── config.ts           # Load/validate/merge user+project mcp.json + fingerprints
 │   ├── approval.ts         # User-local ~/.novi/mcp-approvals.json store
 │   ├── plan.ts             # resolveMcpPlan → connectable/pending/denied/invalid
-│   ├── transport.ts        # stdio + Streamable HTTP transport factory
+│   ├── cli-actions.ts      # Standalone pre-bootstrap MCP operator commands
+│   ├── transport.ts        # stdio + Streamable HTTP + Bearer challenge recorder
 │   ├── catalog.ts          # Immutable paginated tool snapshots, revisions, schema validators
 │   ├── client-manager.ts   # Connect/full-list/refresh/call/close per connectable plan entry
 │   ├── tool-adapter.ts     # MCP tool → ToolDescriptor/AgentTool (ask, external)
+│   ├── oauth/              # Remote HTTP OAuth boundary (no TUI/Gateway imports)
+│   │   ├── coordinator.ts  # Passive recovery + explicit login/logout/reset orchestration
+│   │   ├── provider.ts     # Store-backed SDK OAuthClientProvider
+│   │   ├── store.ts        # Strict V1 private atomic credential state
+│   │   ├── locks.ts        # Process lanes + cross-process binding/write leases
+│   │   ├── network.ts      # HTTPS/redirect/DNS-pin/response-bound policy
+│   │   ├── callback.ts     # One-shot 127.0.0.1 random-port callback
+│   │   ├── browser.ts      # Best-effort no-shell browser opener
+│   │   ├── errors.ts       # Stable MCP_AUTH_* codec and sanitizer
+│   │   └── types.ts        # Binding identity and persisted record types
 │   └── index.ts            # Public barrel exports
 ├── images/                # Multimodal image encode + clipboard adapters (TUI pending attachments)
 │   ├── encode.ts          # bytes/file → PendingImage (mime/size limits, appendPending)
@@ -130,6 +141,12 @@ src/
   `web/` sub-directory owns
   normalized contracts, provider resolution, cache, guarded network access,
   URL/IP policy, and media extractors. See `web-tools.md` before changing it.
+- **MCP OAuth sub-system.** `mcp/oauth/` owns discovery, credentials, locks,
+  callback, network validation, and stable auth errors. It may depend on MCP
+  config/types and the SDK, but must not import TUI, Headless, or Gateway.
+  Runtime surfaces use `McpRuntimeHandle.oauth`; they never read the OAuth
+  store or token-bearing records. Standalone command behavior belongs in
+  `mcp/cli-actions.ts`; `cli.ts` only parses/dispatches before model bootstrap.
 - **Co-located tests.** `foo.ts` → `foo.test.ts`; `tools/` tests live under
   `tools/__tests__/`. Tests are excluded from `dist` (tsconfig includes only
   `src` and `tsc` does not compile `.test.ts` — vitest covers them).

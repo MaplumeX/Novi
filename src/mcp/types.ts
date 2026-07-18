@@ -7,9 +7,29 @@ export type McpStdioServerConfig = {
   cwd?: string;
 };
 
+export type McpOAuthGrantType = "authorization_code" | "client_credentials";
+
+export type McpOAuthClientAuthMethod = "client_secret_basic" | "client_secret_post" | "none";
+
+/** OAuth policy for one Streamable HTTP MCP server declaration. */
+export interface McpOAuthConfig {
+  /** Defaults to authorization_code when omitted. */
+  grantType?: McpOAuthGrantType;
+  /** Pre-registered client id. Omit to use CIMD/DCR for authorization_code. */
+  clientId?: string;
+  /** Must be a complete `${ENV_VAR}` placeholder in persisted config. */
+  clientSecret?: string;
+  /** User/organization-hosted HTTPS Client ID Metadata Document. */
+  clientMetadataUrl?: string;
+  scopes?: string[];
+  tokenEndpointAuthMethod?: McpOAuthClientAuthMethod;
+}
+
 export type McpHttpServerConfig = {
   url: string;
   headers?: Record<string, string>;
+  /** Undefined enables challenge-driven OAuth; false explicitly disables it. */
+  oauth?: false | McpOAuthConfig;
 };
 
 export type McpServerConfig = McpStdioServerConfig | McpHttpServerConfig;

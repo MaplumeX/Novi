@@ -4,6 +4,12 @@ import type { ExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import { McpClientManager, type McpClientManagerOptions } from "../mcp/client-manager.js";
 import { adaptMcpTools } from "../mcp/tool-adapter.js";
 import type { McpPlan } from "../mcp/types.js";
+import type {
+  McpOAuthLoginOptions,
+  McpOAuthLogoutResult,
+  McpOAuthPublicStatus,
+} from "../mcp/oauth/coordinator.js";
+import { mcpOAuthError } from "../mcp/oauth/errors.js";
 import type { SessionPermissionStore } from "../permissions/gate.js";
 import { WorkspaceScopeGuard } from "../permissions/scope.js";
 import type { ToolAssembly, ToolDescriptor } from "./contracts.js";
@@ -16,10 +22,20 @@ import { DEFAULT_TOOL_EXECUTION_BUDGET, ToolExecutionRuntime } from "./runtime/i
 import { SessionToolController } from "./session-tool-controller.js";
 
 /** Lifecycle handle for MCP connections owned by a tool assembly. */
+export interface McpOAuthRuntimeController {
+  status(serverName: string): Promise<McpOAuthPublicStatus>;
+  login(serverName: string, options: McpOAuthLoginOptions): Promise<void>;
+  isLoginActive(serverName: string): boolean;
+  cancel(serverName: string): boolean;
+  logout(serverName: string): Promise<McpOAuthLogoutResult>;
+  resetAuth(serverName: string): Promise<McpOAuthLogoutResult>;
+}
+
 export interface McpRuntimeHandle {
   plan: McpPlan;
   manager: McpClientManager;
   controller?: SessionToolController;
+  oauth: McpOAuthRuntimeController;
   close(): Promise<void>;
   reconnect(serverName?: string): Promise<void>;
   getDiagnostics(): string[];
@@ -213,11 +229,48 @@ function createMcpRuntimeHandle(
   plan: McpPlan,
   controller?: SessionToolController,
 ): McpRuntimeHandle {
+  const loginFlows = new Map<string, AbortController>();
   return {
     plan,
     manager,
+    oauth: {
+      status: (serverName) => manager.getOAuthStatus(serverName),
+      login: async (serverName, options) => {
+        if (loginFlows.has(serverName)) {
+          throw mcpOAuthError(
+            "MCP_AUTH_IN_PROGRESS",
+            `MCP OAuth login is already running for ${serverName}`,
+          );
+        }
+        const controller = new AbortController();
+        loginFlows.set(serverName, controller);
+        try {
+          await manager.loginOAuth(serverName, {
+            ...options,
+            signal: options.signal
+              ? AbortSignal.any([options.signal, controller.signal])
+              : controller.signal,
+          });
+        } finally {
+          loginFlows.delete(serverName);
+        }
+      },
+      isLoginActive: (serverName) => loginFlows.has(serverName),
+      cancel: (serverName) => {
+        const controller = loginFlows.get(serverName);
+        if (!controller) return false;
+        controller.abort(new Error("OAuth login cancelled by user"));
+        return true;
+      },
+      logout: (serverName) => manager.logoutOAuth(serverName),
+      resetAuth: (serverName) => manager.resetOAuth(serverName),
+    },
     ...(controller ? { controller } : {}),
     close: async () => {
+      for (const controller of loginFlows.values()) {
+        controller.abort(new Error("MCP runtime closed"));
+      }
+      loginFlows.clear();
       controller?.close();
       await manager.close();
     },

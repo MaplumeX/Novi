@@ -23,8 +23,15 @@ import {
   type McpServerCatalogSnapshot,
 } from "./catalog.js";
 import { resolveServerConfigPlaceholders } from "./config.js";
+import {
+  McpOAuthCoordinator,
+  resolveMcpOAuthTarget,
+  type McpOAuthCoordinatorOptions,
+  type McpOAuthTarget,
+} from "./oauth/coordinator.js";
+import { createMcpOAuthBinding } from "./oauth/types.js";
 import { createMcpToolDescriptor, sanitizeNamePart } from "./tool-adapter.js";
-import { createMcpTransport } from "./transport.js";
+import { createMcpTransport, McpOAuthChallengeRecorder } from "./transport.js";
 import { redactMcpSecrets } from "./safe-text.js";
 import type { McpPlan, McpPlanEntry, McpServerConfig } from "./types.js";
 import { isHttpServerConfig, isStdioServerConfig } from "./types.js";
@@ -37,7 +44,12 @@ const MAX_RUNTIME_DIAGNOSTICS = 200;
 
 export type McpTransportFactory = (
   config: McpServerConfig,
-  options: { workspaceCwd?: string; serverName: string },
+  options: {
+    workspaceCwd?: string;
+    serverName: string;
+    oauthCredential?: import("./oauth/coordinator.js").McpOAuthCredentialSnapshot;
+    challengeRecorder?: McpOAuthChallengeRecorder;
+  },
 ) => Transport | Promise<Transport>;
 
 export type McpServerConnectionStatus =
@@ -68,6 +80,8 @@ export interface McpClientManagerOptions {
   clientInfo?: { name: string; version: string };
   /** Injectable clock for deterministic catalog snapshots. */
   now?: () => number;
+  oauthCoordinator?: McpOAuthCoordinator;
+  oauth?: McpOAuthCoordinatorOptions;
 }
 
 export interface McpCallToolOptions {
@@ -83,6 +97,9 @@ interface LiveConnection {
   transport: Transport;
   transportKind: "stdio" | "http";
   generation: number;
+  challengeRecorder?: McpOAuthChallengeRecorder;
+  oauthTarget?: McpOAuthTarget;
+  oauthGeneration?: number;
 }
 
 interface RefreshQueue {
@@ -114,6 +131,7 @@ export class McpClientManager {
   private readonly createTransport: McpTransportFactory;
   private readonly createClient: () => Client;
   private readonly now: () => number;
+  private readonly oauthCoordinator: McpOAuthCoordinator;
 
   constructor(options: McpClientManagerOptions = {}) {
     this.envMap = options.envMap ?? { ...process.env };
@@ -126,6 +144,7 @@ export class McpClientManager {
     this.createClient =
       options.createClient ?? (() => new Client(clientInfo, { capabilities: {} }));
     this.now = options.now ?? Date.now;
+    this.oauthCoordinator = options.oauthCoordinator ?? new McpOAuthCoordinator(options.oauth);
   }
 
   getPlan(): McpPlan {
@@ -169,6 +188,31 @@ export class McpClientManager {
       tool: entry.protocolTool,
       transportKind: entry.transportKind,
     }));
+  }
+
+  async getOAuthStatus(
+    serverName: string,
+  ): Promise<import("./oauth/coordinator.js").McpOAuthPublicStatus> {
+    return await this.oauthCoordinator.publicStatus(this.resolveOAuthTarget(serverName));
+  }
+
+  async loginOAuth(
+    serverName: string,
+    options: import("./oauth/coordinator.js").McpOAuthLoginOptions,
+  ): Promise<void> {
+    await this.oauthCoordinator.login(this.resolveOAuthTarget(serverName), options);
+  }
+
+  async logoutOAuth(
+    serverName: string,
+  ): Promise<import("./oauth/coordinator.js").McpOAuthLogoutResult> {
+    return await this.oauthCoordinator.logout(this.resolveOAuthTarget(serverName));
+  }
+
+  async resetOAuth(
+    serverName: string,
+  ): Promise<import("./oauth/coordinator.js").McpOAuthLogoutResult> {
+    return await this.oauthCoordinator.resetAuth(this.resolveOAuthTarget(serverName));
   }
 
   /** Connect every connectable, enabled plan entry without failing the whole plan. */
@@ -231,36 +275,58 @@ export class McpClientManager {
       ? { signal: signalOrOptions }
       : (signalOrOptions ?? {});
     const signal = options.signal;
-    const connection = this.connections.get(serverName);
+    let connection = this.connections.get(serverName);
     if (!connection) {
       throw new Error(`NOVI_ERROR:MCP_TRANSPORT_ERROR:MCP server "${serverName}" is not connected`);
     }
     if (signal?.aborted) throw new Error("NOVI_ERROR:TOOL_ABORTED:MCP tool call aborted");
 
-    try {
+    const invoke = async (active: LiveConnection): Promise<CallToolResult> => {
       const timeout = options.timeoutMs ?? this.callTimeoutMs;
-      const result = await connection.client.callTool(
-        { name: toolName, arguments: args },
-        undefined,
-        {
-          signal,
-          timeout,
-          resetTimeoutOnProgress: false,
-          maxTotalTimeout: timeout,
-          ...(options.onProgress ? { onprogress: options.onProgress } : {}),
-        },
-      );
+      const result = await active.client.callTool({ name: toolName, arguments: args }, undefined, {
+        signal,
+        timeout,
+        resetTimeoutOnProgress: false,
+        maxTotalTimeout: timeout,
+        ...(options.onProgress ? { onprogress: options.onProgress } : {}),
+      });
       if (result && typeof result === "object" && Array.isArray(result.content)) {
         return result as CallToolResult;
       }
       throw new Error("NOVI_ERROR:MCP_PROTOCOL_ERROR:MCP tools/call returned an invalid result");
+    };
+
+    try {
+      return await invoke(connection);
     } catch (error) {
+      let invocationError = error;
       if (signal?.aborted) throw new Error("NOVI_ERROR:TOOL_ABORTED:MCP tool call aborted");
-      const message = safeErrorMessage(error);
-      if (message.startsWith("NOVI_ERROR:")) {
-        throw error instanceof Error ? error : new Error(message);
+      const challenge = connection.challengeRecorder?.take();
+      if (challenge && connection.oauthTarget) {
+        await this.oauthCoordinator.recover(
+          connection.oauthTarget,
+          challenge,
+          connection.oauthGeneration ?? 0,
+        );
+        await this.reconnect(serverName);
+        connection = this.connections.get(serverName);
+        if (!connection) {
+          throw new Error(
+            `NOVI_ERROR:MCP_TRANSPORT_ERROR:MCP server "${serverName}" failed to reconnect after authorization`,
+          );
+        }
+        try {
+          return await invoke(connection);
+        } catch (retryError) {
+          if (signal?.aborted) throw new Error("NOVI_ERROR:TOOL_ABORTED:MCP tool call aborted");
+          invocationError = retryError;
+        }
       }
-      const code = mcpCallErrorCode(error, message);
+      const message = safeErrorMessage(invocationError);
+      if (message.startsWith("NOVI_ERROR:")) {
+        throw invocationError instanceof Error ? invocationError : new Error(message);
+      }
+      const code = mcpCallErrorCode(invocationError, message);
       throw new Error(`NOVI_ERROR:${code}:MCP ${serverName}/${toolName}: ${message}`);
     }
   }
@@ -320,39 +386,89 @@ export class McpClientManager {
       : isHttpServerConfig(config)
         ? "http"
         : "stdio";
-    let transport: Transport | undefined;
-    let client: Client | undefined;
     const generation = this.nextGeneration++;
+    const oauthTarget: McpOAuthTarget | undefined = isHttpServerConfig(config)
+      ? {
+          serverName: entry.name,
+          binding: createMcpOAuthBinding(entry, this.workspaceCwd ?? process.cwd()),
+          config,
+        }
+      : undefined;
+    let finalError: unknown;
+    let recoveredCredential:
+      import("./oauth/coordinator.js").McpOAuthCredentialSnapshot | undefined;
 
-    try {
-      transport = await this.createTransport(config, {
-        workspaceCwd: this.workspaceCwd,
-        serverName: entry.name,
-      });
-      client = this.createClient();
-      await withTimeout(
-        client.connect(transport),
-        this.connectTimeoutMs,
-        `MCP connect timeout for "${entry.name}" after ${this.connectTimeoutMs}ms`,
-      );
-      const connection: LiveConnection = {
-        entry,
-        config,
-        client,
-        transport,
-        transportKind,
-        generation,
-      };
-      this.connections.set(entry.name, connection);
-      this.refreshQueues.set(entry.name, { generation, dirty: false });
-      this.installListChangedHandler(connection);
+    for (let authAttempt = 0; authAttempt < 2; authAttempt++) {
+      let transport: Transport | undefined;
+      let client: Client | undefined;
+      const challengeRecorder = oauthTarget ? new McpOAuthChallengeRecorder() : undefined;
+      const oauthCredential = oauthTarget
+        ? (recoveredCredential ??
+          (isHttpServerConfig(config) && typeof config.oauth === "object"
+            ? await this.oauthCoordinator.credential(oauthTarget).catch((error: unknown) => {
+                finalError = error;
+                return undefined;
+              })
+            : { generation: 0 }))
+        : undefined;
+      if (finalError) break;
 
-      const ok = await this.enqueueRefresh(connection);
-      if (!ok && !this.catalogs.has(entry.name)) {
-        throw new Error(this.states.get(entry.name)?.reason ?? "initial tools/list failed");
+      try {
+        transport = await this.createTransport(config, {
+          workspaceCwd: this.workspaceCwd,
+          serverName: entry.name,
+          oauthCredential,
+          challengeRecorder,
+        });
+        client = this.createClient();
+        await withTimeout(
+          client.connect(transport),
+          this.connectTimeoutMs,
+          `MCP connect timeout for "${entry.name}" after ${this.connectTimeoutMs}ms`,
+        );
+        const connection: LiveConnection = {
+          entry,
+          config,
+          client,
+          transport,
+          transportKind,
+          generation,
+          challengeRecorder,
+          oauthTarget,
+          oauthGeneration: oauthCredential?.generation,
+        };
+        this.connections.set(entry.name, connection);
+        this.refreshQueues.set(entry.name, { generation, dirty: false });
+        this.installListChangedHandler(connection);
+
+        const ok = await this.enqueueRefresh(connection);
+        if (!ok && !this.catalogs.has(entry.name)) {
+          throw new Error(this.states.get(entry.name)?.reason ?? "initial tools/list failed");
+        }
+        return;
+      } catch (error) {
+        await closeBestEffort(client, transport);
+        const challenge = challengeRecorder?.take();
+        if (oauthTarget && challenge && authAttempt === 0) {
+          try {
+            recoveredCredential = await this.oauthCoordinator.recover(
+              oauthTarget,
+              challenge,
+              oauthCredential?.generation ?? 0,
+            );
+            continue;
+          } catch (authError) {
+            finalError = authError;
+            break;
+          }
+        }
+        finalError = error;
+        break;
       }
-    } catch (error) {
-      const reason = safeErrorMessage(error);
+    }
+
+    {
+      const reason = safeErrorMessage(finalError ?? "MCP connection failed");
       const current = this.catalogs.get(entry.name);
       const retained = current ? markMcpCatalogDegraded(current, reason) : undefined;
       if (retained) {
@@ -381,8 +497,16 @@ export class McpClientManager {
         transportKind,
       });
       this.pushDiagnostic(`mcp server "${entry.name}" unavailable: ${reason}`);
-      await closeBestEffort(client, transport);
     }
+  }
+
+  private resolveOAuthTarget(serverName: string): McpOAuthTarget {
+    return resolveMcpOAuthTarget(
+      this.plan,
+      this.workspaceCwd ?? process.cwd(),
+      this.envMap,
+      serverName,
+    );
   }
 
   private installListChangedHandler(connection: LiveConnection): void {
@@ -675,9 +799,18 @@ export class McpClientManager {
 
 function defaultTransportFactory(
   config: McpServerConfig,
-  options: { workspaceCwd?: string; serverName: string },
+  options: {
+    workspaceCwd?: string;
+    serverName: string;
+    oauthCredential?: import("./oauth/coordinator.js").McpOAuthCredentialSnapshot;
+    challengeRecorder?: McpOAuthChallengeRecorder;
+  },
 ): Transport {
-  return createMcpTransport(config, { workspaceCwd: options.workspaceCwd });
+  return createMcpTransport(config, {
+    workspaceCwd: options.workspaceCwd,
+    oauthCredential: options.oauthCredential,
+    challengeRecorder: options.challengeRecorder,
+  });
 }
 
 async function closeBestEffort(

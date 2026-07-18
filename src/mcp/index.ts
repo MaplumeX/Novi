@@ -7,6 +7,9 @@ export type {
   McpConfigFile,
   McpDeclarationsResult,
   McpHttpServerConfig,
+  McpOAuthClientAuthMethod,
+  McpOAuthConfig,
+  McpOAuthGrantType,
   McpPlan,
   McpPlanEntry,
   McpPlanEntryStatus,
@@ -131,3 +134,39 @@ export {
 } from "./exposure.js";
 
 export { createMcpProxyDescriptors, type CreateMcpProxyDescriptorsOptions } from "./proxy-tools.js";
+
+export {
+  mcpOAuthError,
+  mcpOAuthGuidance,
+  sanitizeMcpOAuthMessage,
+  type McpOAuthErrorCode,
+} from "./oauth/errors.js";
+
+export {
+  createMcpOAuthBinding,
+  mcpOAuthBindingKey,
+  type McpOAuthBindingIdentity,
+  type McpOAuthFileV1,
+  type McpOAuthRecordV1,
+  type McpOAuthRegistrationMode,
+} from "./oauth/types.js";
+
+export {
+  getMcpOAuthLockDirectory,
+  getMcpOAuthStorePath,
+  McpOAuthStore,
+  type McpOAuthBindingLease,
+  type McpOAuthStoreOptions,
+} from "./oauth/store.js";
+
+export {
+  McpOAuthCoordinator,
+  resolveMcpOAuthTarget,
+  type McpOAuthChallenge,
+  type McpOAuthCoordinatorOptions,
+  type McpOAuthCredentialSnapshot,
+  type McpOAuthLoginOptions,
+  type McpOAuthLogoutResult,
+  type McpOAuthPublicStatus,
+  type McpOAuthTarget,
+} from "./oauth/coordinator.js";

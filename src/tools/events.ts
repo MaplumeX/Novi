@@ -247,9 +247,11 @@ function errorFrom(
   };
   const found = search(value);
   if (!found) return undefined;
+  const authTerminal = found.code.startsWith("MCP_AUTH_");
   return {
     ...found,
     retryable:
+      !authTerminal &&
       /(?:TIMEOUT|RATE_LIMIT|NETWORK|ARTIFACT_WRITE_FAILED|MCP_TOOL_STALE|MCP_TRANSPORT_ERROR)/.test(
         found.code,
       ),

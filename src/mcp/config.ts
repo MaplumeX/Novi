@@ -6,6 +6,9 @@ import type {
   McpConfigFile,
   McpDeclarationsResult,
   McpHttpServerConfig,
+  McpOAuthClientAuthMethod,
+  McpOAuthConfig,
+  McpOAuthGrantType,
   McpServerConfig,
   McpServerOrigin,
   McpStdioServerConfig,
@@ -16,7 +19,17 @@ const SERVER_NAME_RE = /^[A-Za-z0-9_-]+$/;
 const PLACEHOLDER_RE = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
 
 const STDIO_KEYS = new Set(["command", "args", "env", "cwd"]);
-const HTTP_KEYS = new Set(["url", "headers"]);
+const HTTP_KEYS = new Set(["url", "headers", "oauth"]);
+const OAUTH_KEYS = new Set([
+  "grantType",
+  "clientId",
+  "clientSecret",
+  "clientMetadataUrl",
+  "scopes",
+  "tokenEndpointAuthMethod",
+]);
+const EXACT_PLACEHOLDER_RE = /^\$\{[A-Za-z_][A-Za-z0-9_]*\}$/;
+const OAUTH_SCOPE_TOKEN_RE = /^[\x21\x23-\x5B\x5D-\x7E]+$/;
 
 /** Absolute path to the user MCP config (`~/.novi/mcp.json`). */
 export function getUserMcpConfigPath(): string {
@@ -69,12 +82,27 @@ export function computeServerFingerprint(name: string, config: McpServerConfig):
     return sha256(JSON.stringify(payload));
   }
   const { keys, hashes } = sortedStringRecord(config.headers);
+  const oauth = config.oauth;
+  const oauthIdentity =
+    oauth === false
+      ? false
+      : oauth === undefined
+        ? null
+        : {
+            grantType: oauth.grantType ?? "authorization_code",
+            clientId: oauth.clientId ?? null,
+            clientSecretHash: oauth.clientSecret === undefined ? null : sha256(oauth.clientSecret),
+            clientMetadataUrl: oauth.clientMetadataUrl ?? null,
+            scopes: oauth.scopes ?? [],
+            tokenEndpointAuthMethod: oauth.tokenEndpointAuthMethod ?? null,
+          };
   const payload = {
     name,
     kind: "http" as const,
     url: config.url,
     headerKeys: keys,
     headerHashes: hashes,
+    oauth: oauthIdentity,
   };
   return sha256(JSON.stringify(payload));
 }
@@ -139,9 +167,14 @@ export function resolveServerConfigPlaceholders(
   const headers = config.headers
     ? Object.fromEntries(Object.entries(config.headers).map(([k, v]) => [k, resolveField(v)]))
     : undefined;
+  const oauth =
+    config.oauth && config.oauth.clientSecret !== undefined
+      ? { ...config.oauth, clientSecret: resolveField(config.oauth.clientSecret) }
+      : config.oauth;
   const next: McpHttpServerConfig = {
     url: resolveField(config.url),
     headers,
+    ...(oauth !== undefined ? { oauth } : {}),
   };
   return { ok: missing.length === 0, config: next, missing };
 }
@@ -203,6 +236,149 @@ function validateStringRecord(
   return ok ? out : undefined;
 }
 
+function isOAuthGrantType(value: unknown): value is McpOAuthGrantType {
+  return value === "authorization_code" || value === "client_credentials";
+}
+
+function isOAuthClientAuthMethod(value: unknown): value is McpOAuthClientAuthMethod {
+  return value === "client_secret_basic" || value === "client_secret_post" || value === "none";
+}
+
+function isHttpsMetadataUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === "https:" &&
+      url.pathname !== "/" &&
+      url.username === "" &&
+      url.password === "" &&
+      url.hash === ""
+    );
+  } catch {
+    return false;
+  }
+}
+
+function validateOAuthConfig(
+  serverName: string,
+  raw: unknown,
+): { config?: false | McpOAuthConfig; reason?: string } {
+  if (raw === undefined) return {};
+  if (raw === false) return { config: false };
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    return { reason: `server "${serverName}" oauth must be false or an object` };
+  }
+
+  const obj = raw as Record<string, unknown>;
+  const unknown = Object.keys(obj).find((key) => !OAUTH_KEYS.has(key));
+  if (unknown !== undefined) {
+    return { reason: `server "${serverName}" oauth has unknown field "${unknown}"` };
+  }
+
+  const grantType = obj.grantType ?? "authorization_code";
+  if (!isOAuthGrantType(grantType)) {
+    return {
+      reason: `server "${serverName}" oauth.grantType must be authorization_code or client_credentials`,
+    };
+  }
+
+  const stringFields = ["clientId", "clientSecret", "clientMetadataUrl"] as const;
+  for (const field of stringFields) {
+    const value = obj[field];
+    if (value !== undefined && (typeof value !== "string" || value.trim() === "")) {
+      return { reason: `server "${serverName}" oauth.${field} must be a non-empty string` };
+    }
+  }
+
+  const clientId = typeof obj.clientId === "string" ? obj.clientId : undefined;
+  const clientSecret = typeof obj.clientSecret === "string" ? obj.clientSecret : undefined;
+  const clientMetadataUrl =
+    typeof obj.clientMetadataUrl === "string" ? obj.clientMetadataUrl : undefined;
+
+  if (clientSecret !== undefined && !EXACT_PLACEHOLDER_RE.test(clientSecret)) {
+    return {
+      reason: `server "${serverName}" oauth.clientSecret must be a complete \${ENV_VAR} placeholder`,
+    };
+  }
+  if (clientSecret !== undefined && clientId === undefined) {
+    return { reason: `server "${serverName}" oauth.clientSecret requires oauth.clientId` };
+  }
+  if (clientMetadataUrl !== undefined && !isHttpsMetadataUrl(clientMetadataUrl)) {
+    return {
+      reason: `server "${serverName}" oauth.clientMetadataUrl must be HTTPS with a non-root path`,
+    };
+  }
+  if (clientId !== undefined && clientMetadataUrl !== undefined) {
+    return {
+      reason: `server "${serverName}" oauth cannot combine clientId with clientMetadataUrl`,
+    };
+  }
+
+  let scopes: string[] | undefined;
+  if (obj.scopes !== undefined) {
+    if (!Array.isArray(obj.scopes) || obj.scopes.length === 0) {
+      return { reason: `server "${serverName}" oauth.scopes must be a non-empty string array` };
+    }
+    if (
+      !obj.scopes.every((scope) => typeof scope === "string" && OAUTH_SCOPE_TOKEN_RE.test(scope))
+    ) {
+      return { reason: `server "${serverName}" oauth.scopes contains an invalid scope token` };
+    }
+    if (new Set(obj.scopes).size !== obj.scopes.length) {
+      return { reason: `server "${serverName}" oauth.scopes must not contain duplicates` };
+    }
+    scopes = [...obj.scopes].sort((a, b) => a.localeCompare(b));
+  }
+
+  const tokenEndpointAuthMethod = obj.tokenEndpointAuthMethod;
+  if (tokenEndpointAuthMethod !== undefined && !isOAuthClientAuthMethod(tokenEndpointAuthMethod)) {
+    return {
+      reason: `server "${serverName}" oauth.tokenEndpointAuthMethod is unsupported`,
+    };
+  }
+
+  if (grantType === "client_credentials") {
+    if (clientId === undefined || clientSecret === undefined) {
+      return {
+        reason: `server "${serverName}" client_credentials requires clientId and clientSecret`,
+      };
+    }
+    if (clientMetadataUrl !== undefined) {
+      return {
+        reason: `server "${serverName}" client_credentials does not support clientMetadataUrl`,
+      };
+    }
+    if (tokenEndpointAuthMethod === "none") {
+      return {
+        reason: `server "${serverName}" client_credentials does not support token auth method none`,
+      };
+    }
+  } else if (
+    (tokenEndpointAuthMethod === "client_secret_basic" ||
+      tokenEndpointAuthMethod === "client_secret_post") &&
+    clientSecret === undefined
+  ) {
+    return {
+      reason: `server "${serverName}" oauth.${tokenEndpointAuthMethod} requires clientSecret`,
+    };
+  } else if (tokenEndpointAuthMethod === "none" && clientSecret !== undefined) {
+    return {
+      reason: `server "${serverName}" oauth token auth method none cannot use clientSecret`,
+    };
+  }
+
+  return {
+    config: {
+      ...(obj.grantType !== undefined ? { grantType } : {}),
+      ...(clientId !== undefined ? { clientId } : {}),
+      ...(clientSecret !== undefined ? { clientSecret } : {}),
+      ...(clientMetadataUrl !== undefined ? { clientMetadataUrl } : {}),
+      ...(scopes !== undefined ? { scopes } : {}),
+      ...(tokenEndpointAuthMethod !== undefined ? { tokenEndpointAuthMethod } : {}),
+    },
+  };
+}
+
 /**
  * Validate one raw server entry. Returns a structured declaration (possibly invalid).
  */
@@ -225,9 +401,7 @@ export function validateServerEntry(
   }
 
   if (!SERVER_NAME_RE.test(name)) {
-    diagnostics.push(
-      `server name "${name}" should match [A-Za-z0-9_-]+; treating as invalid`,
-    );
+    diagnostics.push(`server name "${name}" should match [A-Za-z0-9_-]+; treating as invalid`);
     return {
       name,
       origin,
@@ -372,10 +546,7 @@ export function validateServerEntry(
       name,
       origin,
       fingerprint: `invalid:${name}`,
-      diagnostics: [
-        ...diagnostics,
-        `server "${name}" url must be an absolute http(s) URL`,
-      ],
+      diagnostics: [...diagnostics, `server "${name}" url must be an absolute http(s) URL`],
       invalid: true,
       reason: `server "${name}" url must be an absolute http(s) URL`,
     };
@@ -395,9 +566,22 @@ export function validateServerEntry(
     };
   }
 
+  const oauthResult = validateOAuthConfig(name, obj.oauth);
+  if (oauthResult.reason !== undefined) {
+    return {
+      name,
+      origin,
+      fingerprint: `invalid:${name}`,
+      diagnostics: [...diagnostics, oauthResult.reason],
+      invalid: true,
+      reason: oauthResult.reason,
+    };
+  }
+
   const config: McpHttpServerConfig = {
     url: obj.url,
     ...(headers !== undefined ? { headers } : {}),
+    ...(oauthResult.config !== undefined ? { oauth: oauthResult.config } : {}),
   };
   return {
     name,
@@ -417,7 +601,11 @@ function layerServersFromRaw(
   const map = new Map<string, { raw: unknown; origin: McpServerOrigin }>();
   if (!raw) return map;
   if (raw.mcpServers === undefined) return map;
-  if (raw.mcpServers === null || typeof raw.mcpServers !== "object" || Array.isArray(raw.mcpServers)) {
+  if (
+    raw.mcpServers === null ||
+    typeof raw.mcpServers !== "object" ||
+    Array.isArray(raw.mcpServers)
+  ) {
     diagnostics.push(`mcp [${origin}] mcpServers must be an object`);
     return map;
   }
@@ -474,9 +662,7 @@ export async function loadMcpDeclarations(
   }
   for (const [name, entry] of projectMap) {
     if (merged.has(name)) {
-      diagnostics.push(
-        `mcp: project server "${name}" overlays user server of the same name`,
-      );
+      diagnostics.push(`mcp: project server "${name}" overlays user server of the same name`);
       merged.set(name, { ...entry, overlaid: true });
     } else {
       merged.set(name, entry);
@@ -487,10 +673,7 @@ export async function loadMcpDeclarations(
   for (const [name, entry] of merged) {
     const decl = validateServerEntry(name, entry.raw, entry.origin);
     if (entry.overlaid) {
-      decl.diagnostics = [
-        `project overlays user declaration for "${name}"`,
-        ...decl.diagnostics,
-      ];
+      decl.diagnostics = [`project overlays user declaration for "${name}"`, ...decl.diagnostics];
     }
     servers.push(decl);
   }

@@ -50,6 +50,7 @@ const { values, positionals } = parseArgs({
     linger: { type: "boolean", default: false },
     lines: { type: "string" },
     follow: { type: "boolean", default: false },
+    "no-open": { type: "boolean", default: false },
     "tool-budget": { type: "string", multiple: true },
     help: { type: "boolean", short: "h", default: false },
   },
@@ -104,6 +105,9 @@ if (values.help) {
       "  --linger          Enable user linger during service install",
       "  --lines <n>       Service log lines (1..10000; default 200)",
       "  --follow          Follow service logs",
+      "  novi mcp status [server] [--json]",
+      "  novi mcp login|reauthorize <server> [--no-open]",
+      "  novi mcp logout|reset-auth <server>",
       "  --tool-budget <name>=<n>  Override a tool resource budget (repeatable)",
       "  -h, --help        Show this help",
     ].join("\n") + "\n",
@@ -116,6 +120,8 @@ if (values.print && values.mode === "json") {
 }
 
 const promptText = positionals.join(" ");
+const mcpCli = positionals[0] === "mcp";
+const mcpAction = mcpCli ? (positionals[1] ?? "status") : undefined;
 const gatewayAction = [
   "status",
   "probe",
@@ -205,12 +211,18 @@ if (
 }
 if (
   values.json &&
-  (!values.gateway ||
-    !["status", "health", "messages", "agents", "migrate", "rollback-state", "service"].includes(
-      gatewayAction,
-    ))
+  !(
+    (mcpCli && mcpAction === "status") ||
+    (values.gateway &&
+      ["status", "health", "messages", "agents", "migrate", "rollback-state", "service"].includes(
+        gatewayAction,
+      ))
+  )
 ) {
-  fail("--json is supported only for gateway diagnostics, migration, and service commands");
+  fail("--json is supported only for MCP status or gateway diagnostics/migration/service commands");
+}
+if (values["no-open"] && !(mcpCli && ["login", "reauthorize"].includes(mcpAction ?? ""))) {
+  fail("--no-open is supported only for novi mcp login/reauthorize");
 }
 if (values.kind !== undefined && (!values.gateway || gatewayAction !== "health")) {
   fail("--kind is supported only for gateway health");
@@ -319,6 +331,30 @@ const bootstrapOptions = {
 // credentials/settings, then bootstrap() loads them). Headless mode never
 // starts an interactive wizard — it prints guidance and exits.
 async function main(): Promise<void> {
+  if (mcpCli) {
+    const cwd = values.cwd ?? process.cwd();
+    const env = new NodeExecutionEnv({ cwd, shellEnv: process.env });
+    const controller = new AbortController();
+    const cancelOAuth = () => controller.abort(new Error("MCP OAuth command cancelled by SIGINT"));
+    process.once("SIGINT", cancelOAuth);
+    try {
+      const { runMcpCli } = await import("./mcp/cli-actions.js");
+      await runMcpCli({
+        env,
+        cwd,
+        args: positionals.slice(1),
+        noOpen: values["no-open"],
+        json: values.json,
+        signal: controller.signal,
+        write: (line) => process.stdout.write(`${line}\n`),
+      });
+    } finally {
+      process.off("SIGINT", cancelOAuth);
+      await env.cleanup();
+    }
+    return;
+  }
+
   // --- --list-models [search]: print configured models and exit ---
   // Lightweight: env + creds + settings + custom providers, no session/harness.
   if (values["list-models"]) {

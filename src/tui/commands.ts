@@ -44,6 +44,7 @@ import type { UpdateResult } from "../skills-hub/skills-hub.js";
 import type { Risk, SkillLockEntry } from "../skills-hub/types.js";
 import type { AgentRunRuntime } from "../agents/runtime.js";
 import { summarizeAgentRun } from "../agents/format.js";
+import { openAuthorizationUrl } from "../mcp/oauth/browser.js";
 
 export interface ParsedCommand {
   name: string;
@@ -788,7 +789,7 @@ async function runAgentsCommand(ctx: CommandContext, args: string): Promise<void
   ctx.print("Usage: /agents list|info|log|cancel|retry|stop-all [run-id]");
 }
 
-/** `/mcp` subcommands: list / approve / deny / reconnect. */
+/** `/mcp` subcommands: server approval, connection, and explicit OAuth operations. */
 async function runMcpCommand(ctx: CommandContext, args: string): Promise<void> {
   const trimmed = args.trim();
   const spaceIdx = trimmed.search(/\s/);
@@ -867,7 +868,97 @@ async function runMcpCommand(ctx: CommandContext, args: string): Promise<void> {
     return;
   }
 
-  ctx.print("Usage: /mcp [list|approve <name>|deny <name>|reconnect [name]]");
+  if (["status", "login", "reauthorize", "cancel", "logout", "reset-auth"].includes(sub)) {
+    if (!rest) {
+      ctx.print(`Usage: /mcp ${sub} <server>`);
+      return;
+    }
+    const oauth = ctx.handle.mcp?.oauth;
+    if (!oauth) {
+      ctx.print("MCP runtime is not available in this session.");
+      return;
+    }
+    if (sub === "status") {
+      try {
+        const status = await oauth.status(rest);
+        const details = [
+          status.grantType,
+          status.registrationMode,
+          status.issuer ? `issuer=${status.issuer}` : undefined,
+          status.resource ? `resource=${status.resource}` : undefined,
+          status.grantedScopes.length > 0 ? `scopes=${status.grantedScopes.join(" ")}` : undefined,
+          status.pendingScopes.length > 0 ? `pending=${status.pendingScopes.join(" ")}` : undefined,
+          status.expiresAt ? `expires=${status.expiresAt}` : undefined,
+        ].filter(Boolean);
+        ctx.print(
+          `${rest}: ${status.state.replaceAll("_", " ")}${details.length > 0 ? ` (${details.join(", ")})` : ""}`,
+        );
+      } catch (error) {
+        ctx.print(
+          `MCP OAuth status failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      return;
+    }
+    if (sub === "cancel") {
+      if (oauth.cancel(rest)) {
+        ctx.print(`Cancelled MCP OAuth login for "${rest}".`);
+      } else ctx.print(`No MCP OAuth login is running for "${rest}".`);
+      return;
+    }
+    if (sub === "login" || sub === "reauthorize") {
+      if (oauth.isLoginActive(rest)) {
+        ctx.print(`MCP OAuth login already running for "${rest}".`);
+        return;
+      }
+      ctx.print(`Starting MCP OAuth ${sub} for "${rest}"…`);
+      void oauth
+        .login(rest, {
+          reauthorize: sub === "reauthorize",
+          onAuthorizationUrl: async (url) => {
+            ctx.print(`Open this URL to authorize "${rest}":\n${url.toString()}`);
+            if (!(await openAuthorizationUrl(url))) {
+              ctx.print("warning: failed to open the default browser; use the URL above");
+            }
+          },
+        })
+        .then(async () => {
+          const { diagnostics } = await ctx.handle.refreshTools();
+          for (const diagnostic of diagnostics) ctx.print(`warning: ${diagnostic}`);
+          ctx.print(`MCP server "${rest}" authorized.`);
+        })
+        .catch((error: unknown) => {
+          ctx.print(
+            `MCP OAuth ${sub} failed: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        });
+      return;
+    }
+    try {
+      const result = sub === "logout" ? await oauth.logout(rest) : await oauth.resetAuth(rest);
+      const { diagnostics } = await ctx.handle.refreshTools();
+      for (const diagnostic of diagnostics) ctx.print(`warning: ${diagnostic}`);
+      ctx.print(
+        sub === "logout"
+          ? `MCP server "${rest}" logged out locally.`
+          : `MCP server "${rest}" OAuth state reset.`,
+      );
+      if (result.revocationFailed) {
+        ctx.print(
+          `warning: ${rest} is logged out locally, but a server-side token may still be valid`,
+        );
+      }
+    } catch (error) {
+      ctx.print(
+        `MCP OAuth ${sub} failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    return;
+  }
+
+  ctx.print(
+    "Usage: /mcp [list|approve <name>|deny <name>|reconnect [name]|status|login|reauthorize|cancel|logout|reset-auth <name>]",
+  );
 }
 
 const SKILLS_USAGE =

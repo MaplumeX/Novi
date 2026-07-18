@@ -39,3 +39,38 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 60: 完善 Remote MCP OAuth 能力
+
+**Date**: 2026-07-18
+**Task**: 完善 Remote MCP OAuth 能力
+**Branch**: `main`
+
+### Summary
+
+完成 Remote MCP OAuth 配置、发现与注册、PKCE 回调、凭据存储与并发锁、transport/manager 有界恢复、CLI/TUI 管理入口、规范文档及完整回归验证。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `aebb907` | (see git log) |
+| `457aac0` | (see git log) |
+| `3aae854` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

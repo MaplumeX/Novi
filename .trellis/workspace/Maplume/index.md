@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 59
+- **Total Sessions**: 60
 - **Last Active**: 2026-07-18
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~41 | Active |
+| `journal-2.md` | ~76 | Active |
 | `journal-1.md` | ~1971 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 60 | 2026-07-18 | 完善 Remote MCP OAuth 能力 | `aebb907`, `457aac0`, `3aae854` | `main` |
 | 59 | 2026-07-18 | 完成 MCP 协议完整性与上下文高效工具发现 | `f8b9a0a`, `463cd84` | `main` |
 | 58 | 2026-07-18 | 完成 MCP 结果保真与生命周期集成 | `104fa7f`, `0a2058d` | `main` |
 | 57 | 2026-07-18 | MCP deferred tool discovery and permissions | `4dc9c79`, `35ef5ec` | `main` |
